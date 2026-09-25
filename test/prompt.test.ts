@@ -15,7 +15,7 @@ import {
 import type { Author, Message, Settings } from "../src/types.ts";
 
 const settings: Settings = {
-  partnerPrompt: "You are Marlo, a writer of grounded prose.",
+  partnerPrompt: "You are Arlo, a writer of grounded prose.",
   characterSheet: "Name: Ilse Marrow",
   model: "test/model",
   temperature: 0.9,

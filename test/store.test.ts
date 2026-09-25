@@ -16,7 +16,7 @@ afterEach(() => dir.cleanup());
 describe("Store", () => {
   test("starts with the default partner prompt and character sheet", () => {
     const settings = new Store(dir.path).getSettings();
-    expect(settings.partnerPrompt).toContain("Marlo");
+    expect(settings.partnerPrompt).toContain("Arlo");
     expect(settings.characterSheet).toContain("Ilse Marrow");
     expect(existsSync(join(dir.path, "chat.json"))).toBe(true);
   });
