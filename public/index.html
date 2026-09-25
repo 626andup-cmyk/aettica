@@ -1,0 +1,141 @@
+<!doctype html>
+<!--
+  Aettica's single page. The layout is:
+
+    header    channel name, and the settings button
+    main      the message list
+    footer    the composer: your text box, Send, and "Partner's turn"
+    dialog    the settings panel, opened from the header
+
+  All behaviour lives in app.js; all styling in style.css.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover lets the app use the whole screen on phones with notches. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Aettica</title>
+    <meta name="description" content="Roleplay with your AI writing partner." />
+    <meta name="theme-color" content="#1e1f22" />
+
+    <!-- PWA: these let you "Add to Home screen" and open Aettica like an app. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
+    <link rel="stylesheet" href="/style.css" />
+    <!-- `defer` runs the script after the page is parsed, so every element below exists. -->
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <h1 class="channel-name"><span class="hash" aria-hidden="true">#</span>story</h1>
+      <button id="settings-button" class="icon-button" type="button" aria-label="Settings" title="Settings">
+        <!-- A simple gear icon. -->
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"
+          />
+        </svg>
+      </button>
+    </header>
+
+    <main id="messages" class="messages" aria-live="polite">
+      <!-- Filled in by app.js. -->
+    </main>
+
+    <footer class="composer">
+      <!-- Shown while your partner is writing. -->
+      <div id="status" class="status" hidden>
+        <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>Your partner is writing…</span>
+      </div>
+
+      <!-- Shown when something went wrong, e.g. the model didn't answer. -->
+      <div id="error" class="error-banner" role="alert" hidden>
+        <span id="error-text"></span>
+        <button id="error-retry" type="button" class="link-button">Try again</button>
+        <button id="error-dismiss" type="button" class="link-button" aria-label="Dismiss">✕</button>
+      </div>
+
+      <form id="composer-form" class="composer-row">
+        <textarea
+          id="composer-input"
+          rows="1"
+          placeholder="Write your post…  (Ctrl+Enter to send)"
+          aria-label="Your message"
+        ></textarea>
+        <div class="composer-buttons">
+          <button id="turn-button" type="button" class="secondary" title="Let your partner write without a new post from you">
+            Partner's turn
+          </button>
+          <button id="send-button" type="submit" class="primary">Send</button>
+        </div>
+      </form>
+    </footer>
+
+    <!-- Settings panel. A <dialog> gives us a modal with Escape-to-close for free. -->
+    <dialog id="settings-dialog" class="settings">
+      <form id="settings-form" method="dialog">
+        <h2>Settings</h2>
+
+        <label for="setting-partner">Partner prompt</label>
+        <p class="hint">Who your partner is as a writer: their name, voice and style. Not the character they play.</p>
+        <textarea id="setting-partner" name="partnerPrompt" rows="8"></textarea>
+
+        <label for="setting-character">Character sheet</label>
+        <p class="hint">The character your partner plays in this story.</p>
+        <textarea id="setting-character" name="characterSheet" rows="8"></textarea>
+
+        <label for="setting-model">Model</label>
+        <div class="inline">
+          <input id="setting-model" name="model" list="model-list" autocomplete="off" spellcheck="false" />
+          <button id="load-models" type="button" class="secondary">Load list</button>
+        </div>
+        <datalist id="model-list"></datalist>
+
+        <div class="grid">
+          <div>
+            <label for="setting-temperature">Temperature</label>
+            <input id="setting-temperature" name="temperature" type="number" min="0" max="2" step="0.05" />
+          </div>
+          <div>
+            <label for="setting-max-tokens">Max tokens</label>
+            <input id="setting-max-tokens" name="maxTokens" type="number" min="16" max="32000" step="1" />
+          </div>
+          <div>
+            <label for="setting-history">History</label>
+            <input id="setting-history" name="historyLimit" type="number" min="1" max="1000" step="1" />
+          </div>
+        </div>
+        <p class="hint">History is how many recent messages your partner can see.</p>
+
+        <p id="settings-error" class="form-error" role="alert" hidden></p>
+
+        <div class="dialog-buttons">
+          <button id="preview-prompt" type="button" class="secondary">Preview prompt</button>
+          <span class="spacer"></span>
+          <button type="button" id="settings-cancel" class="secondary">Cancel</button>
+          <button type="submit" id="settings-save" class="primary">Save</button>
+        </div>
+
+        <details class="danger-zone">
+          <summary>Danger zone</summary>
+          <button id="clear-chat" type="button" class="danger">Delete every message</button>
+        </details>
+      </form>
+    </dialog>
+
+    <!-- Shows the exact prompt stack the next partner turn would send. -->
+    <dialog id="prompt-dialog" class="settings">
+      <h2>Prompt preview</h2>
+      <p class="hint">This is exactly what the model receives on your partner's next turn.</p>
+      <div id="prompt-preview"></div>
+      <div class="dialog-buttons">
+        <span class="spacer"></span>
+        <button id="prompt-close" type="button" class="primary">Close</button>
+      </div>
+    </dialog>
+  </body>
+</html>

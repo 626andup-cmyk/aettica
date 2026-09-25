@@ -144,6 +144,8 @@ flowchart LR
 
 Each stage adds one new concept, so there's only ever one new thing to learn. Stage 1 is essentially Tiny RP.
 
+**Progress:** stage 1 is built. See [docs/stage-1.md](docs/stage-1.md) for how it works.
+
 | Stage | Adds | New concept learned |
 | --- | --- | --- |
 | 1 | One chat with a partner prompt and one character sheet, via nanoGPT | Server, API calls, prompt assembly |
