@@ -600,6 +600,14 @@ textarea {
   }
 }
 
+/* "Stop" next to "Arlo is writing…". Brighter than other link buttons, so it's easy to find. */
+.status .stop-button {
+  margin-left: 4px;
+  padding: 6px 10px; /* a comfortable size for a thumb */
+  color: var(--text);
+  text-decoration: underline;
+}
+
 .error-banner {
   display: flex;
   align-items: center;

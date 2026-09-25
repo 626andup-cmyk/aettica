@@ -117,6 +117,28 @@ The "one turn at a time" rule is now **one turn per channel**. Your partner can 
 
 Each saved partner message records the character it voices: the channel's character name in roleplay, nobody in OOC.
 
+### Stopping a turn
+
+While your partner is writing, a **Stop** button appears next to "Arlo is writing…". It calls `POST /api/channels/:id/cancel`, which runs `Partner.cancel`:
+
+- Each running turn holds an `AbortController`, a standard JavaScript object for stopping work early. `cancel` fires it, which abandons the request to nanoGPT (`src/nanogpt.ts` passes its signal to `fetch`).
+- The channel is freed at once, and nothing is saved. If you'd just sent a message, that message stays; if you were regenerating, the old reply stays.
+- The request that started the turn gets `{ "cancelled": true }` back instead of a reply.
+
+Separately, every request to nanoGPT has a time limit (`REQUEST_TIMEOUT_SECONDS`, 3 minutes by default). It applies both while waiting for the reply to start *and* while it's arriving, so a model that stalls halfway also gives up cleanly.
+
+### Lost requests
+
+On a phone, a request can be lost without ever failing: when the app goes to the background or the screen locks, the connection can quietly drop, and the page would wait forever for an answer that's never coming.
+
+So while any channel shows "writing…", the page asks the server every 3 seconds which channels are really busy (`checkBusy` in `public/app.js`):
+
+- If the server has finished with a channel but the page never heard back, the page stops waiting and reloads the channel, so the reply appears.
+- If the page's message never reached the server at all, the text goes back into your message box instead of being lost.
+- A request younger than 8 seconds is never treated as lost, since it may simply not have arrived yet.
+
+The same check picks up turns started somewhere else, such as another tab or before a reload.
+
 ## The API
 
 Routes are now a table in `src/server.ts`, each with a method, a path pattern like `/api/channels/:id/turn`, and a handler. `matchRoute` compares a request against a pattern and pulls out the `:id`. The full list is at the top of that file. Most stage 1 routes moved under `/api/channels/:id/...`.
@@ -128,6 +150,7 @@ Errors are sorted more carefully than in stage 1:
 | Invalid input (`ValidationError`) | 400 |
 | Unknown channel or message (`NotFoundError`) | 404 |
 | Partner already writing in that channel (`BusyError`) | 409 |
+| A turn you stopped (`CancelledError`) | 200, with `{ "cancelled": true }` (not an error) |
 | The model failed (`ApiError`) | 502 |
 | Anything else: a bug | 500, with details in the server log |
 

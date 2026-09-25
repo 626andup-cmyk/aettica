@@ -185,6 +185,99 @@ describe("partner turns without a user message", () => {
   });
 });
 
+describe("stopping a turn", () => {
+  /**
+   * Start a slow turn in #story and wait until it's running. The request is
+   * returned wrapped in an object: returning a bare promise from an async
+   * function would make `await startSlowTurn()` wait for the whole turn.
+   */
+  async function startSlowTurn(path = `/api/channels/${story.id}/turn`, body: unknown = {}) {
+    fake.replies.push({ content: "too late", delayMs: 400 });
+    const pending = call("POST", path, body);
+    await Bun.sleep(30);
+    expect(app.partner.isBusy(story.id)).toBe(true);
+    return { pending };
+  }
+
+  test("frees the channel at once, saves nothing, and tells the waiting request", async () => {
+    const { pending } = await startSlowTurn();
+
+    const stop = await call("POST", `/api/channels/${story.id}/cancel`, {});
+    expect(stop.data).toEqual({ cancelled: true });
+    expect(app.partner.isBusy(story.id)).toBe(false);
+
+    const { status, data } = await pending;
+    expect(status).toBe(200);
+    expect(data).toEqual({ cancelled: true });
+    expect(app.store.getMessages(story.id)).toHaveLength(0);
+  });
+
+  test("a new turn can start right after stopping one", async () => {
+    const { pending: stopped } = await startSlowTurn();
+    await call("POST", `/api/channels/${story.id}/cancel`, {});
+
+    fake.replies.push({ content: "Fresh reply" });
+    const { status, data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(status).toBe(200);
+    expect(data.partnerMessage.content).toBe("Fresh reply");
+    await stopped;
+
+    // The stopped turn's late reply is never saved.
+    await Bun.sleep(450);
+    expect(app.store.getMessages(story.id).map((m) => m.content)).toEqual(["Fresh reply"]);
+  });
+
+  test("after sending a message, your message stays saved", async () => {
+    const { pending } = await startSlowTurn(`/api/channels/${story.id}/messages`, { content: "Hello?" });
+    await call("POST", `/api/channels/${story.id}/cancel`, {});
+
+    const { data } = await pending;
+    expect(data.cancelled).toBe(true);
+    expect(data.userMessage.content).toBe("Hello?");
+    expect(app.store.getMessages(story.id).map((m) => m.content)).toEqual(["Hello?"]);
+  });
+
+  test("stopping a regeneration keeps the old reply", async () => {
+    app.store.addMessage({ channelId: story.id, author: "user", content: "Hi" });
+    app.store.addMessage({ channelId: story.id, author: "partner", content: "Old reply" });
+    const { pending } = await startSlowTurn(`/api/channels/${story.id}/regenerate`);
+    await call("POST", `/api/channels/${story.id}/cancel`, {});
+
+    expect((await pending).data).toEqual({ cancelled: true });
+    expect(app.store.getMessages(story.id).map((m) => m.content)).toEqual(["Hi", "Old reply"]);
+  });
+
+  test("does nothing when no turn is running", async () => {
+    expect((await call("POST", `/api/channels/${story.id}/cancel`, {})).data).toEqual({ cancelled: false });
+    expect((await call("POST", "/api/channels/nope/cancel", {})).status).toBe(404);
+  });
+
+  test("only stops the channel it's asked to", async () => {
+    fake.replies.push({ content: "story reply", delayMs: 200 }, { content: "ooc reply", delayMs: 200 });
+    const storyTurn = call("POST", `/api/channels/${story.id}/turn`, {});
+    const oocTurn = call("POST", `/api/channels/${ooc.id}/turn`, {});
+    await Bun.sleep(30);
+
+    await call("POST", `/api/channels/${ooc.id}/cancel`, {});
+    expect((await storyTurn).data.partnerMessage.content).toBe("story reply");
+    expect((await oocTurn).data).toEqual({ cancelled: true });
+  });
+});
+
+describe("a model that stalls", () => {
+  test("halfway through its reply times out cleanly", async () => {
+    app.store.close();
+    app = createApp(testConfig(dir.path, fake.baseUrl, { requestTimeoutMs: 300 }));
+    fake.replies.push({ stallMidReply: true });
+
+    const { status, data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+
+    expect(status).toBe(502);
+    expect(data.error).toMatch(/took longer than/);
+    expect(app.partner.isBusy(story.id)).toBe(false);
+  });
+});
+
 describe("regenerate", () => {
   test("replaces the partner's last reply, without showing the old one to the model", async () => {
     app.store.addMessage({ channelId: story.id, author: "user", content: "Hi" });

@@ -12,6 +12,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - Every message records who wrote it, which character it voices, and which model generated it.
 - Edit the **partner prompt** (who your partner is as a writer), the model, temperature, reply length, and how many recent messages the partner sees.
 - **Partner's turn**: let your partner write without a new message from you, including opening an empty channel.
+- **Stop** a reply that's taking too long. Nothing is saved, and the channel is free again.
 - **Regenerate** the partner's last reply, **edit** or **delete** any message.
 - **Preview prompt**: see exactly what the model receives on the next turn in a channel.
 - Install it to your home screen as an app (PWA).
