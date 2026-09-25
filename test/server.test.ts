@@ -62,8 +62,8 @@ describe("sending a message", () => {
     });
 
     expect(status).toBe(200);
-    expect(data.userMessage).toMatchObject({ content: "I knock on the lighthouse door.", author: "user", characters: [] });
-    expect(data.partnerMessage).toMatchObject({
+    expect(data.userMessages[0]).toMatchObject({ content: "I knock on the lighthouse door.", author: "user", characters: [] });
+    expect(data.partnerMessages[0]).toMatchObject({
       content: "*Ilse looks up from the lamp.*",
       author: "partner",
       characters: ["Ilse Marrow"],
@@ -89,7 +89,7 @@ describe("sending a message", () => {
   test("in OOC, the partner speaks as themselves and sees the channel list", async () => {
     const { data } = await call("POST", `/api/channels/${ooc.id}/messages`, { content: "How's it going?" });
 
-    expect(data.partnerMessage.characters).toEqual([]);
+    expect(data.partnerMessages[0].characters).toEqual([]);
     const system = fake.requests[0]!.messages[0]!.content;
     expect(system).toContain(OOC_FRAMING);
     expect(system).toContain("#story: roleplay, you play Ilse Marrow");
@@ -108,7 +108,7 @@ describe("sending a message", () => {
     const { status, data } = await call("POST", `/api/channels/${story.id}/messages`, { content: "Hello?" });
 
     expect(status).toBe(200);
-    expect(data.partnerMessage).toBeUndefined();
+    expect(data.partnerMessages).toBeUndefined();
     expect(data.error).toContain("rejected the API key");
     expect(data.error).toContain("bad key");
     expect(app.store.getMessages(story.id).map((m) => m.author)).toEqual(["user"]);
@@ -128,7 +128,7 @@ describe("sending a message", () => {
   test("strips <think> reasoning from replies", async () => {
     fake.replies.push({ content: "<think>They want drama.</think>\n\nThe storm breaks." });
     const { data } = await call("POST", `/api/channels/${story.id}/messages`, { content: "Go on." });
-    expect(data.partnerMessage.content).toBe("The storm breaks.");
+    expect(data.partnerMessages[0].content).toBe("The storm breaks.");
   });
 });
 
@@ -136,7 +136,7 @@ describe("partner turns without a user message", () => {
   test("the partner can open an empty channel", async () => {
     const { status, data } = await call("POST", `/api/channels/${story.id}/turn`, {});
     expect(status).toBe(200);
-    expect(data.partnerMessage.author).toBe("partner");
+    expect(data.partnerMessages[0].author).toBe("partner");
     expect(fake.requests[0]!.messages.at(-1)!.content).toBe(NUDGES.rp.opening);
   });
 
@@ -221,7 +221,7 @@ describe("stopping a turn", () => {
     fake.replies.push({ content: "Fresh reply" });
     const { status, data } = await call("POST", `/api/channels/${story.id}/turn`, {});
     expect(status).toBe(200);
-    expect(data.partnerMessage.content).toBe("Fresh reply");
+    expect(data.partnerMessages[0].content).toBe("Fresh reply");
     await stopped;
 
     // The stopped turn's late reply is never saved.
@@ -235,7 +235,7 @@ describe("stopping a turn", () => {
 
     const { data } = await pending;
     expect(data.cancelled).toBe(true);
-    expect(data.userMessage.content).toBe("Hello?");
+    expect(data.userMessages[0].content).toBe("Hello?");
     expect(app.store.getMessages(story.id).map((m) => m.content)).toEqual(["Hello?"]);
   });
 
@@ -261,7 +261,7 @@ describe("stopping a turn", () => {
     await Bun.sleep(30);
 
     await call("POST", `/api/channels/${ooc.id}/cancel`, {});
-    expect((await storyTurn).data.partnerMessage.content).toBe("story reply");
+    expect((await storyTurn).data.partnerMessages[0].content).toBe("story reply");
     expect((await oocTurn).data).toEqual({ cancelled: true });
   });
 });
@@ -289,7 +289,7 @@ describe("regenerate", () => {
     const { status, data } = await call("POST", `/api/channels/${story.id}/regenerate`, {});
 
     expect(status).toBe(200);
-    expect(data.replacedId).toBe(old.id);
+    expect(data.replacedIds).toEqual([old.id]);
     expect(app.store.getMessages(story.id).map((m) => m.content)).toEqual(["Hi", "New reply"]);
     expect(JSON.stringify(fake.requests[0]!.messages)).not.toContain("Old reply");
   });
@@ -308,6 +308,93 @@ describe("regenerate", () => {
   test("refuses when the last message is yours", async () => {
     app.store.addMessage({ channelId: story.id, author: "user", content: "Hi" });
     expect((await call("POST", `/api/channels/${story.id}/regenerate`, {})).status).toBe(400);
+  });
+});
+
+describe("scene breaks", () => {
+  test("===== in a roleplay channel adds a scene break, and the partner doesn't reply", async () => {
+    const { status, data } = await call("POST", `/api/channels/${story.id}/messages`, { content: "===== The Storm" });
+    expect(status).toBe(200);
+    expect(data.sceneBreak).toMatchObject({ kind: "scene_break", content: "The Storm" });
+    expect(data.channel.id).toBe(story.id);
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  test("===== in an OOC channel is just a message", async () => {
+    const { data } = await call("POST", `/api/channels/${ooc.id}/messages`, { content: "=====" });
+    expect(data.userMessages[0]).toMatchObject({ kind: "post", content: "=====" });
+  });
+
+  test("the scene break route adds one, and a waiting mode change applies", async () => {
+    app.store.addMessage({ channelId: story.id, author: "user", content: "Hi", mode: "literary" });
+    const patched = await call("PATCH", `/api/channels/${story.id}`, { mode: "casual" });
+    expect(patched.data.channel).toMatchObject({ mode: "literary", pendingMode: "casual" });
+
+    const { data } = await call("POST", `/api/channels/${story.id}/scene-breaks`, { title: "Later" });
+    expect(data.sceneBreak.content).toBe("Later");
+    expect(data.channel).toMatchObject({ mode: "casual", pendingMode: null });
+  });
+
+  test("the partner opens the new scene after a break", async () => {
+    await call("POST", `/api/channels/${story.id}/scene-breaks`, {});
+    await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(fake.requests[0]!.messages.at(-1)!.content).toContain("Write the opening of the new scene");
+  });
+
+  test("a scene break's title can be edited, even to nothing", async () => {
+    const { sceneBreak } = app.store.addSceneBreak(story.id, "user", "Old");
+    const { data } = await call("PATCH", `/api/messages/${sceneBreak.id}`, { content: "" });
+    expect(data.message.content).toBe("");
+  });
+
+  test("OOC channels can't have scene breaks", async () => {
+    expect((await call("POST", `/api/channels/${ooc.id}/scene-breaks`, {})).status).toBe(400);
+  });
+});
+
+describe("casual mode", () => {
+  beforeEach(() => {
+    app.store.updateChannel(story.id, { mode: "casual" });
+    app.store.updateSettings({ userCharacters: [{ name: "Kestrel", prefix: "k" }, { name: "Jun", prefix: "j" }] });
+  });
+
+  test("your post is split into bubbles by proxy tag and the character you picked", async () => {
+    const { data } = await call("POST", `/api/channels/${story.id}/messages`, {
+      content: "hi!\nk: *waves*",
+      postingAs: "Jun",
+    });
+    expect(data.userMessages.map((m: any) => [m.characters, m.content, m.mode])).toEqual([
+      [["Jun"], "hi!", "casual"],
+      [["Kestrel"], "*waves*", "casual"],
+    ]);
+    expect(data.userMessages[0].turnId).toBe(data.userMessages[1].turnId);
+  });
+
+  test("posting as someone who isn't one of your characters is refused", async () => {
+    const { status } = await call("POST", `/api/channels/${story.id}/messages`, { content: "hi", postingAs: "Ilse" });
+    expect(status).toBe(400);
+  });
+
+  test("the partner's reply is split into bubbles, one turn", async () => {
+    fake.replies.push({ content: "Ilse: Door's open.\nIlse Marrow: *nods*" });
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(data.partnerMessages.map((m: any) => [m.characters, m.content])).toEqual([
+      [["Ilse Marrow"], "Door's open."],
+      [["Ilse Marrow"], "*nods*"],
+    ]);
+    // The model was asked for the casual format.
+    expect(fake.requests[0]!.messages[0]!.content).toContain("casual style");
+  });
+
+  test("regenerating replaces every bubble of the last reply", async () => {
+    fake.replies.push({ content: "Ilse: OLD-BUBBLE-1\nIlse: OLD-BUBBLE-2" }, { content: "Ilse: fresh" });
+    await call("POST", `/api/channels/${story.id}/turn`, {});
+
+    const { data } = await call("POST", `/api/channels/${story.id}/regenerate`, {});
+
+    expect(data.replacedIds).toHaveLength(2);
+    expect(app.store.getMessages(story.id).map((m) => m.content)).toEqual(["fresh"]);
+    expect(JSON.stringify(fake.requests[1]!.messages)).not.toContain("OLD-BUBBLE");
   });
 });
 
@@ -339,7 +426,7 @@ describe("channels", () => {
   test("renaming the character changes who the partner's next reply voices", async () => {
     await call("PATCH", `/api/channels/${story.id}`, { characterName: "The Keeper" });
     const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
-    expect(data.partnerMessage.characters).toEqual(["The Keeper"]);
+    expect(data.partnerMessages[0].characters).toEqual(["The Keeper"]);
   });
 });
 

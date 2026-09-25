@@ -31,6 +31,11 @@
   --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-heading: var(--font-body);
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* Literary posts */
+  --font-prose: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --prose-size: 17px;
+  --prose-line-height: 1.7;
+  --prose-max-width: 46em; /* long lines are hard to read */
   --font-size: 16px;
   --line-height: 1.5;
 
@@ -56,6 +61,11 @@
   --avatar-user-bg: var(--user-color);
   --avatar-partner-bg: var(--partner-color);
   --avatar-text: #ffffff;
+  /* Character avatars get a hue per character; these set the rest of the colour. */
+  --avatar-saturation: 45%;
+  --avatar-lightness: 52%;
+  --name-saturation: 60%; /* character names, in the same hue */
+  --name-lightness: 72%;
 
   /* Shape */
   --radius-sm: 4px;
@@ -110,6 +120,11 @@
   --dialog-backdrop: none;
   --scrim: rgb(0 0 0 / 0.6);
   --code-bg: #1e1f22;
+
+  /* Scene breaks */
+  --scene-break-line: #4e5058;
+  --scene-break-text: var(--text-muted);
+  --scene-break-font: var(--font-prose);
 }
 
 /* ================================================================= base */
@@ -498,6 +513,134 @@ textarea {
   color: var(--text-strong);
 }
 
+/*
+ * Each character has their own hue, set by app.js as --avatar-hue on the
+ * message, for their avatar and name. (Written specifically enough to beat
+ * the "you" and "partner" colours above.)
+ */
+.message.has-character .avatar {
+  background: hsl(var(--avatar-hue) var(--avatar-saturation) var(--avatar-lightness));
+}
+
+.message.has-character .message-author {
+  color: hsl(var(--avatar-hue) var(--name-saturation) var(--name-lightness));
+}
+
+/* ------------------------------------------------ casual & OOC: grouping */
+
+/*
+ * A run of messages from the same voice is grouped, Discord-style: after the
+ * first, the avatar and name are hidden and the gap is smaller.
+ */
+.message.continued {
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+.message.continued .avatar,
+.message.continued .message-meta {
+  display: none;
+}
+
+/* Without its avatar, a continued message still lines up with the text above. */
+.message.continued > :not(.avatar) {
+  grid-column: 2;
+}
+
+/*
+ * Casual bubbles are short and come in bursts, so their Edit/Delete buttons
+ * only appear on hover or when you tap the bubble (app.js toggles
+ * `selected`). The last reply's buttons, with Regenerate, always show.
+ */
+.message[data-mode="casual"] .message-actions:not(.always) {
+  display: none;
+}
+
+.message[data-mode="casual"]:hover .message-actions,
+.message[data-mode="casual"].selected .message-actions {
+  display: flex;
+}
+
+/* ----------------------------------------------------- literary: prose */
+
+/*
+ * A literary post is a prose block: a small byline, then the text in a
+ * book-like font across the width of the channel. No avatar column.
+ */
+.message[data-mode="literary"] {
+  display: block;
+  padding: 14px 20px;
+}
+
+.message[data-mode="literary"] .message-content,
+.message[data-mode="literary"] .message-meta,
+.message[data-mode="literary"] .message-actions {
+  max-width: var(--prose-max-width);
+}
+
+.message[data-mode="literary"] .avatar {
+  display: none;
+}
+
+.message[data-mode="literary"] .message-author {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.message[data-mode="literary"] .message-content {
+  margin-top: 4px;
+  font: var(--prose-size) / var(--prose-line-height) var(--font-prose);
+}
+
+/* ------------------------------------------------------- scene breaks */
+
+/* A line across the channel with the scene's title in the middle. */
+.scene-break {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 12px;
+  margin: 18px 20px;
+  color: var(--scene-break-text);
+}
+
+.scene-break::before,
+.scene-break::after {
+  content: "";
+  flex: 1 1 40px;
+  height: 1px;
+  background: var(--scene-break-line);
+}
+
+.scene-break-title {
+  font: italic 16px var(--scene-break-font);
+}
+
+/* Rename/Remove sit under the line, quietly. */
+.scene-break-actions {
+  order: 3;
+  flex-basis: 100%;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.scene-break-actions button {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scene-break-actions button:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 /* A post that's still being sent. */
 .message.pending {
   opacity: 0.6;
@@ -548,10 +691,37 @@ textarea {
   gap: 8px;
 }
 
+/* One row: [new scene] ...space... [Partner's turn] [Send]. */
 .composer-buttons {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+}
+
+.composer-buttons .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* "Posting as [Kestrel]" above the text box in casual scenes. */
+.posting-as-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.posting-as {
+  min-width: 0;
+  max-width: 60%;
+  padding: 4px 8px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
 }
 
 .composer-input {
@@ -729,6 +899,23 @@ button:disabled {
   resize: vertical;
 }
 
+.dialog select {
+  width: 100%;
+  padding: 10px 12px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.hint code {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  font-family: var(--font-mono);
+}
+
 .hint {
   margin: 2px 0 6px;
   font-size: 13px;
@@ -803,6 +990,10 @@ button:disabled {
   letter-spacing: normal;
   color: var(--text);
   cursor: pointer;
+}
+
+.mode-picker {
+  margin-top: 14px;
 }
 
 .kind-option:has(input:checked) {

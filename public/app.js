@@ -34,6 +34,8 @@ const state = {
   retry: null,
   /** Unsent text for each channel, so switching channels doesn't lose it. */
   drafts: new Map(),
+  /** In casual channels: which of your characters you're posting as, by channel id. */
+  postingAs: new Map(),
   /** Fingerprint of the app's files when this page loaded (see `checkForUpdate`). */
   appVersion: null,
 };
@@ -203,6 +205,7 @@ async function createChannel(event) {
   const kind = form.kind.value;
   const body = { name: form.name.value, kind };
   if (kind === "rp") {
+    body.mode = form.mode.value;
     body.characterName = form.characterName.value;
     body.characterSheet = form.characterSheet.value;
   }
@@ -223,6 +226,7 @@ async function saveChannel(event) {
   const form = els.channelForm.elements;
   const body = { name: form.name.value };
   if (channel.kind === "rp") {
+    body.mode = form.mode.value;
     body.characterName = form.characterName.value;
     body.characterSheet = form.characterSheet.value;
   }
@@ -435,13 +439,31 @@ async function sendMessage() {
   hideError();
   // Show your post straight away, as a placeholder, while the partner
   // writes. It's swapped for the saved copy when the server answers.
+  const channel = currentChannel();
+
+  // `=====` (plus an optional title) on its own is a scene break, not a post.
+  // (The server understands it too, but handling it here avoids showing
+  // "=====" as a message for a moment.)
+  const sceneTitle = channel.kind === "rp" ? content.trim().match(/^={5,}[ \t]*([^\n]*)$/) : null;
+  if (sceneTitle) {
+    els.input.value = "";
+    state.drafts.delete(channelId);
+    autoGrow();
+    await addSceneBreak(sceneTitle[1].trim());
+    return;
+  }
+
+  const postingAs = channel.kind === "rp" && channel.mode === "casual" ? state.postingAs.get(channelId) || null : null;
+  const sentAt = new Date();
   const placeholder = {
     id: "pending",
     channelId,
+    kind: "post",
+    mode: channel.kind === "rp" ? channel.mode : null,
     author: "user",
     content,
-    characters: [],
-    createdAt: new Date().toISOString(),
+    characters: postingAs ? [postingAs] : [],
+    createdAt: sentAt.toISOString(),
   };
   state.messages.push(placeholder);
   els.input.value = "";
@@ -451,7 +473,11 @@ async function sendMessage() {
   // If the request is abandoned (Stop, or lost) and the server never saved
   // your message, put your text back in the box so it isn't lost.
   const restoreIfUnsaved = (messages) => {
-    const saved = messages.some((m) => m.author === "user" && m.content === content);
+    // In casual mode your text may have been split into several bubbles, so
+    // look for any post of yours from this send whose text is part of it.
+    const saved = messages.some(
+      (m) => m.author === "user" && new Date(m.createdAt) >= sentAt - 2000 && content.includes(m.content),
+    );
     if (!saved && els.input.value === "") {
       els.input.value = content;
       autoGrow();
@@ -462,13 +488,13 @@ async function sendMessage() {
     channelId,
     async (stillMine) => {
       try {
-        const data = await api("POST", channelPath("messages", channelId), { content });
+        const data = await api("POST", channelPath("messages", channelId), { content, postingAs });
         if (!stillMine()) return; // abandoned; the channel was already reloaded
         if (state.channelId !== channelId) return; // you've moved on; it'll load when you return
         state.messages = state.messages.filter((m) => m !== placeholder);
-        state.messages.push(data.userMessage);
-        if (data.partnerMessage) {
-          state.messages.push(data.partnerMessage);
+        state.messages.push(...data.userMessages);
+        if (data.partnerMessages) {
+          state.messages.push(...data.partnerMessages);
         } else if (data.error) {
           // Your message is saved but the reply failed. "Try again" asks the
           // partner for a turn, which answers the message you already sent.
@@ -496,19 +522,62 @@ async function sendMessage() {
 
 /** Let your partner write without a new message from you. */
 async function partnerTurn() {
-  await runTurn("turn", (data) => state.messages.push(data.partnerMessage), partnerTurn);
+  await runTurn("turn", (data) => state.messages.push(...data.partnerMessages), partnerTurn);
 }
 
-/** Replace your partner's last reply with a fresh one. */
+/** Replace your partner's last reply (every bubble of it, in casual mode) with a fresh one. */
 async function regenerate() {
   await runTurn(
     "regenerate",
     (data) => {
-      state.messages = state.messages.filter((m) => m.id !== data.replacedId);
-      state.messages.push(data.partnerMessage);
+      const replaced = new Set(data.replacedIds);
+      state.messages = state.messages.filter((m) => !replaced.has(m.id));
+      state.messages.push(...data.partnerMessages);
     },
     regenerate,
   );
+}
+
+/**
+ * Add a scene break to the open channel. If a mode change was waiting, the
+ * server applies it now, and sends the updated channel back.
+ */
+async function addSceneBreak(title) {
+  const channelId = state.channelId;
+  hideError();
+  try {
+    const data = await api("POST", channelPath("scene-breaks", channelId), { title });
+    updateChannelInState(data.channel);
+    if (state.channelId !== channelId) return;
+    state.messages.push(data.sceneBreak);
+    renderAll();
+    scrollToBottom();
+  } catch (error) {
+    showError(error.message, null);
+  }
+}
+
+/** The "New scene" button: ask for an optional title, then add the break. */
+function newScene() {
+  const title = prompt("Title for the new scene (optional):", "");
+  if (title !== null) addSceneBreak(title.trim());
+}
+
+async function renameSceneBreak(sceneBreak) {
+  const title = prompt("Scene title:", sceneBreak.content);
+  if (title === null) return;
+  try {
+    const data = await api("PATCH", `/api/messages/${encodeURIComponent(sceneBreak.id)}`, { content: title.trim() });
+    state.messages = state.messages.map((m) => (m.id === sceneBreak.id ? data.message : m));
+    renderMessages();
+  } catch (error) {
+    showError(error.message, null);
+  }
+}
+
+/** Replace a channel in `state.channels` with a fresh copy from the server. */
+function updateChannelInState(channel) {
+  state.channels = state.channels.map((c) => (c.id === channel.id ? channel : c));
 }
 
 /**
@@ -526,7 +595,7 @@ async function runTurn(action, onSuccess, retry) {
   await withBusyChannel(channelId, async (stillMine) => {
     try {
       const data = await api("POST", channelPath(action, channelId), {});
-      if (stillMine() && state.channelId === channelId && data.partnerMessage) onSuccess(data);
+      if (stillMine() && state.channelId === channelId && data.partnerMessages) onSuccess(data);
     } catch (error) {
       if (stillMine() && state.channelId === channelId) showError(error.message, retry);
     }
@@ -620,15 +689,40 @@ function renderChannelHeader() {
 
   els.channelName.textContent = channel?.name ?? "";
   els.channelTitleIcon.setAttribute("href", channel?.kind === "ooc" ? "#icon-ooc" : "#icon-hash");
-  els.channelTopic.textContent = !channel
-    ? ""
-    : channel.kind === "ooc"
-      ? `Out of character with ${state.settings.partnerName}`
-      : channel.characterName
-        ? `${state.settings.partnerName} plays ${channel.characterName}`
-        : "";
+  els.channelTopic.textContent = channel ? channelTopic(channel) : "";
   $("channel-settings-button").hidden = !channel;
   document.title = channel ? `#${channel.name} · Aettica` : "Aettica";
+}
+
+/**
+ * The line next to the channel name, e.g.
+ * "Arlo plays Ilse Marrow · Literary (casual from the next scene)".
+ */
+function channelTopic(channel) {
+  const partnerName = state.settings.partnerName;
+  if (channel.kind === "ooc") return `Out of character with ${partnerName}`;
+  const parts = [];
+  if (channel.characterName) parts.push(`${partnerName} plays ${channel.characterName}`);
+  let mode = MODE_NAMES[channel.mode];
+  if (channel.pendingMode) mode += ` (${MODE_NAMES[channel.pendingMode].toLowerCase()} from the next scene)`;
+  parts.push(mode);
+  return parts.join(" · ");
+}
+
+const MODE_NAMES = { literary: "Literary", casual: "Casual" };
+
+/**
+ * Whether the open channel's current scene has no posts yet (nothing since
+ * the last scene break). A mode change applies at once in that case, and at
+ * the next scene break otherwise; the server decides, this is just for the
+ * hint in channel settings.
+ */
+function currentSceneIsEmpty() {
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    if (state.messages[i].kind === "scene_break") return true;
+    if (state.messages[i].id !== "pending") return false;
+  }
+  return true;
 }
 
 /** Redraw the message list from `state.messages`. */
@@ -654,10 +748,39 @@ function renderMessages() {
     return;
   }
 
-  const lastId = state.messages.at(-1).id;
+  // The last partner turn can be regenerated. In casual mode that's every
+  // bubble of the last reply; the button goes on the last one.
+  const last = state.messages.at(-1);
+  const canRegenerate = last.kind === "post" && last.author === "partner";
+
+  let previous = null;
   for (const message of state.messages) {
-    els.messages.append(renderMessage(message, message.id === lastId));
+    const element =
+      message.kind === "scene_break"
+        ? renderSceneBreak(message)
+        : renderMessage(message, {
+            continued: continuesGroup(previous, message),
+            regenerate: canRegenerate && message === last,
+          });
+    els.messages.append(element);
+    previous = message;
   }
+}
+
+/**
+ * Whether a message continues the one before it, Discord-style: same
+ * author, same character(s), same mode, within a few minutes. A continued
+ * message hides its avatar and name, so a burst of casual bubbles reads as
+ * one block. Literary posts are always shown in full.
+ */
+function continuesGroup(previous, message) {
+  if (!previous || previous.kind !== "post" || message.mode === "literary") return false;
+  const sameVoice =
+    previous.author === message.author &&
+    previous.mode === message.mode &&
+    previous.characters.join("|") === message.characters.join("|");
+  const minutesApart = (new Date(message.createdAt) - new Date(previous.createdAt)) / 60000;
+  return sameVoice && minutesApart < 7;
 }
 
 function emptyNote(text) {
@@ -668,38 +791,84 @@ function emptyNote(text) {
 }
 
 /**
+ * A scene break: a divider with the scene's title, and small buttons to
+ * rename or remove it.
+ */
+function renderSceneBreak(sceneBreak) {
+  const root = document.createElement("div");
+  root.className = "scene-break";
+  root.setAttribute("role", "separator");
+
+  const title = document.createElement("span");
+  title.className = "scene-break-title";
+  title.textContent = sceneBreak.content || "New scene";
+  root.append(title);
+
+  const actions = document.createElement("span");
+  actions.className = "scene-break-actions";
+  actions.append(
+    actionButton("Rename", () => renameSceneBreak(sceneBreak)),
+    actionButton("Remove", () => deleteMessage(sceneBreak.id), state.busy.has(state.channelId)),
+  );
+  root.append(actions);
+  return root;
+}
+
+/**
  * Who a message shows as written by.
  *
- * Your messages: "You". Partner messages that voice characters: the
- * character names, with the partner's name as a badge (it's them writing
- * the character). Partner messages voicing no one (OOC): the partner's name.
+ *   - Your posts: "You", or in casual mode the character you posted as,
+ *     with "You" as a small badge.
+ *   - Partner posts that voice characters: the character names, with the
+ *     partner's name as a badge (it's them writing the character).
+ *   - Partner posts voicing no one (OOC): the partner's name.
  */
 function authorOf(message) {
-  if (message.author === "user") return { name: "You", badge: null };
-  const partnerName = state.settings.partnerName;
-  if (message.characters.length > 0) return { name: message.characters.join(" & "), badge: partnerName };
-  return { name: partnerName, badge: null };
+  const writer = message.author === "user" ? "You" : state.settings.partnerName;
+  if (message.characters.length > 0) return { name: message.characters.join(" & "), badge: writer };
+  return { name: writer, badge: null };
 }
 
 /**
  * Build the element for one message.
  *
+ * The layout depends on the mode it was written in (`data-mode`), styled in
+ * style.css:
+ *
+ *   - `literary`: a wide prose block with a small byline.
+ *   - `casual`: a chat bubble with the character's avatar and name; a run of
+ *     bubbles from the same character is grouped (`continued`).
+ *   - `ooc`: like casual, for out-of-character channels.
+ *
  * Text is always inserted as text, never as raw HTML, except for the tiny
  * bit of formatting in `formatText`, which escapes everything first. That
  * way a model reply containing `<script>` can't run code in your browser.
+ *
+ * @param options.continued   Hide the avatar and name (see `continuesGroup`).
+ * @param options.regenerate  Show the Regenerate button.
  */
-function renderMessage(message, isLast) {
+function renderMessage(message, { continued = false, regenerate: showRegenerate = false } = {}) {
   const { name, badge } = authorOf(message);
   const pending = message.id === "pending";
+  const mode = message.mode ?? "ooc";
 
   const root = document.createElement("article");
-  root.className = pending ? "message pending" : "message";
+  root.className = ["message", pending && "pending", continued && "continued"].filter(Boolean).join(" ");
   root.dataset.author = message.author;
+  root.dataset.mode = mode;
+  // Tapping a casual bubble shows its Edit/Delete buttons (see style.css).
+  if (mode === "casual") root.addEventListener("click", () => root.classList.toggle("selected"));
 
   const avatar = document.createElement("div");
   avatar.className = "avatar";
   avatar.textContent = initial(name);
   avatar.setAttribute("aria-hidden", "true");
+  // Each character gets their own colour for avatar and name, like
+  // Tupperbox. The hue is set on the whole message; style.css uses it.
+  if (message.characters.length > 0) {
+    root.classList.add("has-character");
+    root.style.setProperty("--avatar-hue", String(hueFor(name)));
+  }
 
   const meta = document.createElement("div");
   meta.className = "message-meta";
@@ -747,6 +916,7 @@ function renderMessage(message, isLast) {
   const busy = state.busy.has(state.channelId);
   const actions = document.createElement("div");
   actions.className = "message-actions";
+  if (showRegenerate) actions.classList.add("always");
   actions.append(
     actionButton("Edit", () => {
       state.editingId = message.id;
@@ -754,12 +924,16 @@ function renderMessage(message, isLast) {
     }),
     actionButton("Delete", () => deleteMessage(message.id), busy),
   );
-  // Only the newest message can be regenerated, and only if it's the partner's.
-  if (isLast && message.author === "partner") {
-    actions.append(actionButton("Regenerate", regenerate, busy));
-  }
+  if (showRegenerate) actions.append(actionButton("Regenerate", regenerate, busy));
   root.append(actions);
   return root;
+}
+
+/** A stable hue (0-359) for a name, so each character keeps their colour. */
+function hueFor(name) {
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+  return hash % 360;
 }
 
 /** The inline editor shown in place of a message's text while editing. */
@@ -807,8 +981,41 @@ function renderComposer() {
   $("status-text").textContent = `${state.settings.partnerName} is writing…`;
   els.send.disabled = busy;
   els.turn.disabled = busy;
-  els.input.placeholder =
-    channel.kind === "ooc" ? `Message ${state.settings.partnerName}…` : `Write your post in #${channel.name}…`;
+
+  const casual = channel.kind === "rp" && channel.mode === "casual";
+  $("scene-button").hidden = channel.kind !== "rp";
+  $("scene-button").disabled = busy;
+  renderPostingAs(casual);
+
+  if (channel.kind === "ooc") {
+    els.input.placeholder = `Message ${state.settings.partnerName}…`;
+  } else if (casual) {
+    const example = state.settings.userCharacters[0];
+    els.input.placeholder = example
+      ? `Chat in #${channel.name}… (start a line with ${example.prefix}: to post as ${example.name})`
+      : `Chat in #${channel.name}…`;
+  } else {
+    els.input.placeholder = `Write your post in #${channel.name}…  (===== starts a new scene)`;
+  }
+}
+
+/**
+ * The "posting as" picker, shown in casual scenes: yourself, or one of your
+ * characters. Lines starting with a character's prefix override it.
+ */
+function renderPostingAs(visible) {
+  const select = $("posting-as");
+  const characters = state.settings.userCharacters;
+  const row = $("posting-as-row");
+  row.hidden = !visible || characters.length === 0;
+  if (row.hidden) return;
+
+  // Forget a choice whose character no longer exists.
+  let current = state.postingAs.get(state.channelId) ?? "";
+  if (current && !characters.some((c) => c.name === current)) current = "";
+
+  select.replaceChildren(new Option("yourself", ""), ...characters.map((c) => new Option(c.name, c.name)));
+  select.value = current;
 }
 
 /**
@@ -890,6 +1097,7 @@ function openSettings() {
   form.temperature.value = s.temperature;
   form.maxTokens.value = s.maxTokens;
   form.historyLimit.value = s.historyLimit;
+  form.userCharacters.value = s.userCharacters.map((c) => `${c.prefix}: ${c.name}`).join("\n");
   hideFormError(els.settingsForm);
   els.settingsDialog.showModal();
 }
@@ -901,6 +1109,7 @@ async function saveSettings(event) {
   const form = els.settingsForm.elements;
   try {
     const data = await api("PUT", "/api/settings", {
+      userCharacters: parseUserCharacters(form.userCharacters.value),
       partnerName: form.partnerName.value,
       partnerPrompt: form.partnerPrompt.value,
       model: form.model.value,
@@ -915,6 +1124,23 @@ async function saveSettings(event) {
   } catch (error) {
     showFormError(els.settingsForm, error.message);
   }
+}
+
+/**
+ * Read the "Your characters" box: one `prefix: Name` per line, blank lines
+ * ignored. Throws an Error naming the first line it can't read. (The server
+ * checks the result again, e.g. for duplicate prefixes.)
+ */
+function parseUserCharacters(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .map((line) => {
+      const match = line.match(/^([^\s:]+)\s*:\s*(.+)$/);
+      if (!match) throw new Error(`Couldn't read "${line}". Write each character as prefix: Name, like k: Kestrel.`);
+      return { prefix: match[1], name: match[2].trim() };
+    });
 }
 
 /** Ask the server which models nanoGPT offers and offer them as suggestions. */
@@ -949,6 +1175,9 @@ function openChannelSettings() {
   form.name.value = channel.name;
   form.characterName.value = channel.characterName;
   form.characterSheet.value = channel.characterSheet;
+  // Show the mode you'll get: a waiting change if there is one.
+  form.mode.value = channel.pendingMode ?? channel.mode;
+  updateModeNote();
   els.channelForm.querySelector(".rp-only").hidden = channel.kind !== "rp";
   $("channel-kind-note").textContent =
     channel.kind === "rp"
@@ -956,6 +1185,23 @@ function openChannelSettings() {
       : "An out-of-character channel. Your partner talks to you as themselves.";
   hideFormError(els.channelForm);
   els.channelDialog.showModal();
+}
+
+/**
+ * Under the Style choice in channel settings: say when a mode change will
+ * take effect, since a scene never mixes styles.
+ */
+function updateModeNote() {
+  const channel = currentChannel();
+  const chosen = els.channelForm.elements.mode.value;
+  const note = $("channel-mode-note");
+  if (!channel || chosen === channel.mode) {
+    note.textContent = "";
+  } else if (currentSceneIsEmpty()) {
+    note.textContent = `The current scene hasn't started yet, so it will be ${chosen} right away.`;
+  } else {
+    note.textContent = `Scenes never mix styles, so this takes effect at the next scene break.`;
+  }
 }
 
 function openNewChannel() {
@@ -1033,6 +1279,11 @@ els.input.addEventListener("input", autoGrow);
 
 els.turn.addEventListener("click", partnerTurn);
 $("stop-button").addEventListener("click", stopTurn);
+$("scene-button").addEventListener("click", newScene);
+$("posting-as").addEventListener("change", (event) => state.postingAs.set(state.channelId, event.target.value));
+els.channelForm.addEventListener("change", (event) => {
+  if (event.target.name === "mode") updateModeNote();
+});
 $("update-reload").addEventListener("click", () => location.reload());
 
 // Coming back to the app (switching to it, unlocking the phone) is when an

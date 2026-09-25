@@ -160,7 +160,7 @@ The whole look of Aettica is themeable, including glassy, skeuomorphic styles li
 
 Each stage adds one new concept, so there's only ever one new thing to learn. Stage 1 is essentially Tiny RP.
 
-**Progress:** stages 1 and 2 are built. See [docs/stage-1.md](docs/stage-1.md) and [docs/stage-2.md](docs/stage-2.md) for how they work.
+**Progress:** stages 1 to 3 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md) and [docs/stage-3.md](docs/stage-3.md) for how they work.
 
 | Stage | Adds | New concept learned |
 | --- | --- | --- |

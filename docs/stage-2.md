@@ -1,5 +1,7 @@
 # Stage 2: how it works
 
+> This describes Aettica as it was at the end of stage 2. Stage 3 added scene breaks and modes, and changed some API responses to lists (`userMessages`, `partnerMessages`); see [stage-3.md](stage-3.md).
+
 Stage 2 turns one chat into a server of channels. According to [DESIGN.md](../DESIGN.md), it adds **multiple channels, an OOC channel and message authorship**, and its new concepts are **a database** and **data relationships**.
 
 This document covers what changed since [stage 1](stage-1.md). Everything that document says about the server, API calls and the single partner turn still holds.

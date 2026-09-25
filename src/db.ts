@@ -34,7 +34,7 @@ import { Database } from "bun:sqlite";
  * Never edit a migration once it has been released: databases that already
  * ran it won't run it again. Add a new one to the end instead.
  */
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: string[] = [
   // ---------------------------------------------------------------- 1
   // Stage 2: settings, channels, messages, and the characters each message
   // voices.
@@ -87,6 +87,36 @@ const MIGRATIONS: string[] = [
     position       INTEGER NOT NULL,
     PRIMARY KEY (message_id, character_name)
   );
+  `,
+
+  // ---------------------------------------------------------------- 2
+  // Stage 3: channel modes (literary/casual), scene breaks, and turns.
+  //
+  // ALTER TABLE ... ADD COLUMN adds a column to an existing table. Every
+  // existing row gets the DEFAULT value, so old data stays valid.
+  `
+  -- The mode of each channel's current scene, and a change waiting for the
+  -- next scene break (NULL when none is waiting).
+  ALTER TABLE channels ADD COLUMN mode TEXT NOT NULL DEFAULT 'literary'
+    CHECK (mode IN ('literary', 'casual'));
+  ALTER TABLE channels ADD COLUMN pending_mode TEXT
+    CHECK (pending_mode IN ('literary', 'casual'));
+
+  -- Scene breaks are rows in the messages table, so they stay in order with
+  -- the messages around them. For a scene break, content is its title.
+  ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'post'
+    CHECK (kind IN ('post', 'scene_break'));
+
+  -- The mode each message was written in (NULL outside RP channels).
+  ALTER TABLE messages ADD COLUMN mode TEXT
+    CHECK (mode IN ('literary', 'casual'));
+
+  -- Messages written together (one casual reply's bubbles) share a turn id.
+  ALTER TABLE messages ADD COLUMN turn_id TEXT;
+
+  -- Everything written in RP channels so far was literary.
+  UPDATE messages SET mode = 'literary'
+   WHERE channel_id IN (SELECT id FROM channels WHERE kind = 'rp');
   `,
 ];
 

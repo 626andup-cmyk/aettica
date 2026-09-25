@@ -15,7 +15,16 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { openDatabase } from "./db.ts";
 import { importLegacyChat } from "./legacy.ts";
-import type { Author, Channel, ChannelKind, Message, Settings } from "./types.ts";
+import type {
+  Author,
+  Channel,
+  ChannelKind,
+  ChannelMode,
+  Message,
+  MessageKind,
+  Settings,
+  UserCharacter,
+} from "./types.ts";
 
 /** Where the starting partner prompt and character sheet are kept. */
 const DEFAULTS_DIR = resolve(import.meta.dir, "..", "defaults");
@@ -58,6 +67,7 @@ export function defaultSettings(): Settings {
     temperature: 0.9,
     maxTokens: 1024,
     historyLimit: 40,
+    userCharacters: [],
   };
 }
 
@@ -118,14 +128,45 @@ export function validateSettings(input: unknown): Partial<Settings> {
   if (raw.historyLimit !== undefined) {
     clean.historyLimit = numberInRange(raw.historyLimit, "historyLimit", LIMITS.historyLimit, true);
   }
+  if (raw.userCharacters !== undefined) clean.userCharacters = userCharacters(raw.userCharacters);
 
   return clean;
+}
+
+/**
+ * Check your list of characters: each needs a name and a short prefix with
+ * no spaces or colons, and no two can share a prefix (or a prefix would be
+ * ambiguous).
+ */
+function userCharacters(value: unknown): UserCharacter[] {
+  if (!Array.isArray(value)) throw new ValidationError("userCharacters must be a list");
+  if (value.length > 50) throw new ValidationError("That's too many characters (50 at most)");
+  const seen = new Set<string>();
+  return value.map((item) => {
+    const raw = requireObject(item, "Each character");
+    const character = { name: name(raw.name, "Character name"), prefix: name(raw.prefix, "Prefix") };
+    if (/[\s:]/.test(character.prefix) || character.prefix.length > 20) {
+      throw new ValidationError(`The prefix "${character.prefix}" must be short, with no spaces or colons`);
+    }
+    const key = character.prefix.toLowerCase();
+    if (seen.has(key)) throw new ValidationError(`Two characters use the prefix "${character.prefix}"`);
+    seen.add(key);
+    return character;
+  });
+}
+
+/** Check a channel mode. */
+function mode(value: unknown): ChannelMode {
+  if (value !== "literary" && value !== "casual") throw new ValidationError('mode must be "literary" or "casual"');
+  return value;
 }
 
 /** The fields you give when creating a channel. */
 export interface NewChannel {
   name: string;
   kind: ChannelKind;
+  /** RP channels: the first scene's mode. Defaults to literary. */
+  mode?: ChannelMode;
   characterName?: string;
   characterSheet?: string;
 }
@@ -139,12 +180,16 @@ export function validateNewChannel(input: unknown): NewChannel {
   return {
     name: name(raw.name, "name"),
     kind: raw.kind,
+    ...(raw.mode !== undefined ? { mode: mode(raw.mode) } : {}),
     ...validateChannelUpdate({ characterName: raw.characterName, characterSheet: raw.characterSheet }),
   };
 }
 
-/** The channel fields that can be changed after creation. */
-export type ChannelUpdate = Partial<Pick<Channel, "name" | "characterName" | "characterSheet">>;
+/**
+ * The channel fields that can be changed after creation. `mode` is the mode
+ * you *ask* for; see `Store.updateChannel` for when it takes effect.
+ */
+export type ChannelUpdate = Partial<Pick<Channel, "name" | "characterName" | "characterSheet" | "mode">>;
 
 /** Check a partial channel update. The kind can't be changed, so it's ignored. */
 export function validateChannelUpdate(input: unknown): ChannelUpdate {
@@ -158,6 +203,7 @@ export function validateChannelUpdate(input: unknown): ChannelUpdate {
     clean.characterName = raw.characterName.trim();
   }
   if (raw.characterSheet !== undefined) clean.characterSheet = longText(raw.characterSheet, "characterSheet");
+  if (raw.mode !== undefined) clean.mode = mode(raw.mode);
   return clean;
 }
 
@@ -211,6 +257,8 @@ interface ChannelRow {
   id: string;
   name: string;
   kind: ChannelKind;
+  mode: ChannelMode;
+  pending_mode: ChannelMode | null;
   position: number;
   character_name: string;
   character_sheet: string;
@@ -220,6 +268,9 @@ interface ChannelRow {
 interface MessageRow {
   id: string;
   channel_id: string;
+  kind: MessageKind;
+  mode: ChannelMode | null;
+  turn_id: string | null;
   author: Author;
   content: string;
   created_at: string;
@@ -234,6 +285,8 @@ function toChannel(row: ChannelRow): Channel {
     id: row.id,
     name: row.name,
     kind: row.kind,
+    mode: row.mode,
+    pendingMode: row.pending_mode,
     position: row.position,
     characterName: row.character_name,
     characterSheet: row.character_sheet,
@@ -245,8 +298,11 @@ function toMessage(row: MessageRow): Message {
   return {
     id: row.id,
     channelId: row.channel_id,
+    kind: row.kind,
     author: row.author,
     content: row.content,
+    mode: row.mode,
+    turnId: row.turn_id,
     characters: JSON.parse(row.characters) as string[],
     createdAt: row.created_at,
     // Only include optional fields when they have a value.
@@ -262,7 +318,7 @@ function toMessage(row: MessageRow): Message {
  * everything about a message.
  */
 const SELECT_MESSAGES = `
-  SELECT m.id, m.channel_id, m.author, m.content, m.created_at, m.edited_at, m.model,
+  SELECT m.id, m.channel_id, m.kind, m.mode, m.turn_id, m.author, m.content, m.created_at, m.edited_at, m.model,
     (SELECT json_group_array(character_name)
        FROM (SELECT character_name FROM message_characters
               WHERE message_id = m.id ORDER BY position)) AS characters
@@ -277,6 +333,12 @@ export interface NewMessage {
   content: string;
   characters?: string[];
   model?: string;
+  /** Defaults to "post". Use `addSceneBreak` for scene breaks. */
+  kind?: MessageKind;
+  /** RP channels: the mode it was written in. Defaults to `null`. */
+  mode?: ChannelMode | null;
+  /** Shared by messages written together. Defaults to `null`. */
+  turnId?: string | null;
 }
 
 export class Store {
@@ -364,13 +426,14 @@ export class Store {
     const id = crypto.randomUUID();
     this.db
       .query(
-        `INSERT INTO channels (id, name, kind, position, character_name, character_sheet, created_at)
-         VALUES ($id, $name, $kind, $position, $characterName, $characterSheet, $createdAt)`,
+        `INSERT INTO channels (id, name, kind, mode, position, character_name, character_sheet, created_at)
+         VALUES ($id, $name, $kind, $mode, $position, $characterName, $characterSheet, $createdAt)`,
       )
       .run({
         id,
         name: input.name,
         kind: input.kind,
+        mode: input.mode ?? "literary",
         position: next,
         // OOC channels have no character.
         characterName: input.kind === "rp" ? (input.characterName ?? "") : "",
@@ -380,22 +443,66 @@ export class Store {
     return this.getChannel(id);
   }
 
-  /** Change a channel's name or character. Returns the updated channel. */
+  /**
+   * Change a channel's name, character or mode. Returns the updated channel.
+   *
+   * A mode change follows the design's rule that a scene never mixes
+   * styles:
+   *
+   *   - If the current scene has no messages yet (a new channel, or just
+   *     after a scene break), the new mode applies right away.
+   *   - Otherwise it's saved as `pendingMode` and applies at the next scene
+   *     break (`addSceneBreak`). Asking for the current mode again cancels
+   *     a pending change.
+   */
   updateChannel(id: string, update: ChannelUpdate): Channel {
     const channel = this.getChannel(id); // throws if missing
+    const { mode: requestedMode, ...rest } = update;
+    const merged = { ...channel, ...rest };
     // Character fields only mean something for RP channels.
-    const merged = { ...channel, ...update };
     if (channel.kind === "ooc") {
       merged.characterName = "";
       merged.characterSheet = "";
     }
+    if (requestedMode !== undefined && channel.kind === "rp") {
+      if (this.currentSceneIsEmpty(id)) {
+        merged.mode = requestedMode;
+        merged.pendingMode = null;
+      } else {
+        merged.pendingMode = requestedMode === channel.mode ? null : requestedMode;
+      }
+    }
     this.db
       .query(
-        `UPDATE channels SET name = $name, character_name = $characterName, character_sheet = $characterSheet
+        `UPDATE channels SET name = $name, character_name = $characterName, character_sheet = $characterSheet,
+                mode = $mode, pending_mode = $pendingMode
          WHERE id = $id`,
       )
-      .run({ id, name: merged.name, characterName: merged.characterName, characterSheet: merged.characterSheet });
+      .run({
+        id,
+        name: merged.name,
+        characterName: merged.characterName,
+        characterSheet: merged.characterSheet,
+        mode: merged.mode,
+        pendingMode: merged.pendingMode,
+      });
     return this.getChannel(id);
+  }
+
+  /**
+   * Whether the channel's current scene has no messages yet: nothing after
+   * its latest scene break, or nothing at all if it has none.
+   */
+  currentSceneIsEmpty(channelId: string): boolean {
+    const { count } = this.db
+      .query(
+        `SELECT COUNT(*) AS count FROM messages
+          WHERE channel_id = $channelId AND kind = 'post'
+            AND seq > COALESCE(
+              (SELECT MAX(seq) FROM messages WHERE channel_id = $channelId AND kind = 'scene_break'), 0)`,
+      )
+      .get({ channelId }) as { count: number };
+    return count === 0;
   }
 
   /**
@@ -461,8 +568,8 @@ export class Store {
   addMessage(input: NewMessage & { id?: string; createdAt?: string; editedAt?: string }): Message {
     const id = input.id ?? crypto.randomUUID();
     const insertMessage = this.db.query(
-      `INSERT INTO messages (id, channel_id, author, content, created_at, edited_at, model)
-       VALUES ($id, $channelId, $author, $content, $createdAt, $editedAt, $model)`,
+      `INSERT INTO messages (id, channel_id, kind, mode, turn_id, author, content, created_at, edited_at, model)
+       VALUES ($id, $channelId, $kind, $mode, $turnId, $author, $content, $createdAt, $editedAt, $model)`,
     );
     const insertCharacter = this.db.query(
       "INSERT OR IGNORE INTO message_characters (message_id, character_name, position) VALUES ($id, $name, $position)",
@@ -473,6 +580,9 @@ export class Store {
       insertMessage.run({
         id,
         channelId: input.channelId,
+        kind: input.kind ?? "post",
+        mode: input.mode ?? null,
+        turnId: input.turnId ?? null,
         author: input.author,
         content: input.content,
         createdAt: input.createdAt ?? new Date().toISOString(),
@@ -483,6 +593,54 @@ export class Store {
     })();
 
     return this.getMessage(id);
+  }
+
+  /**
+   * Add several messages at once, all or nothing, sharing a new turn id.
+   * Used for a casual reply's bubbles, or several lines you sent together.
+   */
+  addTurn(messages: Omit<NewMessage, "turnId">[]): Message[] {
+    const turnId = crypto.randomUUID();
+    return this.db.transaction(() => messages.map((m) => this.addMessage({ ...m, turnId })))();
+  }
+
+  /**
+   * Put a scene break at the end of a channel.
+   *
+   * If a mode change is waiting (`pendingMode`), this is where it takes
+   * effect: the new scene starts in the new mode. Both happen in one
+   * transaction.
+   *
+   * @returns The scene break, and the channel as it is afterwards.
+   */
+  addSceneBreak(channelId: string, author: Author, title: string): { sceneBreak: Message; channel: Channel } {
+    const channel = this.getChannel(channelId); // throws if missing
+    if (channel.kind !== "rp") throw new ValidationError("Scene breaks are only for roleplay channels.");
+
+    return this.db.transaction(() => {
+      const sceneBreak = this.addMessage({ channelId, author, content: title.trim(), kind: "scene_break" });
+      if (channel.pendingMode) {
+        this.db
+          .query("UPDATE channels SET mode = pending_mode, pending_mode = NULL WHERE id = $channelId")
+          .run({ channelId });
+      }
+      return { sceneBreak, channel: this.getChannel(channelId) };
+    })();
+  }
+
+  /**
+   * The partner's most recent turn in a channel: every message of it (one
+   * for a literary post, several bubbles for a casual reply), oldest first.
+   * Empty if the channel doesn't end on a partner post.
+   */
+  lastPartnerTurn(channelId: string): Message[] {
+    const last = this.lastMessage(channelId);
+    if (!last || last.kind !== "post" || last.author !== "partner") return [];
+    if (!last.turnId) return [last];
+    const rows = this.db
+      .query(`${SELECT_MESSAGES} WHERE m.channel_id = $channelId AND m.turn_id = $turnId ORDER BY m.seq`)
+      .all({ channelId, turnId: last.turnId }) as MessageRow[];
+    return rows.map(toMessage);
   }
 
   /** Replace a message's text. Throws `NotFoundError` if it doesn't exist. */

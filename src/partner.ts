@@ -19,6 +19,7 @@
 
 import type { ApiOptions } from "./nanogpt.ts";
 import { CancelledError, createChatCompletion } from "./nanogpt.ts";
+import { replyToMessages } from "./posts.ts";
 import { buildPromptStack } from "./prompt.ts";
 import type { Store } from "./store.ts";
 import type { ChatMessage, Message } from "./types.ts";
@@ -32,12 +33,12 @@ export type TurnTrigger = "user-message" | "continue" | "regenerate";
 /** Extra options for a turn. */
 export interface TurnOptions {
   /**
-   * Id of an existing partner message this turn replaces (a regeneration).
-   * That message is left out of the prompt, as if it had never been written,
-   * and is deleted only once the new reply has been saved. If generation
-   * fails, the old message stays.
+   * Ids of existing partner messages this turn replaces (a regeneration:
+   * one literary post, or every bubble of a casual reply). They're left out
+   * of the prompt, as if never written, and deleted only once the new reply
+   * has been saved. If generation fails, they stay.
    */
-  replacing?: string;
+  replacing?: string[];
 }
 
 /** Thrown when a turn is requested in a channel where one is still being written. */
@@ -54,14 +55,15 @@ export class BusyError extends Error {
  * Used by the turn itself and by the "Preview prompt" button, so the preview
  * is always exactly what a turn would send.
  *
- * @param excludeId  A message to leave out (the one being regenerated).
+ * @param excludeIds  Messages to leave out (the ones being regenerated).
  */
-export function promptForChannel(store: Store, channelId: string, excludeId?: string): ChatMessage[] {
+export function promptForChannel(store: Store, channelId: string, excludeIds: string[] = []): ChatMessage[] {
+  const excluded = new Set(excludeIds);
   return buildPromptStack({
     settings: store.getSettings(),
     channel: store.getChannel(channelId),
     channels: store.listChannels(),
-    messages: store.getMessages(channelId).filter((m) => m.id !== excludeId),
+    messages: store.getMessages(channelId).filter((m) => !excluded.has(m.id)),
   });
 }
 
@@ -119,7 +121,8 @@ export class Partner {
    * @param channelId  Where to write.
    * @param trigger    Why the turn is happening (for logging).
    * @param options    See `TurnOptions`.
-   * @returns          The partner's new message, as saved.
+   * @returns          The partner's new message(s), as saved: one, or
+   *                   several bubbles in a casual scene.
    * @throws NotFoundError if the channel doesn't exist.
    * @throws BusyError     if a turn is already running in that channel.
    * @throws CancelledError if the turn was stopped with `cancel`.
@@ -127,7 +130,7 @@ export class Partner {
    *                       In both of those cases nothing is saved, so the
    *                       channel is unchanged.
    */
-  async takeTurn(channelId: string, trigger: TurnTrigger, options: TurnOptions = {}): Promise<Message> {
+  async takeTurn(channelId: string, trigger: TurnTrigger, options: TurnOptions = {}): Promise<Message[]> {
     if (this.writingIn.has(channelId)) throw new BusyError();
     const channel = this.store.getChannel(channelId); // throws if missing
 
@@ -155,22 +158,18 @@ export class Partner {
       const seconds = ((Date.now() - started) / 1000).toFixed(1);
       console.log(`[partner] turn finished in ${seconds}s (finish reason: ${result.finishReason ?? "unknown"})`);
 
-      if (options.replacing) this.store.deleteMessage(options.replacing);
-
       // Re-read the channel: its character may have been renamed while the
-      // model was writing, and the message should carry the current name.
+      // model was writing, and the messages should carry the current name.
       const current = this.store.getChannel(channelId);
-      return this.store.addMessage({
-        channelId,
-        author: "partner",
-        content: result.content,
-        // In an RP channel the partner voices the channel's character. In
-        // OOC they speak as themselves, so no character.
-        characters: current.kind === "rp" && current.characterName ? [current.characterName] : [],
-        // Record the model we *asked* for rather than the one the API reports,
-        // because that's the id you'd put back in settings to get it again.
-        model: settings.model,
-      });
+      // Record the model we *asked* for rather than the one the API reports,
+      // because that's the id you'd put back in settings to get it again.
+      const newMessages = replyToMessages(current, result.content, settings.model);
+
+      // Swap old for new in one transaction: never both, never neither.
+      return this.store.db.transaction(() => {
+        for (const id of options.replacing ?? []) this.store.deleteMessage(id);
+        return this.store.addTurn(newMessages);
+      })();
     } finally {
       // Always release the lock, even if generation failed. Otherwise one
       // network error would leave the channel "busy" forever. (Only if it's

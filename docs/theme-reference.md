@@ -18,6 +18,8 @@ All are defined in the `:root` block of `public/style.css`.
 | `--font-heading` | Server name, channel title, dialog titles |
 | `--font-mono` | Prompt preview |
 | `--font-size`, `--line-height` | Base text size and spacing |
+| `--font-prose`, `--prose-size`, `--prose-line-height` | Literary posts |
+| `--prose-max-width` | How wide a literary post's lines can get |
 
 ### Text and accents
 
@@ -31,6 +33,9 @@ All are defined in the `:root` block of `public/style.css`.
 | `--update-bg` | The "Aettica has been updated" banner |
 | `--user-color`, `--partner-color` | Author name colours |
 | `--avatar-user-bg`, `--avatar-partner-bg`, `--avatar-text` | Avatar circles |
+| `--avatar-saturation`, `--avatar-lightness` | Character avatars. Each character's hue comes from their name (`--avatar-hue`, set by the app); these set the rest of the colour. |
+| `--name-saturation`, `--name-lightness` | Character names, in the same hue as their avatar |
+| `--scene-break-line`, `--scene-break-text`, `--scene-break-font` | Scene break dividers |
 
 ### Shape
 
@@ -80,9 +85,11 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.channel-view` | The open channel. Has `data-channel-id` and `data-channel-kind`. |
 | `.channel-header`, `.channel-title`, `.channel-topic` | The bar at the top of the channel |
 | `.messages` | The scrolling message list |
-| `.message` | One message. Has `data-author="user"` or `"partner"`, and `.pending` while being sent. |
+| `.message` | One message. Has `data-author="user"` or `"partner"`, and `data-mode="literary"`, `"casual"` or `"ooc"`. Also `.pending` while being sent, `.continued` when grouped under the message before it, `.has-character` when it voices a character (with `--avatar-hue` set on it), and `.selected` when a casual bubble is tapped. |
+| `.scene-break`, `.scene-break-title`, `.scene-break-actions` | Scene break dividers. The lines either side are `.scene-break::before` and `::after`. |
 | `.avatar`, `.message-meta`, `.message-author`, `.message-badge`, `.message-time`, `.message-model`, `.message-content`, `.message-actions` | Parts of a message |
 | `.composer`, `.composer-input`, `.composer-buttons`, `.status`, `.typing-dots`, `.stop-button`, `.error-banner` | The composer area |
+| `.posting-as-row`, `.posting-as`, `.scene-button` | "Posting as" in casual scenes, and the ⁂ new scene button |
 | `.update-banner` | "Aettica has been updated", at the top of the channel |
 | `.button`, `.button-primary`, `.button-danger`, `.icon-button`, `.link-button` | Buttons |
 | `.dialog`, `.dialog-title`, `.dialog-buttons`, `.hint`, `.form-error` | Dialogs and their parts |

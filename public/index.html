@@ -61,6 +61,13 @@
       <symbol id="icon-plus" viewBox="0 0 24 24">
         <path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z" />
       </symbol>
+      <symbol id="icon-scene" viewBox="0 0 24 24">
+        <!-- Three stars: a scene break (an asterism, ⁂). -->
+        <path
+          fill="currentColor"
+          d="M12 3.5l1.2 2.5 2.7.3-2 1.9.5 2.7L12 9.6l-2.4 1.3.5-2.7-2-1.9 2.7-.3L12 3.5Zm-5 9l1.2 2.5 2.7.3-2 1.9.5 2.7L7 18.6l-2.4 1.3.5-2.7-2-1.9 2.7-.3L7 12.5Zm10 0l1.2 2.5 2.7.3-2 1.9.5 2.7-2.4-1.3-2.4 1.3.5-2.7-2-1.9 2.7-.3 1.2-2.5Z"
+        />
+      </symbol>
       <symbol id="icon-menu" viewBox="0 0 24 24">
         <path fill="currentColor" d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z" />
       </symbol>
@@ -149,8 +156,18 @@
           </div>
 
           <form id="composer-form" class="composer-row">
+            <!-- Casual scenes only: which of your characters you're posting as. -->
+            <label class="posting-as-row" id="posting-as-row" hidden>
+              Posting as
+              <select id="posting-as" class="posting-as"></select>
+            </label>
             <textarea id="composer-input" class="composer-input" rows="1" aria-label="Your message"></textarea>
             <div class="composer-buttons">
+              <!-- Roleplay channels only: end this scene and start a new one. -->
+              <button id="scene-button" type="button" class="icon-button scene-button" title="New scene" aria-label="New scene">
+                <svg width="22" height="22" aria-hidden="true"><use href="#icon-scene" /></svg>
+              </button>
+              <span class="spacer"></span>
               <button id="turn-button" type="button" class="button" title="Let your partner write without a new message from you">
                 Partner's turn
               </button>
@@ -175,6 +192,13 @@
         <label for="setting-partner">Partner prompt</label>
         <p class="hint">Who your partner is as a writer: their name, voice and style. Used in every channel.</p>
         <textarea id="setting-partner" name="partnerPrompt" rows="8"></textarea>
+
+        <label for="setting-characters">Your characters</label>
+        <p class="hint">
+          For casual scenes. One per line, as <code>prefix: Name</code>, e.g. <code>k: Kestrel</code>. Then start a
+          line with <code>k:</code> to post it as Kestrel.
+        </p>
+        <textarea id="setting-characters" name="userCharacters" rows="3" spellcheck="false"></textarea>
 
         <label for="setting-model">Model</label>
         <div class="inline">
@@ -220,6 +244,23 @@
 
         <!-- Only shown for RP channels. -->
         <div class="rp-only">
+          <fieldset class="kind-picker mode-picker">
+            <legend>Style</legend>
+            <label class="kind-option">
+              <input type="radio" name="mode" value="literary" />
+              <span><strong>Literary</strong><br /><span class="hint">Prose posts that take their time.</span></span>
+            </label>
+            <label class="kind-option">
+              <input type="radio" name="mode" value="casual" />
+              <span
+                ><strong>Casual</strong><br /><span class="hint"
+                  >Short in-character messages, one character per bubble.</span
+                ></span
+              >
+            </label>
+          </fieldset>
+          <p class="hint" id="channel-mode-note"></p>
+
           <label for="channel-setting-character-name">Character name</label>
           <p class="hint">The character your partner plays here. Shown as the author of their posts.</p>
           <input id="channel-setting-character-name" name="characterName" autocomplete="off" />
@@ -274,6 +315,12 @@
         <input id="new-channel-name" name="name" autocomplete="off" placeholder="e.g. lighthouse" />
 
         <div class="rp-only">
+          <label for="new-channel-mode">Style</label>
+          <select id="new-channel-mode" name="mode">
+            <option value="literary">Literary: prose posts</option>
+            <option value="casual">Casual: short chat bubbles</option>
+          </select>
+
           <label for="new-channel-character-name">Character name</label>
           <input id="new-channel-character-name" name="characterName" autocomplete="off" />
           <label for="new-channel-sheet">Character sheet</label>

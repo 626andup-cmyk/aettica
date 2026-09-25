@@ -24,6 +24,8 @@
  *
  *   GET    /api/channels/:id/messages          Every message in a channel
  *   POST   /api/channels/:id/messages          Send your message, then the partner replies
+ *                                              (or add a scene break, if the message is `=====`)
+ *   POST   /api/channels/:id/scene-breaks      Add a scene break
  *   DELETE /api/channels/:id/messages          Delete every message in a channel
  *   POST   /api/channels/:id/turn              Partner takes a turn without a new message from you
  *   POST   /api/channels/:id/regenerate        Replace the partner's last reply with a new one
@@ -41,6 +43,7 @@ import { join, normalize, sep } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
 import { ApiError, CancelledError, listModels, type ApiOptions } from "./nanogpt.ts";
 import { BusyError, Partner, promptForChannel } from "./partner.ts";
+import { parseSceneBreak, postToMessages } from "./posts.ts";
 import {
   NotFoundError,
   Store,
@@ -225,16 +228,28 @@ export function createApp(config: Config): App {
       method: "POST",
       pattern: "/api/channels/:id/messages",
       handler: async (request, { id }) => {
-        const content = requireText(await readJson(request), "content");
-        store.getChannel(id!); // 404 for an unknown channel
+        const body = await readJson(request);
+        const content = requireText(body, "content");
+        const channel = store.getChannel(id!); // 404 for an unknown channel
         // Refuse *before* saving, so a message sent while the partner is busy
         // isn't saved without a reply attached.
         ensureIdle(id!);
-        const userMessage = store.addMessage({ channelId: id!, author: "user", content });
+
+        // `=====` (with an optional title) in an RP channel is a scene break,
+        // not a post, and the partner doesn't reply to it.
+        const sceneTitle = channel.kind === "rp" ? parseSceneBreak(content) : null;
+        if (sceneTitle !== null) return json(store.addSceneBreak(id!, "user", sceneTitle));
+
+        const settings = store.getSettings();
+        const postingAs = readPostingAs(body, settings.userCharacters);
+        const messages = postToMessages(channel, content, settings.userCharacters, postingAs);
+        if (messages.length === 0) throw new HttpError(400, "There's nothing to send after the character tags.");
+        const userMessages = store.addTurn(messages);
+
         // The reply is attempted separately: if it fails, your message is still
         // saved and the app offers to retry with a partner turn.
         const reply = await tryTurn(() => partner.takeTurn(id!, "user-message"));
-        return json({ userMessage, ...reply });
+        return json({ userMessages, ...reply });
       },
     },
     {
@@ -249,21 +264,37 @@ export function createApp(config: Config): App {
     {
       method: "POST",
       pattern: "/api/channels/:id/turn",
-      handler: async (_request, { id }) => json({ partnerMessage: await partner.takeTurn(id!, "continue") }),
+      handler: async (_request, { id }) => json({ partnerMessages: await partner.takeTurn(id!, "continue") }),
+    },
+    {
+      method: "POST",
+      pattern: "/api/channels/:id/scene-breaks",
+      handler: async (request, { id }) => {
+        const body = (await readJson(request)) as { title?: unknown } | null;
+        const title = body?.title ?? "";
+        if (typeof title !== "string" || title.length > 200) {
+          throw new HttpError(400, '"title" must be text of 200 characters at most.');
+        }
+        // Waits for a turn in progress, so the break can't land in the middle
+        // of a reply.
+        ensureIdle(id!);
+        return json(store.addSceneBreak(id!, "user", title));
+      },
     },
     {
       method: "POST",
       pattern: "/api/channels/:id/regenerate",
       handler: async (_request, { id }) => {
         ensureIdle(id!);
-        const last = store.lastMessage(id!);
-        if (!last || last.author !== "partner") {
+        // The whole last reply: one post, or every bubble of a casual reply.
+        const replacedIds = store.lastPartnerTurn(id!).map((m) => m.id);
+        if (replacedIds.length === 0) {
           throw new HttpError(400, "The last message isn't from your partner, so there's nothing to regenerate.");
         }
         // Generate first, and only delete the old reply once the new one exists.
         // If generation fails you keep the reply you had.
-        const message = await partner.takeTurn(id!, "regenerate", { replacing: last.id });
-        return json({ partnerMessage: message, replacedId: last.id });
+        const partnerMessages = await partner.takeTurn(id!, "regenerate", { replacing: replacedIds });
+        return json({ partnerMessages, replacedIds });
       },
     },
     {
@@ -287,8 +318,16 @@ export function createApp(config: Config): App {
       method: "PATCH",
       pattern: "/api/messages/:id",
       handler: async (request, { id }) => {
-        const content = requireText(await readJson(request), "content");
-        return json({ message: store.editMessage(id!, content) });
+        const body = await readJson(request);
+        // A scene break's "content" is its title, which may be empty.
+        if (store.getMessage(id!).kind === "scene_break") {
+          const title = (body as { content?: unknown } | null)?.content;
+          if (typeof title !== "string" || title.length > 200) {
+            throw new HttpError(400, '"content" must be text of 200 characters at most.');
+          }
+          return json({ message: store.editMessage(id!, title.trim()) });
+        }
+        return json({ message: store.editMessage(id!, requireText(body, "content")) });
       },
     },
     {
@@ -346,9 +385,9 @@ export function createApp(config: Config): App {
  */
 async function tryTurn(
   turn: () => Promise<unknown>,
-): Promise<{ partnerMessage?: unknown; error?: string; cancelled?: true }> {
+): Promise<{ partnerMessages?: unknown; error?: string; cancelled?: true }> {
   try {
-    return { partnerMessage: await turn() };
+    return { partnerMessages: await turn() };
   } catch (error) {
     if (error instanceof CancelledError) return { cancelled: true };
     if (error instanceof ApiError || error instanceof BusyError) return { error: error.message };
@@ -384,6 +423,19 @@ async function readJson(request: Request): Promise<unknown> {
   } catch {
     throw new HttpError(400, "The request body isn't valid JSON.");
   }
+}
+
+/**
+ * Read the optional `postingAs` field of a message: the name of one of your
+ * characters (for casual scenes), or nothing to post as yourself.
+ */
+function readPostingAs(body: unknown, characters: { name: string }[]): string | null {
+  const value = (body as Record<string, unknown> | null)?.postingAs;
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || !characters.some((c) => c.name === value)) {
+    throw new HttpError(400, `"postingAs" must be one of your characters.`);
+  }
+  return value;
 }
 
 /** Read a required, non-empty text field from a JSON body. */
