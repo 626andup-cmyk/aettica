@@ -1,0 +1,10 @@
+<!--
+  Aettica's app icon: a quill over a speech bubble, on the accent colour.
+  The artwork stays inside the central 80% so it survives being cropped to a
+  circle or squircle by the phone's launcher ("maskable" in the manifest).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#8b7cf6"/>
+  <path fill="#fff" d="M136 150h240a32 32 0 0 1 32 32v130a32 32 0 0 1-32 32H232l-66 52v-52h-30a32 32 0 0 1-32-32V182a32 32 0 0 1 32-32Z" opacity=".95"/>
+  <path fill="#8b7cf6" d="M318 176c-52 10-96 52-114 112l-10 34 22-24c8-9 20-14 32-14 40 0 70-30 76-72l-24 8 26-22c-2-8-4-15-8-22Z"/>
+</svg>

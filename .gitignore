@@ -1,0 +1,9 @@
+# Dependencies (reinstall with `bun install`)
+node_modules/
+
+# Your chat, settings and anything else the server saves. This is personal
+# data, so it never goes into git.
+data/
+
+# Secrets: your nanoGPT API key lives here.
+.env

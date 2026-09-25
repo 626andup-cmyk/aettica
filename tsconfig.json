@@ -1,0 +1,19 @@
+{
+  // TypeScript settings. Bun runs .ts files directly, so this file only matters
+  // for editors and for `bun run typecheck`, which checks types without
+  // producing any output files.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext"],
+    "types": ["bun"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "test"]
+}
