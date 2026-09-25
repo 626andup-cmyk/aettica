@@ -1,26 +1,117 @@
 /*
  * Aettica's styles.
  *
- * The look borrows from Discord: a dark background, a channel name at the
- * top, and messages with an avatar, a name and a timestamp. All colours are
- * defined once as variables here, so changing the theme means changing
- * this block.
+ * The default look borrows from Discord: dark panels, a channel sidebar, and
+ * messages with an avatar, a name and a timestamp.
+ *
+ * THEME-READY
+ * -----------
+ * Every visual choice is a variable ("token") in the :root block below. The
+ * rules further down only ever use var(--token), never a raw colour, blur or
+ * shadow. A theme (stage 3.5) mostly just redefines tokens. For example, a
+ * glassy theme might set:
+ *
+ *   --sidebar-bg: rgb(255 255 255 / 0.25);
+ *   --sidebar-backdrop: blur(18px) saturate(1.4);
+ *   --app-background: url("sky.jpg") center / cover;
+ *
+ * For anything tokens can't express, themes can target the class names used
+ * here. Elements with the `surface` class never use ::before or ::after in
+ * this file; those are left free for themes to add highlights and glows.
+ *
+ * The full list of tokens and classes is in docs/theme-reference.md.
  */
 
+/* ================================================================ tokens */
+
 :root {
-  --bg: #313338; /* main background */
-  --bg-dark: #1e1f22; /* header, composer */
-  --bg-input: #383a40; /* text boxes */
-  --bg-hover: #2e3035; /* message under your finger/mouse */
+  color-scheme: dark;
+
+  /* Type */
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: var(--font-body);
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-size: 16px;
+  --line-height: 1.5;
+
+  /* Text */
   --text: #dbdee1;
   --text-muted: #949ba4;
-  --accent: #8b7cf6; /* buttons, links, the partner's name */
-  --accent-strong: #7a6ae8;
-  --user: #5fb3a1; /* your name */
+  --text-strong: #f2f3f5;
+  --em-color: #c9cdfb; /* *italic* text, i.e. RP actions */
+
+  /* Accent colours */
+  --accent: #8b7cf6;
+  --accent-hover: #7a6ae8;
+  --accent-text: #ffffff; /* text on top of the accent colour */
   --danger: #da373c;
-  --radius: 8px;
-  color-scheme: dark;
+  --danger-text: #ffffff;
+  --error-bg: #4a2426;
+  --error-text: #f38b8f;
+
+  /* Who's who */
+  --user-color: #5fb3a1;
+  --partner-color: var(--accent);
+  --avatar-user-bg: var(--user-color);
+  --avatar-partner-bg: var(--partner-color);
+  --avatar-text: #ffffff;
+
+  /* Shape */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-avatar: 50%;
+
+  /* The whole app's backdrop. Can be a colour, gradient or image. */
+  --app-background: #313338;
+
+  /* Sidebar */
+  --sidebar-width: 248px;
+  --sidebar-bg: #2b2d31;
+  --sidebar-border: none;
+  --sidebar-shadow: none;
+  --sidebar-backdrop: none; /* backdrop-filter, e.g. blur(16px) for glass */
+  --sidebar-footer-bg: #232428;
+  --channel-link-color: var(--text-muted);
+  --channel-link-hover-bg: #35373c;
+  --channel-link-active-bg: #404249;
+  --channel-link-active-color: var(--text-strong);
+
+  /* Channel view */
+  --channel-background: transparent; /* on top of --app-background */
+  --header-bg: #313338;
+  --header-border: 1px solid #1f2023;
+  --header-shadow: none;
+  --header-backdrop: none;
+  --message-hover-bg: #2e3035;
+  --composer-bg: #313338;
+  --composer-border: none;
+  --composer-backdrop: none;
+
+  /* Controls */
+  --input-bg: #383a40;
+  --input-border: 1px solid transparent;
+  --input-focus-border: 1px solid var(--accent);
+  --button-bg: #4e5058;
+  --button-hover-bg: #6d6f78;
+  --button-text: var(--text-strong);
+  --button-border: none;
+  --button-shadow: none;
+  --button-primary-bg: var(--accent);
+  --button-primary-hover-bg: var(--accent-hover);
+  --button-primary-text: var(--accent-text);
+  --icon-button-hover-bg: #3a3c42;
+
+  /* Dialogs */
+  --dialog-bg: #313338;
+  --dialog-border: none;
+  --dialog-shadow: 0 8px 32px rgb(0 0 0 / 0.5);
+  --dialog-backdrop: none;
+  --scrim: rgb(0 0 0 / 0.6);
+  --code-bg: #1e1f22;
 }
+
+/* ================================================================= base */
 
 * {
   box-sizing: border-box;
@@ -32,13 +123,10 @@ body {
   margin: 0;
 }
 
-/* The page is a column: header, scrolling message list, composer. */
 body {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
+  background: var(--app-background);
   color: var(--text);
-  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: var(--font-size) / var(--line-height) var(--font-body);
   /* Keep content clear of phone notches and the home bar. */
   padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
 }
@@ -50,32 +138,258 @@ textarea {
   color: inherit;
 }
 
-/* ------------------------------------------------------------- header */
+/* The `hidden` attribute must win over any display rule below. */
+[hidden] {
+  display: none !important;
+}
 
-.topbar {
+/* ============================================================== layout */
+
+/* Sidebar on the left, channel view filling the rest. */
+.app {
+  display: flex;
+  height: 100%;
+}
+
+/*
+ * Every .surface is "positioned" (relative, fixed, or a modal dialog), so a
+ * theme's ::before/::after layers can be placed inside it with
+ * position: absolute without the theme changing layout. `isolation: isolate`
+ * makes each surface its own layer stack, so a theme layer with
+ * z-index: -1 sits above the surface's background but below its content.
+ */
+.surface {
+  isolation: isolate;
+}
+
+.sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  border-right: var(--sidebar-border);
+  box-shadow: var(--sidebar-shadow);
+  backdrop-filter: var(--sidebar-backdrop);
+}
+
+.channel-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0; /* lets long words wrap instead of widening the page */
+  background: var(--channel-background);
+}
+
+/* Only phones need these. (.icon-button.menu-button is specific enough to
+   beat the .icon-button rule further down.) */
+.icon-button.menu-button,
+.sidebar-scrim {
+  display: none;
+}
+
+/*
+ * Phones: the sidebar slides in over the channel when you tap the menu
+ * button, with a dark scrim behind it. app.js toggles `sidebar-open`.
+ */
+@media (max-width: 799px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: min(var(--sidebar-width), 85vw);
+    padding-top: env(safe-area-inset-top);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+
+  .app.sidebar-open .sidebar {
+    transform: none;
+  }
+
+  .app.sidebar-open .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: var(--scrim);
+  }
+
+  .icon-button.menu-button {
+    display: grid;
+  }
+}
+
+/* ============================================================= sidebar */
+
+.sidebar-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  background: var(--bg-dark);
-  border-bottom: 1px solid #111214;
+  padding: 12px 12px 12px 16px;
 }
 
-.channel-name {
+.server-name {
   flex: 1;
   margin: 0;
-  font-size: 17px;
-  font-weight: 600;
+  font: 700 17px var(--font-heading);
+  color: var(--text-strong);
 }
 
-.hash {
+.channel-list {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0 8px;
+  list-style: none;
+}
+
+.channel-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 2px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--channel-link-color);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.channel-link:hover {
+  background: var(--channel-link-hover-bg);
+  color: var(--text);
+}
+
+.channel-link[aria-current="page"] {
+  background: var(--channel-link-active-bg);
+  color: var(--channel-link-active-color);
+}
+
+.channel-link-name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.channel-icon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+/* A small pulsing dot on channels where the partner is writing. */
+.channel-busy {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom)) 8px;
+  background: var(--sidebar-footer-bg);
+}
+
+.partner-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.partner-card .avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+}
+
+.partner-card-name {
+  font-weight: 600;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partner-card-role {
+  font-size: 12px;
   color: var(--text-muted);
-  margin-right: 4px;
+}
+
+/* ======================================================= channel header */
+
+.channel-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 6px 8px 6px 16px;
+  background: var(--header-bg);
+  border-bottom: var(--header-border);
+  box-shadow: var(--header-shadow);
+  backdrop-filter: var(--header-backdrop);
+}
+
+@media (max-width: 799px) {
+  .channel-header {
+    padding-left: 4px;
+  }
+}
+
+.channel-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  font: 600 17px var(--font-heading);
+  color: var(--text-strong);
+}
+
+.channel-title #channel-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-topic {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 8px;
+  border-left: 1px solid var(--text-muted);
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.channel-topic:empty {
+  border: 0;
 }
 
 .icon-button {
   display: grid;
   place-items: center;
+  flex-shrink: 0;
   width: 40px;
   height: 40px;
   border: 0;
@@ -87,10 +401,10 @@ textarea {
 
 .icon-button:hover {
   color: var(--text);
-  background: var(--bg-hover);
+  background: var(--icon-button-hover-bg);
 }
 
-/* ----------------------------------------------------------- messages */
+/* ============================================================ messages */
 
 .messages {
   flex: 1;
@@ -115,71 +429,87 @@ textarea {
 
 .message:hover,
 .message:focus-within {
-  background: var(--bg-hover);
+  background: var(--message-hover-bg);
 }
 
 .avatar {
-  grid-row: span 3;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
   display: grid;
   place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-avatar);
   font-weight: 700;
-  color: #fff;
+  color: var(--avatar-text);
+  background: var(--avatar-partner-bg);
 }
 
-.message.user .avatar {
-  background: var(--user);
+.message .avatar {
+  grid-row: span 3;
 }
 
-.message.partner .avatar {
-  background: var(--accent);
+.message[data-author="user"] .avatar {
+  background: var(--avatar-user-bg);
 }
 
-.meta {
+.message-meta {
   display: flex;
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.author {
+.message-author {
   font-weight: 600;
+  color: var(--partner-color);
 }
 
-.message.user .author {
-  color: var(--user);
+.message[data-author="user"] .message-author {
+  color: var(--user-color);
 }
 
-.message.partner .author {
-  color: var(--accent);
+/* "Arlo" next to a character name: who's writing that character. */
+.message-badge {
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--channel-link-active-bg);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
-.time,
-.model {
+.message-time,
+.message-model {
   font-size: 12px;
   color: var(--text-muted);
 }
 
 /* pre-wrap keeps the line breaks and blank lines the writer typed. */
-.content {
+.message-content {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.content em {
-  color: #c9cdfb;
+.message-content em {
+  color: var(--em-color);
+}
+
+.message-content strong {
+  color: var(--text-strong);
+}
+
+/* A post that's still being sent. */
+.message.pending {
+  opacity: 0.6;
 }
 
 /* Edit / delete / regenerate. Always visible (phones have no hover), but quiet. */
-.actions {
+.message-actions {
   display: flex;
   gap: 12px;
   margin-top: 2px;
 }
 
-.actions button,
+.message-actions button,
 .link-button {
   padding: 2px 0;
   border: 0;
@@ -189,7 +519,7 @@ textarea {
   cursor: pointer;
 }
 
-.actions button:hover,
+.message-actions button:hover,
 .link-button:hover {
   color: var(--text);
   text-decoration: underline;
@@ -201,11 +531,14 @@ textarea {
   margin-top: 4px;
 }
 
-/* ----------------------------------------------------------- composer */
+/* ============================================================ composer */
 
 .composer {
-  background: var(--bg);
+  position: relative;
   padding: 8px 16px calc(12px + env(safe-area-inset-bottom));
+  background: var(--composer-bg);
+  border-top: var(--composer-border);
+  backdrop-filter: var(--composer-backdrop);
 }
 
 .composer-row {
@@ -220,61 +553,9 @@ textarea {
   gap: 8px;
 }
 
-textarea,
-input {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  background: var(--bg-input);
-}
-
-textarea:focus,
-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-#composer-input {
+.composer-input {
   resize: none;
   max-height: 40vh; /* app.js grows the box as you type, up to this height */
-}
-
-.primary,
-.secondary,
-.danger {
-  padding: 8px 16px;
-  border: 0;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.primary {
-  background: var(--accent);
-  color: #fff;
-}
-
-.primary:hover {
-  background: var(--accent-strong);
-}
-
-.secondary {
-  background: var(--bg-input);
-}
-
-.secondary:hover {
-  background: #43454b;
-}
-
-.danger {
-  background: var(--danger);
-  color: #fff;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .status {
@@ -287,12 +568,12 @@ button:disabled {
 }
 
 /* Three bouncing dots, like a typing indicator. */
-.dots {
+.typing-dots {
   display: inline-flex;
   gap: 3px;
 }
 
-.dots i {
+.typing-dots i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -300,11 +581,11 @@ button:disabled {
   animation: bounce 1.2s infinite ease-in-out;
 }
 
-.dots i:nth-child(2) {
+.typing-dots i:nth-child(2) {
   animation-delay: 0.15s;
 }
 
-.dots i:nth-child(3) {
+.typing-dots i:nth-child(3) {
   animation-delay: 0.3s;
 }
 
@@ -325,42 +606,92 @@ button:disabled {
   gap: 12px;
   margin-bottom: 8px;
   padding: 8px 12px;
-  border-radius: var(--radius);
-  background: #4a2426;
+  border-radius: var(--radius-md);
+  background: var(--error-bg);
   font-size: 14px;
 }
 
-.error-banner span {
+.error-banner > span {
   flex: 1;
 }
 
-/* The `hidden` attribute must win over the display rules above. */
-[hidden] {
-  display: none !important;
+/* ============================================================ controls */
+
+textarea,
+input:not([type="radio"]) {
+  width: 100%;
+  padding: 10px 12px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
 }
 
-/* ----------------------------------------------------------- dialogs */
+textarea:focus,
+input:not([type="radio"]):focus {
+  outline: none;
+  border: var(--input-focus-border);
+}
 
-.settings {
+.button {
+  padding: 8px 16px;
+  border: var(--button-border);
+  border-radius: var(--radius-md);
+  background: var(--button-bg);
+  box-shadow: var(--button-shadow);
+  color: var(--button-text);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: var(--button-hover-bg);
+}
+
+.button-primary {
+  background: var(--button-primary-bg);
+  color: var(--button-primary-text);
+}
+
+.button-primary:hover {
+  background: var(--button-primary-hover-bg);
+}
+
+.button-danger {
+  background: var(--danger);
+  color: var(--danger-text);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================================= dialogs */
+
+.dialog {
   width: min(640px, 100vw - 24px);
   max-height: calc(100vh - 24px);
   padding: 20px;
-  border: 0;
-  border-radius: 12px;
-  background: var(--bg);
+  border: var(--dialog-border);
+  border-radius: var(--radius-lg);
+  background: var(--dialog-bg);
+  box-shadow: var(--dialog-shadow);
+  backdrop-filter: var(--dialog-backdrop);
   color: var(--text);
 }
 
-.settings::backdrop {
-  background: rgb(0 0 0 / 0.6);
+.dialog::backdrop {
+  background: var(--scrim);
 }
 
-.settings h2 {
+.dialog-title {
   margin: 0 0 12px;
-  font-size: 20px;
+  font: 700 20px var(--font-heading);
+  color: var(--text-strong);
 }
 
-.settings label {
+.dialog label,
+.kind-picker legend {
   display: block;
   margin-top: 14px;
   font-size: 13px;
@@ -370,7 +701,7 @@ button:disabled {
   color: var(--text-muted);
 }
 
-.settings textarea {
+.dialog textarea {
   resize: vertical;
 }
 
@@ -409,7 +740,7 @@ button:disabled {
 }
 
 .form-error {
-  color: #f38b8f;
+  color: var(--error-text);
   font-size: 14px;
 }
 
@@ -419,8 +750,44 @@ button:disabled {
   font-size: 14px;
 }
 
-.danger-zone button {
+.danger-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 8px;
+}
+
+/* "Roleplay" / "Out of character" choice in the new channel dialog. */
+.kind-picker {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.dialog .kind-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  font-size: var(--font-size);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.kind-option:has(input:checked) {
+  border: var(--input-focus-border);
+}
+
+.kind-option input {
+  margin-top: 5px;
+  accent-color: var(--accent);
 }
 
 /* Prompt preview: one block per API message, labelled with its role. */
@@ -438,9 +805,9 @@ button:disabled {
 .prompt-message pre {
   margin: 4px 0 0;
   padding: 10px;
-  border-radius: var(--radius);
-  background: var(--bg-dark);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font: 13px / 1.5 var(--font-mono);
 }

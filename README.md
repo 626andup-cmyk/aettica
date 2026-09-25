@@ -2,17 +2,21 @@
 
 Aettica gives you an AI **RP partner**, not a character: a writer with their own style who plays characters alongside you. The full vision is in [DESIGN.md](DESIGN.md).
 
-**Status: stage 1 of 8.** One chat with your partner, who plays one character, using a model from [nanoGPT](https://nano-gpt.com). See [docs/stage-1.md](docs/stage-1.md) for how it works inside.
+**Status: stage 2 of 8.** A Discord-style server of channels with your partner, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts) and [stage 2](docs/stage-2.md) (database, channels).
 
-## What stage 1 can do
+## What it can do
 
-- Chat with your partner in a single `#story` channel.
-- Edit the **partner prompt** (who your partner is as a writer) and the **character sheet** (who they play) from the settings panel.
-- Choose the model, temperature, reply length, and how many recent messages the partner sees.
-- **Partner's turn**: let your partner write without a new message from you, including opening an empty story.
+- **Channels**: create, rename, reorder and delete them from the sidebar.
+  - **Roleplay** channels are storylines. Each has its own character, with a name and a sheet, that your partner plays.
+  - **Out-of-character** channels are for talking with your partner as themselves. They know which storylines exist.
+- Every message records who wrote it, which character it voices, and which model generated it.
+- Edit the **partner prompt** (who your partner is as a writer), the model, temperature, reply length, and how many recent messages the partner sees.
+- **Partner's turn**: let your partner write without a new message from you, including opening an empty channel.
 - **Regenerate** the partner's last reply, **edit** or **delete** any message.
-- **Preview prompt**: see exactly what the model receives on the next turn.
+- **Preview prompt**: see exactly what the model receives on the next turn in a channel.
 - Install it to your home screen as an app (PWA).
+
+If you used stage 1, your chat is moved into the `#story` channel automatically the first time stage 2 starts.
 
 ## Running it
 
@@ -51,15 +55,15 @@ The app only works while the server is running. If it says it can't connect, sta
 | `NANOGPT_API_KEY` | none (required) | Your nanoGPT API key |
 | `HOST` | `127.0.0.1` | Where the server listens. The default means only this device can connect. |
 | `PORT` | `3000` | Port for the web app |
-| `DATA_DIR` | `./data` | Where your chat is saved |
+| `DATA_DIR` | `./data` | Where your data is saved |
 | `NANOGPT_BASE_URL` | `https://nano-gpt.com/api/v1` | API address (only change this for testing) |
 | `REQUEST_TIMEOUT_SECONDS` | `180` | How long to wait for a reply before giving up |
 
-Everything else (prompt, character, model and so on) is changed in the app's settings panel.
+Everything else (prompt, characters, model and so on) is changed in the app.
 
 ## Your data
 
-Your chat and settings are saved in `data/chat.json`. It's plain JSON, so you can read it, and you can back it up by copying the file. The `data/` folder and `.env` are never committed to git.
+Everything is saved in an SQLite database, `data/aettica.db`. To back it up, stop the server and copy that file, or copy it together with `aettica.db-wal` and `aettica.db-shm` if the server is running. The `data/` folder and `.env` are never committed to git.
 
 Aettica has no login. Keep `HOST` at `127.0.0.1` so that nobody else on your Wi-Fi can open your chat.
 
@@ -79,13 +83,15 @@ src/
   partner.ts   The one "partner takes a turn" function
   prompt.ts    Builds the prompt stack sent to the model
   nanogpt.ts   Talks to nanoGPT's API
-  store.ts     Saves the chat to data/chat.json
+  db.ts        The database's tables, and upgrading them (migrations)
+  store.ts     Reading and writing channels, messages and settings
+  legacy.ts    Moving a stage 1 chat into the database
   config.ts    Reads settings from .env
-  types.ts     The shapes of messages, settings and the save file
+  types.ts     The shapes of channels, messages and settings
 public/        The web app (plain HTML, CSS and JavaScript, no build step)
 defaults/      Starting partner prompt and character sheet
 test/          Tests
-docs/          Explanations of how things work
+docs/          How things work, stage by stage, and the theme reference
 ```
 
 ## Licence

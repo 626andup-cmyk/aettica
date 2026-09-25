@@ -2,11 +2,14 @@
  * Aettica's web app: everything that happens in the browser.
  *
  * The app is deliberately simple: no framework, no build step. It keeps a
- * copy of the chat in `state`, talks to the server with `fetch`, and redraws
- * the message list with `render()` whenever something changes.
+ * copy of what's on screen in `state`, talks to the server with `fetch`, and
+ * redraws with the `render...` functions whenever something changes.
  *
  * The server is always the source of truth. The browser never guesses what
  * was saved; it shows what the server sends back.
+ *
+ * The open channel is kept in the address bar (`#/channel/<id>`), so reloading
+ * the page, or reopening the app, brings you back to the same channel.
  */
 
 "use strict";
@@ -15,45 +18,64 @@
 
 /** Everything the page is currently showing. */
 const state = {
-  /** @type {null | {partnerPrompt:string, characterSheet:string, model:string, temperature:number, maxTokens:number, historyLimit:number}} */
+  /** Server-wide settings: partnerName, partnerPrompt, model, temperature, maxTokens, historyLimit. */
   settings: null,
-  /** @type {Array<{id:string, author:"user"|"partner", content:string, createdAt:string, editedAt?:string, model?:string}>} */
+  /** Every channel, in sidebar order: {id, name, kind, position, characterName, characterSheet}. */
+  channels: [],
+  /** Id of the open channel, or null if there are no channels. */
+  channelId: null,
+  /** Messages in the open channel: {id, channelId, author, content, characters, createdAt, editedAt?, model?}. */
   messages: [],
-  /** True while the partner is writing. Disables the buttons that would start another turn. */
-  busy: false,
+  /** Ids of channels where the partner is writing right now. */
+  busy: new Set(),
   /** Id of the message being edited, if any. */
   editingId: null,
   /** What "Try again" does after an error, or null if retrying makes no sense. */
   retry: null,
+  /** Unsent text for each channel, so switching channels doesn't lose it. */
+  drafts: new Map(),
+  /** Timer for checking back on a turn started elsewhere (another tab, or before a reload). */
+  pollTimer: null,
 };
 
 // Shortcut for looking up elements by id.
 const $ = (id) => document.getElementById(id);
 
 const els = {
+  app: $("app"),
+  channelList: $("channel-list"),
+  partnerName: $("partner-name"),
+  partnerAvatar: $("partner-avatar"),
+  channelView: $("channel-view"),
+  channelName: $("channel-name"),
+  channelTitleIcon: $("channel-title-icon"),
+  channelTopic: $("channel-topic"),
   messages: $("messages"),
+  composer: $("composer"),
   status: $("status"),
   error: $("error"),
   errorText: $("error-text"),
   errorRetry: $("error-retry"),
-  errorDismiss: $("error-dismiss"),
   form: $("composer-form"),
   input: $("composer-input"),
   send: $("send-button"),
   turn: $("turn-button"),
-  settingsButton: $("settings-button"),
   settingsDialog: $("settings-dialog"),
   settingsForm: $("settings-form"),
-  settingsError: $("settings-error"),
-  settingsCancel: $("settings-cancel"),
-  loadModels: $("load-models"),
-  modelList: $("model-list"),
-  previewPrompt: $("preview-prompt"),
+  channelDialog: $("channel-dialog"),
+  channelForm: $("channel-form"),
+  newChannelDialog: $("new-channel-dialog"),
+  newChannelForm: $("new-channel-form"),
   promptDialog: $("prompt-dialog"),
   promptPreview: $("prompt-preview"),
-  promptClose: $("prompt-close"),
-  clearChat: $("clear-chat"),
+  modelList: $("model-list"),
+  loadModels: $("load-models"),
 };
+
+/** The open channel's full details, or undefined. */
+function currentChannel() {
+  return state.channels.find((c) => c.id === state.channelId);
+}
 
 // ------------------------------------------------------------ server API
 
@@ -77,106 +99,295 @@ async function api(method, path, body) {
   return data;
 }
 
-/** Fetch the whole chat from the server and redraw. */
+/** The API path for something in the open channel, e.g. channelPath("turn"). */
+function channelPath(suffix, channelId = state.channelId) {
+  return `/api/channels/${encodeURIComponent(channelId)}/${suffix}`;
+}
+
+/** Fetch settings, channels and busy channels from the server. */
 async function loadState() {
   const data = await api("GET", "/api/state");
   state.settings = data.settings;
-  state.messages = data.messages;
-  setBusy(data.busy);
-  render();
-  scrollToBottom();
-  // If a turn was already running (say, started in another tab), check back
-  // until it finishes so its reply shows up here too.
-  if (data.busy) setTimeout(loadState, 3000);
+  state.channels = data.channels;
+  state.busy = new Set(data.busyChannels);
 }
 
-// ---------------------------------------------------------------- actions
+// ------------------------------------------------------------- channels
+
+/**
+ * Open a channel: load its messages and redraw everything.
+ * Also used to refresh the open channel after changes.
+ */
+async function openChannel(channelId) {
+  // Keep whatever you'd typed in the channel you're leaving.
+  if (state.channelId) state.drafts.set(state.channelId, els.input.value);
+
+  state.channelId = channelId;
+  state.editingId = null;
+  state.messages = [];
+  hideError();
+
+  // Put the channel in the address bar without adding a history entry for
+  // every switch. (Only if it isn't there already, to avoid a loop with the
+  // hashchange handler.)
+  const hash = channelId ? `#/channel/${channelId}` : "";
+  if (location.hash !== hash) history.replaceState(null, "", hash || location.pathname);
+
+  if (channelId) {
+    try {
+      const { messages } = await api("GET", channelPath("messages", channelId));
+      // Ignore the answer if you switched again while it was loading.
+      if (state.channelId !== channelId) return;
+      state.messages = messages;
+    } catch (error) {
+      showError(`Couldn't load this channel: ${error.message}`, () => openChannel(channelId));
+    }
+  }
+
+  els.input.value = state.drafts.get(channelId) ?? "";
+  autoGrow();
+  renderAll();
+  scrollToBottom();
+  watchBusyChannel();
+}
+
+/** The channel named in the address bar, if it exists. */
+function channelFromAddress() {
+  const match = location.hash.match(/^#\/channel\/(.+)$/);
+  const id = match && decodeURIComponent(match[1]);
+  return state.channels.some((c) => c.id === id) ? id : null;
+}
+
+/**
+ * If the partner is writing in the open channel because of a request made
+ * somewhere else (another tab, or before you reloaded), check back every few
+ * seconds until they're done, then show the new message.
+ */
+function watchBusyChannel() {
+  clearTimeout(state.pollTimer);
+  if (!state.busy.has(state.channelId) || pendingRequests.has(state.channelId)) return;
+
+  state.pollTimer = setTimeout(async () => {
+    try {
+      await loadState();
+    } catch {
+      // Server unreachable for a moment; keep trying.
+    }
+    if (state.busy.has(state.channelId)) {
+      renderSidebar();
+      watchBusyChannel();
+    } else {
+      openChannel(state.channelId);
+    }
+  }, 3000);
+}
+
+async function createChannel(event) {
+  event.preventDefault();
+  const form = els.newChannelForm.elements;
+  const kind = form.kind.value;
+  const body = { name: form.name.value, kind };
+  if (kind === "rp") {
+    body.characterName = form.characterName.value;
+    body.characterSheet = form.characterSheet.value;
+  }
+  try {
+    const { channel } = await api("POST", "/api/channels", body);
+    state.channels.push(channel);
+    els.newChannelDialog.close();
+    closeSidebar();
+    openChannel(channel.id);
+  } catch (error) {
+    showFormError(els.newChannelForm, error.message);
+  }
+}
+
+async function saveChannel(event) {
+  event.preventDefault();
+  const channel = currentChannel();
+  const form = els.channelForm.elements;
+  const body = { name: form.name.value };
+  if (channel.kind === "rp") {
+    body.characterName = form.characterName.value;
+    body.characterSheet = form.characterSheet.value;
+  }
+  try {
+    const { channel: updated } = await api("PATCH", `/api/channels/${encodeURIComponent(channel.id)}`, body);
+    state.channels = state.channels.map((c) => (c.id === updated.id ? updated : c));
+    els.channelDialog.close();
+    renderAll();
+  } catch (error) {
+    showFormError(els.channelForm, error.message);
+  }
+}
+
+/** Move the open channel one place up (-1) or down (+1) in the sidebar. */
+async function moveChannel(step) {
+  const ids = state.channels.map((c) => c.id);
+  const from = ids.indexOf(state.channelId);
+  const to = from + step;
+  if (to < 0 || to >= ids.length) return;
+  // Swap the two neighbours.
+  [ids[from], ids[to]] = [ids[to], ids[from]];
+  try {
+    const { channels } = await api("PUT", "/api/channels/order", { ids });
+    state.channels = channels;
+    renderAll();
+  } catch (error) {
+    showFormError(els.channelForm, error.message);
+  }
+}
+
+async function deleteChannel() {
+  const channel = currentChannel();
+  if (!confirm(`Delete #${channel.name} and every message in it? This can't be undone.`)) return;
+  try {
+    await api("DELETE", `/api/channels/${encodeURIComponent(channel.id)}`, {});
+    state.channels = state.channels.filter((c) => c.id !== channel.id);
+    state.drafts.delete(channel.id);
+    els.channelDialog.close();
+    openChannel(state.channels[0]?.id ?? null);
+  } catch (error) {
+    showFormError(els.channelForm, error.message);
+  }
+}
+
+async function clearChannel() {
+  const channel = currentChannel();
+  if (!confirm(`Delete every message in #${channel.name}? This can't be undone.`)) return;
+  try {
+    await api("DELETE", channelPath("messages"), {});
+    state.messages = [];
+    els.channelDialog.close();
+    renderMessages();
+  } catch (error) {
+    showFormError(els.channelForm, error.message);
+  }
+}
+
+// ------------------------------------------------------ messages & turns
+
+/**
+ * Channels with a request in flight from *this* page. Used so this page
+ * doesn't also poll for a turn it's already waiting on.
+ */
+const pendingRequests = new Set();
+
+/**
+ * Run a request that makes the partner write in a channel: marks the channel
+ * busy while it runs, and redraws afterwards. Returns what `work` returns.
+ */
+async function withBusyChannel(channelId, work) {
+  state.busy.add(channelId);
+  pendingRequests.add(channelId);
+  renderAll();
+  try {
+    return await work();
+  } finally {
+    state.busy.delete(channelId);
+    pendingRequests.delete(channelId);
+    renderAll();
+    if (channelId === state.channelId) scrollToBottom();
+  }
+}
 
 /**
  * Send what's in the text box. The server saves it and your partner replies
  * in the same request.
  */
 async function sendMessage() {
+  const channelId = state.channelId;
   const content = els.input.value;
-  if (content.trim() === "" || state.busy) return;
+  if (!channelId || content.trim() === "" || state.busy.has(channelId)) return;
 
   hideError();
-  setBusy(true);
-
   // Show your post straight away, as a placeholder, while the partner
   // writes. It's swapped for the saved copy when the server answers.
-  const placeholder = { id: "pending", author: "user", content, createdAt: new Date().toISOString() };
+  const placeholder = {
+    id: "pending",
+    channelId,
+    author: "user",
+    content,
+    characters: [],
+    createdAt: new Date().toISOString(),
+  };
   state.messages.push(placeholder);
   els.input.value = "";
+  state.drafts.delete(channelId);
   autoGrow();
-  render();
-  scrollToBottom();
 
-  try {
-    const data = await api("POST", "/api/messages", { content });
-    state.messages = state.messages.filter((m) => m !== placeholder);
-    state.messages.push(data.userMessage);
-    if (data.partnerMessage) {
-      state.messages.push(data.partnerMessage);
-    } else if (data.error) {
-      // Your message is saved but the reply failed. "Try again" asks the
-      // partner for a turn, which answers the message you already sent.
-      showError(data.error, partnerTurn);
+  await withBusyChannel(channelId, async () => {
+    try {
+      const data = await api("POST", channelPath("messages", channelId), { content });
+      if (state.channelId !== channelId) return; // you've moved on; it'll load when you return
+      state.messages = state.messages.filter((m) => m !== placeholder);
+      state.messages.push(data.userMessage);
+      if (data.partnerMessage) {
+        state.messages.push(data.partnerMessage);
+      } else if (data.error) {
+        // Your message is saved but the reply failed. "Try again" asks the
+        // partner for a turn, which answers the message you already sent.
+        showError(data.error, partnerTurn);
+      }
+    } catch (error) {
+      // Nothing was saved (e.g. the server is down), so put your text back
+      // in the box; "Try again" simply sends it again.
+      state.messages = state.messages.filter((m) => m !== placeholder);
+      if (state.channelId === channelId) {
+        els.input.value = content;
+        autoGrow();
+        showError(error.message, sendMessage);
+      } else {
+        state.drafts.set(channelId, content);
+      }
     }
-  } catch (error) {
-    // Nothing was saved (e.g. the server is down), so put your text back in
-    // the box; "Try again" simply sends it again.
-    state.messages = state.messages.filter((m) => m !== placeholder);
-    els.input.value = content;
-    autoGrow();
-    showError(error.message, sendMessage);
-  } finally {
-    setBusy(false);
-    render();
-    scrollToBottom();
-  }
+  });
 }
 
 /** Let your partner write without a new message from you. */
 async function partnerTurn() {
-  await runTurn(async () => {
-    const data = await api("POST", "/api/turn", {});
-    state.messages.push(data.partnerMessage);
-  }, partnerTurn);
+  await runTurn("turn", (data) => state.messages.push(data.partnerMessage), partnerTurn);
 }
 
 /** Replace your partner's last reply with a fresh one. */
 async function regenerate() {
-  await runTurn(async () => {
-    const data = await api("POST", "/api/regenerate", {});
-    state.messages = state.messages.filter((m) => m.id !== data.replacedId);
-    state.messages.push(data.partnerMessage);
-  }, regenerate);
+  await runTurn(
+    "regenerate",
+    (data) => {
+      state.messages = state.messages.filter((m) => m.id !== data.replacedId);
+      state.messages.push(data.partnerMessage);
+    },
+    regenerate,
+  );
 }
 
-/** Shared wrapper for partner turns: busy indicator, errors, redraw. */
-async function runTurn(work, retry) {
-  if (state.busy) return;
+/**
+ * Shared wrapper for partner turns in the open channel.
+ *
+ * @param action     "turn" or "regenerate" (the end of the API path).
+ * @param onSuccess  Updates `state.messages` with the server's answer.
+ * @param retry      What "Try again" should do if it fails.
+ */
+async function runTurn(action, onSuccess, retry) {
+  const channelId = state.channelId;
+  if (!channelId || state.busy.has(channelId)) return;
   hideError();
-  setBusy(true);
-  try {
-    await work();
-  } catch (error) {
-    showError(error.message, retry);
-  } finally {
-    setBusy(false);
-    render();
-    scrollToBottom();
-  }
+  await withBusyChannel(channelId, async () => {
+    try {
+      const data = await api("POST", channelPath(action, channelId), {});
+      if (state.channelId === channelId) onSuccess(data);
+    } catch (error) {
+      if (state.channelId === channelId) showError(error.message, retry);
+    }
+  });
 }
 
 async function saveEdit(id, content) {
   try {
-    const data = await api("PATCH", `/api/messages/${id}`, { content });
-    const index = state.messages.findIndex((m) => m.id === id);
-    if (index !== -1) state.messages[index] = data.message;
+    const data = await api("PATCH", `/api/messages/${encodeURIComponent(id)}`, { content });
+    state.messages = state.messages.map((m) => (m.id === id ? data.message : m));
     state.editingId = null;
-    render();
+    renderMessages();
   } catch (error) {
     showError(error.message, null);
   }
@@ -185,9 +396,9 @@ async function saveEdit(id, content) {
 async function deleteMessage(id) {
   if (!confirm("Delete this message?")) return;
   try {
-    await api("DELETE", `/api/messages/${id}`, {});
+    await api("DELETE", `/api/messages/${encodeURIComponent(id)}`, {});
     state.messages = state.messages.filter((m) => m.id !== id);
-    render();
+    renderMessages();
   } catch (error) {
     showError(error.message, null);
   }
@@ -195,16 +406,100 @@ async function deleteMessage(id) {
 
 // -------------------------------------------------------------- rendering
 
-/** Redraw the whole message list from `state.messages`. */
-function render() {
+/** Redraw everything from `state`. */
+function renderAll() {
+  renderSidebar();
+  renderChannelHeader();
+  renderMessages();
+  renderComposer();
+}
+
+/** The channel list and the partner card at the bottom of the sidebar. */
+function renderSidebar() {
+  els.channelList.replaceChildren(
+    ...state.channels.map((channel) => {
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.className = "channel-link";
+      link.href = `#/channel/${channel.id}`;
+      link.dataset.kind = channel.kind;
+      if (channel.id === state.channelId) link.setAttribute("aria-current", "page");
+      link.title = channel.kind === "ooc" ? "Out of character" : channel.characterName || "Roleplay";
+
+      const name = document.createElement("span");
+      name.className = "channel-link-name";
+      name.textContent = channel.name;
+      link.append(channelIcon(channel.kind), name);
+
+      if (state.busy.has(channel.id)) {
+        const dot = document.createElement("span");
+        dot.className = "channel-busy";
+        dot.title = "Your partner is writing here";
+        link.append(dot);
+      }
+      item.append(link);
+      return item;
+    }),
+  );
+
+  const partnerName = state.settings?.partnerName ?? "Partner";
+  els.partnerName.textContent = partnerName;
+  els.partnerAvatar.textContent = initial(partnerName);
+}
+
+/** The `#` icon for RP channels, a speech bubble for OOC. */
+function channelIcon(kind) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "channel-icon");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", kind === "ooc" ? "#icon-ooc" : "#icon-hash");
+  svg.append(use);
+  return svg;
+}
+
+/** Channel name and "topic" (character or OOC) at the top of the channel. */
+function renderChannelHeader() {
+  const channel = currentChannel();
+  // These attributes are what per-channel themes (stage 3.5) will hook onto.
+  els.channelView.dataset.channelId = channel?.id ?? "";
+  els.channelView.dataset.channelKind = channel?.kind ?? "";
+
+  els.channelName.textContent = channel?.name ?? "";
+  els.channelTitleIcon.setAttribute("href", channel?.kind === "ooc" ? "#icon-ooc" : "#icon-hash");
+  els.channelTopic.textContent = !channel
+    ? ""
+    : channel.kind === "ooc"
+      ? `Out of character with ${state.settings.partnerName}`
+      : channel.characterName
+        ? `${state.settings.partnerName} plays ${channel.characterName}`
+        : "";
+  $("channel-settings-button").hidden = !channel;
+  document.title = channel ? `#${channel.name} · Aettica` : "Aettica";
+}
+
+/** Redraw the message list from `state.messages`. */
+function renderMessages() {
+  const channel = currentChannel();
   els.messages.replaceChildren();
 
+  if (!channel) {
+    els.messages.append(
+      emptyNote("There are no channels yet. Create one with the + button at the top of the channel list."),
+    );
+    return;
+  }
+
   if (state.messages.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent =
-      "No messages yet. Write the first post, or press “Partner's turn” to let your partner open the story.";
-    els.messages.append(empty);
+    els.messages.append(
+      emptyNote(
+        channel.kind === "ooc"
+          ? `Nothing here yet. Say hi, or press “Partner's turn” to let ${state.settings.partnerName} start the conversation.`
+          : "No messages yet. Write the first post, or press “Partner's turn” to let your partner open the story.",
+      ),
+    );
     return;
   }
 
@@ -212,6 +507,27 @@ function render() {
   for (const message of state.messages) {
     els.messages.append(renderMessage(message, message.id === lastId));
   }
+}
+
+function emptyNote(text) {
+  const note = document.createElement("p");
+  note.className = "empty";
+  note.textContent = text;
+  return note;
+}
+
+/**
+ * Who a message shows as written by.
+ *
+ * Your messages: "You". Partner messages that voice characters: the
+ * character names, with the partner's name as a badge (it's them writing
+ * the character). Partner messages voicing no one (OOC): the partner's name.
+ */
+function authorOf(message) {
+  if (message.author === "user") return { name: "You", badge: null };
+  const partnerName = state.settings.partnerName;
+  if (message.characters.length > 0) return { name: message.characters.join(" & "), badge: partnerName };
+  return { name: partnerName, badge: null };
 }
 
 /**
@@ -222,30 +538,39 @@ function render() {
  * way a model reply containing `<script>` can't run code in your browser.
  */
 function renderMessage(message, isLast) {
-  const isUser = message.author === "user";
-  const name = isUser ? "You" : "Partner";
+  const { name, badge } = authorOf(message);
+  const pending = message.id === "pending";
 
   const root = document.createElement("article");
-  root.className = `message ${message.author}`;
+  root.className = pending ? "message pending" : "message";
+  root.dataset.author = message.author;
 
   const avatar = document.createElement("div");
   avatar.className = "avatar";
-  avatar.textContent = name[0];
+  avatar.textContent = initial(name);
   avatar.setAttribute("aria-hidden", "true");
 
   const meta = document.createElement("div");
-  meta.className = "meta";
+  meta.className = "message-meta";
   const author = document.createElement("span");
-  author.className = "author";
+  author.className = "message-author";
   author.textContent = name;
+  meta.append(author);
+  if (badge) {
+    const tag = document.createElement("span");
+    tag.className = "message-badge";
+    tag.textContent = badge;
+    tag.title = `Written by ${badge}`;
+    meta.append(tag);
+  }
   const time = document.createElement("time");
-  time.className = "time";
+  time.className = "message-time";
   time.dateTime = message.createdAt;
   time.textContent = formatTime(message.createdAt) + (message.editedAt ? " (edited)" : "");
-  meta.append(author, time);
+  meta.append(time);
   if (message.model) {
     const model = document.createElement("span");
-    model.className = "model";
+    model.className = "message-model";
     // Show just the part after the last "/" (e.g. "DeepSeek-V3.1-Terminus")
     // to save space on a phone; the full id appears when you hover or long-press.
     model.textContent = message.model.split("/").at(-1);
@@ -255,39 +580,34 @@ function renderMessage(message, isLast) {
 
   root.append(avatar, meta);
 
-  // The placeholder for a post that's still being sent has no actions yet.
-  if (message.id === "pending") {
-    const content = document.createElement("div");
-    content.className = "content";
-    content.innerHTML = formatText(message.content);
-    root.append(content);
-    return root;
-  }
-
   if (state.editingId === message.id) {
     root.append(renderEditor(message));
     return root;
   }
 
   const content = document.createElement("div");
-  content.className = "content";
+  content.className = "message-content";
   content.innerHTML = formatText(message.content);
+  root.append(content);
 
+  // A post that's still being sent has no actions yet.
+  if (pending) return root;
+
+  const busy = state.busy.has(state.channelId);
   const actions = document.createElement("div");
-  actions.className = "actions";
+  actions.className = "message-actions";
   actions.append(
     actionButton("Edit", () => {
       state.editingId = message.id;
-      render();
+      renderMessages();
     }),
-    actionButton("Delete", () => deleteMessage(message.id)),
+    actionButton("Delete", () => deleteMessage(message.id), busy),
   );
   // Only the newest message can be regenerated, and only if it's the partner's.
-  if (isLast && !isUser) {
-    actions.append(actionButton("Regenerate", regenerate, state.busy));
+  if (isLast && message.author === "partner") {
+    actions.append(actionButton("Regenerate", regenerate, busy));
   }
-
-  root.append(content, actions);
+  root.append(actions);
   return root;
 }
 
@@ -299,14 +619,14 @@ function renderEditor(message) {
   box.value = message.content;
 
   const actions = document.createElement("div");
-  actions.className = "actions";
+  actions.className = "message-actions";
   actions.append(
     actionButton("Save", () => {
       if (box.value.trim() !== "") saveEdit(message.id, box.value);
     }),
     actionButton("Cancel", () => {
       state.editingId = null;
-      render();
+      renderMessages();
     }),
   );
 
@@ -323,6 +643,21 @@ function actionButton(label, onClick, disabled = false) {
   button.disabled = disabled;
   button.addEventListener("click", onClick);
   return button;
+}
+
+/** Show or hide the composer, the "writing…" indicator, and lock buttons while busy. */
+function renderComposer() {
+  const channel = currentChannel();
+  els.composer.hidden = !channel;
+  if (!channel) return;
+
+  const busy = state.busy.has(channel.id);
+  els.status.hidden = !busy;
+  $("status-text").textContent = `${state.settings.partnerName} is writing…`;
+  els.send.disabled = busy;
+  els.turn.disabled = busy;
+  els.input.placeholder =
+    channel.kind === "ooc" ? `Message ${state.settings.partnerName}…` : `Write your post in #${channel.name}…`;
 }
 
 /**
@@ -346,6 +681,11 @@ function escapeHtml(text) {
     .replaceAll("'", "&#39;");
 }
 
+/** The first letter of a name, for avatars. */
+function initial(name) {
+  return (name.trim()[0] ?? "?").toUpperCase();
+}
+
 /** "14:05" for today, "Sep 24, 14:05" for older messages. */
 function formatTime(iso) {
   const date = new Date(iso);
@@ -358,15 +698,7 @@ function scrollToBottom() {
   els.messages.scrollTop = els.messages.scrollHeight;
 }
 
-// ------------------------------------------------------ status and errors
-
-/** Show or hide the "writing…" indicator and lock the turn buttons. */
-function setBusy(busy) {
-  state.busy = busy;
-  els.status.hidden = !busy;
-  els.send.disabled = busy;
-  els.turn.disabled = busy;
-}
+// ------------------------------------------------------------------ errors
 
 /**
  * Show an error above the composer. `retry` is the function "Try again"
@@ -384,46 +716,53 @@ function hideError() {
   els.error.hidden = true;
 }
 
-// --------------------------------------------------------------- settings
+/** Show an error inside a dialog's form. */
+function showFormError(form, message) {
+  const box = form.querySelector(".form-error");
+  box.textContent = message;
+  box.hidden = false;
+}
 
-/** Fill the settings form from `state.settings` and open it. */
+function hideFormError(form) {
+  form.querySelector(".form-error").hidden = true;
+}
+
+// ---------------------------------------------------------------- dialogs
+
+/** Server-wide settings: fill the form from `state.settings` and open it. */
 function openSettings() {
   const s = state.settings;
   const form = els.settingsForm.elements;
+  form.partnerName.value = s.partnerName;
   form.partnerPrompt.value = s.partnerPrompt;
-  form.characterSheet.value = s.characterSheet;
   form.model.value = s.model;
   form.temperature.value = s.temperature;
   form.maxTokens.value = s.maxTokens;
   form.historyLimit.value = s.historyLimit;
-  els.settingsError.hidden = true;
+  hideFormError(els.settingsForm);
   els.settingsDialog.showModal();
-}
-
-/** Read the settings form. Numbers are converted from the text boxes' strings. */
-function readSettingsForm() {
-  const form = els.settingsForm.elements;
-  return {
-    partnerPrompt: form.partnerPrompt.value,
-    characterSheet: form.characterSheet.value,
-    model: form.model.value,
-    temperature: Number(form.temperature.value),
-    maxTokens: Number(form.maxTokens.value),
-    historyLimit: Number(form.historyLimit.value),
-  };
 }
 
 async function saveSettings(event) {
   // Stop the <form method="dialog"> from closing the dialog before we know
   // the save worked.
   event.preventDefault();
+  const form = els.settingsForm.elements;
   try {
-    const data = await api("PUT", "/api/settings", readSettingsForm());
+    const data = await api("PUT", "/api/settings", {
+      partnerName: form.partnerName.value,
+      partnerPrompt: form.partnerPrompt.value,
+      model: form.model.value,
+      // Number boxes give text; the server wants numbers.
+      temperature: Number(form.temperature.value),
+      maxTokens: Number(form.maxTokens.value),
+      historyLimit: Number(form.historyLimit.value),
+    });
     state.settings = data.settings;
     els.settingsDialog.close();
+    renderAll();
   } catch (error) {
-    els.settingsError.textContent = error.message;
-    els.settingsError.hidden = false;
+    showFormError(els.settingsForm, error.message);
   }
 }
 
@@ -444,21 +783,49 @@ async function loadModels() {
     // Focus the model box so the suggestions are one tap away.
     els.settingsForm.elements.model.focus();
   } catch (error) {
-    els.settingsError.textContent = error.message;
-    els.settingsError.hidden = false;
+    showFormError(els.settingsForm, error.message);
     els.loadModels.textContent = "Load list";
   } finally {
     els.loadModels.disabled = false;
   }
 }
 
+/** Channel settings for the open channel. */
+function openChannelSettings() {
+  const channel = currentChannel();
+  if (!channel) return;
+  const form = els.channelForm.elements;
+  form.name.value = channel.name;
+  form.characterName.value = channel.characterName;
+  form.characterSheet.value = channel.characterSheet;
+  els.channelForm.querySelector(".rp-only").hidden = channel.kind !== "rp";
+  $("channel-kind-note").textContent =
+    channel.kind === "rp"
+      ? "A roleplay channel. Your partner writes as the character below."
+      : "An out-of-character channel. Your partner talks to you as themselves.";
+  hideFormError(els.channelForm);
+  els.channelDialog.showModal();
+}
+
+function openNewChannel() {
+  els.newChannelForm.reset();
+  hideFormError(els.newChannelForm);
+  updateNewChannelKind();
+  els.newChannelDialog.showModal();
+}
+
+/** Show the character fields only when "Roleplay" is picked. */
+function updateNewChannelKind() {
+  els.newChannelForm.querySelector(".rp-only").hidden = els.newChannelForm.elements.kind.value !== "rp";
+}
+
 /**
- * Show the exact prompt stack the next turn would send. Uses the *saved*
- * settings, so save first if you want to preview a change.
+ * Show the exact prompt stack the next turn in the open channel would send.
+ * Uses the *saved* settings, so save first if you want to preview a change.
  */
 async function previewPrompt() {
   try {
-    const { messages } = await api("GET", "/api/prompt");
+    const { messages } = await api("GET", channelPath("prompt"));
     els.promptPreview.replaceChildren(
       ...messages.map((m) => {
         const block = document.createElement("div");
@@ -474,22 +841,19 @@ async function previewPrompt() {
     );
     els.promptDialog.showModal();
   } catch (error) {
-    els.settingsError.textContent = error.message;
-    els.settingsError.hidden = false;
+    showFormError(els.channelForm, error.message);
   }
 }
 
-async function clearChat() {
-  if (!confirm("Delete every message in this chat? This can't be undone.")) return;
-  try {
-    await api("DELETE", "/api/messages", {});
-    state.messages = [];
-    els.settingsDialog.close();
-    render();
-  } catch (error) {
-    els.settingsError.textContent = error.message;
-    els.settingsError.hidden = false;
-  }
+// ---------------------------------------------------------------- sidebar
+
+/** On phones, the sidebar slides over the channel. These open and close it. */
+function openSidebar() {
+  els.app.classList.add("sidebar-open");
+}
+
+function closeSidebar() {
+  els.app.classList.remove("sidebar-open");
 }
 
 // ---------------------------------------------------------------- composer
@@ -518,15 +882,40 @@ els.input.addEventListener("input", autoGrow);
 
 els.turn.addEventListener("click", partnerTurn);
 els.errorRetry.addEventListener("click", () => state.retry && state.retry());
-els.errorDismiss.addEventListener("click", hideError);
+$("error-dismiss").addEventListener("click", hideError);
 
-els.settingsButton.addEventListener("click", openSettings);
+// Clicking a channel link changes the address; this opens that channel.
+window.addEventListener("hashchange", () => {
+  const id = channelFromAddress();
+  if (id && id !== state.channelId) openChannel(id);
+  closeSidebar();
+});
+// Tapping the channel you're already in should still close the phone sidebar.
+els.channelList.addEventListener("click", closeSidebar);
+
+$("menu-button").addEventListener("click", openSidebar);
+$("sidebar-scrim").addEventListener("click", closeSidebar);
+
+$("settings-button").addEventListener("click", openSettings);
 els.settingsForm.addEventListener("submit", saveSettings);
-els.settingsCancel.addEventListener("click", () => els.settingsDialog.close());
 els.loadModels.addEventListener("click", loadModels);
-els.previewPrompt.addEventListener("click", previewPrompt);
-els.promptClose.addEventListener("click", () => els.promptDialog.close());
-els.clearChat.addEventListener("click", clearChat);
+
+$("channel-settings-button").addEventListener("click", openChannelSettings);
+els.channelForm.addEventListener("submit", saveChannel);
+$("channel-move-up").addEventListener("click", () => moveChannel(-1));
+$("channel-move-down").addEventListener("click", () => moveChannel(1));
+$("preview-prompt").addEventListener("click", previewPrompt);
+$("clear-channel").addEventListener("click", clearChannel);
+$("delete-channel").addEventListener("click", deleteChannel);
+
+$("new-channel-button").addEventListener("click", openNewChannel);
+els.newChannelForm.addEventListener("submit", createChannel);
+els.newChannelForm.addEventListener("change", updateNewChannelKind);
+
+// Every "Cancel" / "Close" button closes the dialog it's in.
+for (const button of document.querySelectorAll("[data-close]")) {
+  button.addEventListener("click", () => button.closest("dialog").close());
+}
 
 // Register the service worker, which is what makes the app installable.
 if ("serviceWorker" in navigator) {
@@ -535,4 +924,8 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-loadState().catch((error) => showError(`Couldn't load the chat: ${error.message}`, () => location.reload()));
+// Start: load the server's state, then open the channel in the address bar
+// (or the first channel).
+loadState()
+  .then(() => openChannel(channelFromAddress() ?? state.channels[0]?.id ?? null))
+  .catch((error) => showError(`Couldn't load Aettica: ${error.message}`, () => location.reload()));

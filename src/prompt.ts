@@ -1,5 +1,5 @@
 /**
- * Prompt assembly: turning the chat into what the model actually reads.
+ * Prompt assembly: turning a channel into what the model actually reads.
  *
  * A model has no memory between requests. Every time your partner takes a
  * turn, we rebuild the whole context from scratch and send it along. The
@@ -16,39 +16,59 @@
  * Layer 5 is the conversation itself, sent as alternating `user`/`assistant`
  * messages after it.
  *
- * Stage 1 fills layers 1, 3 and 5. Layers 2 and 4 have their slots here
- * already, empty, so later stages add content without reshaping this file.
+ * The stack depends on the kind of channel:
+ *
+ *   - **RP channels**: layer 1 frames the partner as the author of a story,
+ *     layer 3 is the channel's character sheet.
+ *   - **OOC channels**: layer 1 frames the partner as themselves, talking to
+ *     you as a friend, and layer 3 lists the channels on the server so they
+ *     know what storylines exist. (Stage 7 adds a summary of each.)
+ *
+ * Layers 2 and 4 have their slots here already, empty, so later stages add
+ * content without reshaping this file.
  */
 
-import type { ChatMessage, Message, Settings } from "./types.ts";
+import type { Channel, ChannelKind, ChatMessage, Message, Settings } from "./types.ts";
 
 /**
- * Fixed framing that comes before your partner prompt in layer 1.
+ * Fixed framing that comes before your partner prompt in RP channels.
  *
  * Your partner prompt describes *who* the partner is. This explains the
  * *situation*: that they are a writer collaborating with you, not the
  * character itself. It's the core idea of Aettica, so it isn't editable.
  */
-export const PARTNER_FRAMING = `You are the user's roleplay partner: a writer with your own voice and style, collaborating with them on a story. You are not an assistant, and you are not the character you play. You are the author behind them.
+export const RP_FRAMING = `You are the user's roleplay partner: a writer with your own voice and style, collaborating with them on a story. You are not an assistant, and you are not the character you play. You are the author behind them.
 
 The user writes for their own character. You write for yours. Never write the user's character's actions, dialogue or thoughts.
 
 Write only your next post, in character, with no preamble and no out-of-character commentary.`;
 
 /**
- * Message sent when the partner takes a turn without a new message from you.
+ * Fixed framing for OOC channels: the partner as themselves.
+ */
+export const OOC_FRAMING = `You are the user's roleplay partner, talking with them out of character. Here you are yourself: the writer, not any character you play. You're friends. Be genuine, have your own opinions and moods, and feel free to just hang out. You might plan stories together, talk about what happened in one, or chat about anything at all.
+
+Write only your next message, as yourself, with no preamble.`;
+
+/**
+ * Messages sent when the partner takes a turn without a new message from you.
  *
  * Most chat models expect the conversation to end on a `user` message and get
  * confused (or refuse) if it ends on their own reply. So when the partner is
- * continuing their own post, or starting an empty chat, we end the stack with
- * this short out-of-character nudge. It's never saved or shown in the chat.
+ * continuing after their own message, or starting an empty channel, we end
+ * the stack with a short nudge. It's never saved or shown in the chat.
  */
-export const CONTINUE_NUDGE =
-  "(OOC: No new post from me this time. Take your next turn and move the story forward.)";
-
-/** Used instead of `CONTINUE_NUDGE` when the chat is completely empty. */
-export const OPENING_NUDGE =
-  "(OOC: The story hasn't started yet. Write an opening post that sets the scene and gives my character a way in.)";
+export const NUDGES: Record<ChannelKind, { continue: string; opening: string }> = {
+  rp: {
+    continue: "(OOC: No new post from me this time. Take your next turn and move the story forward.)",
+    opening:
+      "(OOC: The story hasn't started yet. Write an opening post that sets the scene and gives my character a way in.)",
+  },
+  ooc: {
+    continue: "(No new message from me yet. Say whatever's on your mind, or pick the conversation back up.)",
+    opening: "(This is the start of our out-of-character chat. Say hello, however feels natural to you.)",
+  },
+};
 
 /**
  * One labelled section of the system prompt. Keeping the label next to the
@@ -60,26 +80,43 @@ interface Layer {
   content: string | null;
 }
 
+/** Everything the prompt stack is built from. */
+export interface PromptInput {
+  settings: Settings;
+  /** The channel the partner is writing in. */
+  channel: Channel;
+  /** Every channel on the server, in sidebar order (used by OOC channels). */
+  channels: Channel[];
+  /** The channel's messages, oldest first. Only the newest `historyLimit` are sent. */
+  messages: Message[];
+}
+
 /**
  * Build the five-layer prompt stack for one partner turn.
  *
- * @param settings  The current chat settings (partner prompt, sheet, etc.).
- * @param messages  The whole chat, oldest first. Only the most recent
- *                  `settings.historyLimit` messages are included.
- * @returns         The messages to send to the chat completions API.
+ * @returns The messages to send to the chat completions API.
  */
-export function buildPromptStack(settings: Settings, messages: Message[]): ChatMessage[] {
+export function buildPromptStack({ settings, channel, channels, messages }: PromptInput): ChatMessage[] {
+  const isRp = channel.kind === "rp";
+
   const layers: Layer[] = [
-    // Layer 1: who is writing. The fixed framing, then your partner prompt.
+    // Layer 1: who is writing. The fixed framing for this kind of channel,
+    // then your partner prompt.
     {
       title: "Who you are",
-      content: joinNonEmpty([PARTNER_FRAMING, settings.partnerPrompt]),
+      content: joinNonEmpty([isRp ? RP_FRAMING : OOC_FRAMING, settings.partnerPrompt]),
     },
     // Layer 2: channel mode (literary/casual). Arrives in stage 3.
     { title: "Channel mode", content: null },
-    // Layer 3: the character(s) being played. Stage 4 replaces this single
-    // sheet with every notebook entry pinned to the channel.
-    { title: "The character you play", content: settings.characterSheet },
+    // Layer 3: in RP, the character being played. Stage 4 replaces this
+    // single sheet with every notebook entry pinned to the channel.
+    // In OOC, an overview of the server instead.
+    isRp
+      ? {
+          title: channel.characterName ? `The character you play: ${channel.characterName}` : "The character you play",
+          content: channel.characterSheet,
+        }
+      : { title: "Channels on your server", content: describeChannels(channels, channel) },
     // Layer 4: model-quirk prompt from the connection profile. Stage 5.
     { title: "Model notes", content: null },
   ];
@@ -94,10 +131,27 @@ export function buildPromptStack(settings: Settings, messages: Message[]): ChatM
   // turn without you writing anything: the design's core rule.
   const last = history.at(-1);
   if (!last || last.role !== "user") {
-    history.push({ role: "user", content: last ? CONTINUE_NUDGE : OPENING_NUDGE });
+    const nudges = NUDGES[channel.kind];
+    history.push({ role: "user", content: last ? nudges.continue : nudges.opening });
   }
 
   return [system, ...history];
+}
+
+/**
+ * A list of every channel for the OOC prompt, like:
+ *
+ *   - #story: roleplay, you play Ilse Marrow
+ *   - #ooc: this conversation
+ */
+export function describeChannels(channels: Channel[], current: Channel): string {
+  return channels
+    .map((c) => {
+      if (c.id === current.id) return `- #${c.name}: this conversation`;
+      if (c.kind === "ooc") return `- #${c.name}: another out-of-character chat`;
+      return `- #${c.name}: roleplay${c.characterName ? `, you play ${c.characterName}` : ""}`;
+    })
+    .join("\n");
 }
 
 /**
@@ -117,7 +171,7 @@ export function recentMessages(messages: Message[], limit: number): Message[] {
 }
 
 /**
- * Convert saved chat messages into API messages.
+ * Convert saved messages into API messages.
  *
  * Your messages become `user`, your partner's become `assistant`. If two
  * messages in a row have the same author (say you sent two posts before the
