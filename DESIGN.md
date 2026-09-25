@@ -140,6 +140,22 @@ flowchart LR
 - **The server digest** gives each channel one or two lines: who's in it, where the story stands, the emotional temperature. OOC gets the digest, and can pull a fuller channel summary when that channel comes up.
 - Hidden-from-you details never appear in summaries you can see.
 
+## Themes
+
+The whole look of Aettica is themeable, including glassy, skeuomorphic styles like Frutiger Aero, Aero Glass and liquid glass. You can make your own themes, and each channel can have its own.
+
+- **A theme is a folder** in `data/themes/`: a CSS file plus optional images (wallpapers, textures, glossy button art). A simple theme changes a few variables; an elaborate one can restyle anything.
+- **Themes layer.** The app theme applies everywhere. A channel theme overrides it inside that channel only: its messages, header, composer and background. The sidebar and settings keep the app theme, so switching channels never changes the whole app.
+- **Channel themes are scoped.** Aettica wraps a channel theme's CSS so it only reaches that channel's view and can't break the rest of the app.
+- **Built-in themes** ship with the app, at least one Frutiger Aero and one liquid glass, as starting points to copy and edit.
+- **Glass has a cheap fallback.** Real backdrop blur is demanding on phones. A theme can provide a "fake glass" version (for example a pre-blurred wallpaper), used when you choose it or when the real one stutters.
+
+**Theme-ready from stage 2.** Until the theme stage, the app is built so themes will be easy to add:
+
+- Every visual value (colours, blur, borders, shadows, radius, fonts, backgrounds) goes through a named CSS variable.
+- Elements have descriptive class names a theme can target (`.sidebar`, `.message-bubble`, `.channel-header`).
+- Panels and bubbles have spare layers for glass effects: a backdrop, a highlight, and a glow.
+
 ## Build stages
 
 Each stage adds one new concept, so there's only ever one new thing to learn. Stage 1 is essentially Tiny RP.
@@ -151,6 +167,7 @@ Each stage adds one new concept, so there's only ever one new thing to learn. St
 | 1 | One chat with a partner prompt and one character sheet, via nanoGPT | Server, API calls, prompt assembly |
 | 2 | Multiple channels, OOC channel, message authorship | Database, data relationships |
 | 3 | Scene breaks and literary/casual modes | Per-channel settings, rendering modes |
+| 3.5 | Themes: app theme, per-channel themes, built-in glass themes | Theme files, CSS variables, scoping |
 | 4 | Notebook with pinning and permissions | Ownership, access rules |
 | 5 | Connection profiles and roulettes | Configuration, weighted picks |
 | 6 | Tools, the approval queue, and message comments | Tool calling, proposals |
@@ -177,3 +194,5 @@ These are parked until the core works.
 - [ ] Which of your nanoGPT models reliably handle tool calling?
 - [ ] How often do rolling channel summaries update (every N messages)?
 - [ ] Is there ever more than one partner per server?
+- [ ] Should a channel theme also restyle the sidebar while you're in that channel?
+- [ ] Can the partner pick or suggest a channel's theme (for example when creating a channel)?
