@@ -39,8 +39,10 @@ describe("importing a stage 1 chat", () => {
     const store = new Store(dir.path);
     const [story, ooc] = store.listChannels();
 
-    expect(story).toMatchObject({ name: "story", kind: "rp", characterName: "Captain Reyes" });
-    expect(story!.characterSheet).toBe("Name: Captain Reyes\nA smuggler.");
+    expect(story).toMatchObject({ name: "story", kind: "rp" });
+    // The character sheet became a notebook entry, pinned to #story.
+    expect(store.notebook.castFor("user", story!.id).map((c) => [c.name, c.playedBy])).toEqual([["Captain Reyes", "partner"]]);
+    expect(store.notebook.listEntries("user")[0]!.fields).toEqual([{ label: "Notes", value: "A smuggler." }]);
     expect(ooc).toMatchObject({ name: "ooc", kind: "ooc" });
 
     expect(store.getMessages(story!.id).map((m) => [m.id, m.author, m.content, m.characters, m.createdAt, m.model])).toEqual([

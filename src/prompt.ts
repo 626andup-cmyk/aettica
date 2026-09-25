@@ -8,7 +8,7 @@
  *
  *   1. Partner identity and writing style   (who is writing)
  *   2. Channel mode instructions            (literary or casual)
- *   3. Character sheets and pinned entries  (who they are playing)
+ *   3. The cast and pinned notebook entries (who's in the story)
  *   4. Connection profile's model-quirk     (taming this particular model)
  *   5. Scene summaries and recent messages  (what has happened)
  *
@@ -18,11 +18,15 @@
  *
  * The stack depends on the kind of channel:
  *
- *   - **RP channels**: layer 1 frames the partner as the author of a story,
- *     layer 3 is the channel's character sheet.
+ *   - **RP channels**: layer 1 frames the partner as the author of a story.
+ *     Layer 3 is the channel's cast and lore (the notebook entries pinned to
+ *     it), any entries those link to with `[[Name]]`, and who plays whom.
+ *     Entries hidden from you are included with a note to keep the secret;
+ *     entries you hide from your partner never appear.
  *   - **OOC channels**: layer 1 frames the partner as themselves, talking to
- *     you as a friend, and layer 3 lists the channels on the server so they
- *     know what storylines exist. (Stage 7 adds a summary of each.)
+ *     you as a friend, and layer 3 lists the channels on the server (with
+ *     who they play in each) and the notebook's entries, so they know what
+ *     storylines exist. (Stage 7 adds a summary of each.)
  *
  * In RP channels, layer 2 holds the instructions for the current scene's
  * mode (literary or casual), and layer 5 shows scene breaks where they fall.
@@ -30,7 +34,9 @@
  * reshaping this file.
  */
 
-import type { Channel, ChannelKind, ChannelMode, ChatMessage, Message, Settings } from "./types.ts";
+import type { PromptEntry } from "./notebook.ts";
+import { playedBy } from "./permissions.ts";
+import type { Channel, ChannelKind, ChannelMode, ChatMessage, Message, NotebookEntry, Settings } from "./types.ts";
 
 /**
  * Fixed framing that comes before your partner prompt in RP channels.
@@ -120,6 +126,16 @@ export interface PromptInput {
   channels: Channel[];
   /** The channel's messages, oldest first. Only the newest `historyLimit` are sent. */
   messages: Message[];
+  /**
+   * RP channels: the notebook entries pinned to the channel, and the ones
+   * they link to, as your partner may see them (see `Notebook.forPrompt`).
+   */
+  notebook?: { pinned: PromptEntry[]; linked: PromptEntry[] };
+  /**
+   * OOC channels: the names of the characters your partner plays in each
+   * channel, by channel id, and every notebook entry they can see.
+   */
+  overview?: { castNames: Record<string, string[]>; entries: PromptEntry[] };
 }
 
 /**
@@ -127,8 +143,11 @@ export interface PromptInput {
  *
  * @returns The messages to send to the chat completions API.
  */
-export function buildPromptStack({ settings, channel, channels, messages }: PromptInput): ChatMessage[] {
+export function buildPromptStack({ settings, channel, channels, messages, notebook, overview }: PromptInput): ChatMessage[] {
   const isRp = channel.kind === "rp";
+  const pinned = notebook?.pinned ?? [];
+  const yourCharacters = pinned.filter((p) => p.entry.kind === "character" && playedBy(p.entry) === "partner");
+  const userCharacters = pinned.filter((p) => p.entry.kind === "character" && playedBy(p.entry) === "user");
 
   const layers: Layer[] = [
     // Layer 1: who is writing. The fixed framing for this kind of channel,
@@ -138,25 +157,22 @@ export function buildPromptStack({ settings, channel, channels, messages }: Prom
       content: joinNonEmpty([isRp ? RP_FRAMING : OOC_FRAMING, settings.partnerPrompt]),
     },
     // Layer 2: how to write in this scene's mode. RP channels only.
-    { title: "Style", content: isRp ? modeInstructions(channel.mode, channel.characterName) : null },
-    // Layer 3: in RP, the character being played. Stage 4 replaces this
-    // single sheet with every notebook entry pinned to the channel.
-    // In OOC, an overview of the server instead.
-    isRp
-      ? {
-          title: channel.characterName ? `The character you play: ${channel.characterName}` : "The character you play",
-          content: channel.characterSheet,
-        }
-      : { title: "Channels on your server", content: describeChannels(channels, channel) },
-    // Also layer 3: in casual scenes the user posts as their own characters,
-    // so name them, so the model doesn't write for them.
     {
-      title: "The user's characters",
-      content:
-        isRp && channel.mode === "casual" && settings.userCharacters.length > 0
-          ? `The user plays ${settings.userCharacters.map((c) => c.name).join(", ")}. Never write their messages.`
-          : null,
+      title: "Style",
+      content: isRp ? modeInstructions(channel.mode, yourCharacters[0]?.entry.name ?? "") : null,
     },
+    // Layer 3, in RP: the notebook entries pinned to the channel (the cast
+    // and any lore), then the entries they link to.
+    { title: "The cast", content: isRp ? describeEntries(pinned.filter((p) => p.entry.kind === "character")) : null },
+    { title: "Lore", content: isRp ? describeEntries(pinned.filter((p) => p.entry.kind === "lore")) : null },
+    { title: "Linked notes", content: isRp ? describeEntries(notebook?.linked ?? []) : null },
+    {
+      title: "Whose characters are whose",
+      content: isRp ? castRules(yourCharacters.map((p) => p.entry.name), userCharacters.map((p) => p.entry.name)) : null,
+    },
+    // Layer 3, in OOC: an overview of the server and the notebook instead.
+    { title: "Channels on your server", content: isRp ? null : describeChannels(channels, channel, overview?.castNames ?? {}) },
+    { title: "Your shared notebook", content: isRp ? null : describeNotebook(overview?.entries ?? []) },
     // Layer 4: model-quirk prompt from the connection profile. Stage 5.
     { title: "Model notes", content: null },
   ];
@@ -187,15 +203,84 @@ export function buildPromptStack({ settings, channel, channels, messages }: Prom
  *
  *   - #story: roleplay, you play Ilse Marrow
  *   - #ooc: this conversation
+ *
+ * @param castNames  The characters your partner plays in each channel, by id.
  */
-export function describeChannels(channels: Channel[], current: Channel): string {
+export function describeChannels(channels: Channel[], current: Channel, castNames: Record<string, string[]>): string {
   return channels
     .map((c) => {
       if (c.id === current.id) return `- #${c.name}: this conversation`;
       if (c.kind === "ooc") return `- #${c.name}: another out-of-character chat`;
-      return `- #${c.name}: roleplay${c.characterName ? `, you play ${c.characterName}` : ""}`;
+      const names = castNames[c.id] ?? [];
+      return `- #${c.name}: roleplay${names.length ? `, you play ${names.join(", ")}` : ""}`;
     })
     .join("\n");
+}
+
+/** The note added to entries hidden from the user. */
+export const SECRET_NOTE = "Hidden from the user: this is your secret. Use it in the story, but never reveal it outright.";
+
+/**
+ * Notebook entries written out for the prompt, each as a `###` heading with
+ * its fields and any notes for the writer:
+ *
+ *   ### Ilse Marrow (you play this character)
+ *   Age: 34
+ *   Speech: Short sentences.
+ *   Notes for you: Ilse never raises her voice.
+ *
+ * Entries hidden from the user are marked, so the model keeps their secrets.
+ * `[[Links]]` are written as plain names.
+ */
+export function describeEntries(entries: PromptEntry[]): string {
+  return entries
+    .map(({ entry, hiddenFromUser }) => {
+      const lines = [`### ${entry.name}${entryRole(entry)}`];
+      if (hiddenFromUser) lines.push(`(${SECRET_NOTE})`);
+      for (const field of entry.fields) {
+        if (field.value.trim()) lines.push(`${field.label}: ${plainLinks(field.value.trim())}`);
+      }
+      if (entry.systemPrompt.trim()) lines.push(`Notes for you: ${plainLinks(entry.systemPrompt.trim())}`);
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
+/** " (you play this character)", " (the user plays this character)", or "" for lore. */
+function entryRole(entry: NotebookEntry): string {
+  if (entry.kind !== "character") return "";
+  return playedBy(entry) === "user" ? " (the user plays this character)" : " (you play this character)";
+}
+
+/** `[[Name]]` becomes `Name`, and `[[Name|shown]]` becomes `shown`. */
+export function plainLinks(text: string): string {
+  return text.replace(/\[\[([^\]|\n]+)(?:\|([^\]\n]*))?\]\]/g, (_m, name: string, shown?: string) => (shown ?? name).trim());
+}
+
+/** Who plays whom in this channel, so the model never writes for the user's characters. */
+function castRules(yours: string[], theirs: string[]): string | null {
+  const lines: string[] = [];
+  if (yours.length) lines.push(`You play ${yours.join(", ")}.`);
+  if (theirs.length) lines.push(`The user plays ${theirs.join(", ")}. Never write their actions, dialogue or thoughts.`);
+  return lines.length ? lines.join(" ") : null;
+}
+
+/**
+ * The OOC overview of the notebook: every entry your partner can see, by
+ * name, with whose it is and whether it's a secret from the user.
+ */
+export function describeNotebook(entries: PromptEntry[]): string | null {
+  if (entries.length === 0) return null;
+  const whose = (entry: NotebookEntry) =>
+    entry.owner === "joint" ? "shared" : entry.owner === "partner" ? "yours" : "the user's";
+  const lines = entries.map(
+    ({ entry, hiddenFromUser }) =>
+      `- ${entry.name} (${entry.kind}, ${whose(entry)}${hiddenFromUser ? ", hidden from the user" : ""})`,
+  );
+  if (entries.some((e) => e.hiddenFromUser)) {
+    lines.push("", "Entries marked hidden are secrets you're keeping from the user. Don't reveal them here either.");
+  }
+  return lines.join("\n");
 }
 
 /**

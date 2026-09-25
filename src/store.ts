@@ -14,6 +14,9 @@ import type { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { openDatabase } from "./db.ts";
+import { NotFoundError, ValidationError } from "./errors.ts";
+import { Notebook } from "./notebook.ts";
+import { parseSheet } from "./sheets.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
   Author,
@@ -23,30 +26,16 @@ import type {
   Message,
   MessageKind,
   Settings,
-  UserCharacter,
 } from "./types.ts";
+
+// The error types live in their own file (so the notebook can use them
+// too); re-exported here, where most code already imports them from.
+export { NotFoundError, ValidationError };
 
 /** Where the starting partner prompt and character sheet are kept. */
 const DEFAULTS_DIR = resolve(import.meta.dir, "..", "defaults");
 
-/** Thrown when something is looked up by an id that doesn't exist. */
-export class NotFoundError extends Error {
-  constructor(what: string) {
-    super(`That ${what} doesn't exist.`);
-    this.name = "NotFoundError";
-  }
-}
 
-/**
- * Thrown when a request contains invalid data: a missing name, a temperature
- * out of range, and so on. The message says what's wrong and is shown to you.
- */
-export class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ValidationError";
-  }
-}
 
 // ------------------------------------------------------------- defaults
 
@@ -67,7 +56,6 @@ export function defaultSettings(): Settings {
     temperature: 0.9,
     maxTokens: 1024,
     historyLimit: 40,
-    userCharacters: [],
     appTheme: "classic",
   };
 }
@@ -92,9 +80,9 @@ const LIMITS = {
   temperature: { min: 0, max: 2 },
   maxTokens: { min: 16, max: 32000 },
   historyLimit: { min: 1, max: 1000 },
-  /** Longest prompt or character sheet, in characters. */
+  /** Longest partner prompt, in characters. */
   longText: 100_000,
-  /** Longest name (channel, character, partner), in characters. */
+  /** Longest name (channel, partner), in characters. */
   name: 100,
 } as const;
 
@@ -129,7 +117,6 @@ export function validateSettings(input: unknown): Partial<Settings> {
   if (raw.historyLimit !== undefined) {
     clean.historyLimit = numberInRange(raw.historyLimit, "historyLimit", LIMITS.historyLimit, true);
   }
-  if (raw.userCharacters !== undefined) clean.userCharacters = userCharacters(raw.userCharacters);
   // Only the id's form is checked here; the server checks the theme exists.
   if (raw.appTheme !== undefined) clean.appTheme = themeId(raw.appTheme, "appTheme");
 
@@ -144,28 +131,6 @@ function themeId(value: unknown, field: string): string {
   return value;
 }
 
-/**
- * Check your list of characters: each needs a name and a short prefix with
- * no spaces or colons, and no two can share a prefix (or a prefix would be
- * ambiguous).
- */
-function userCharacters(value: unknown): UserCharacter[] {
-  if (!Array.isArray(value)) throw new ValidationError("userCharacters must be a list");
-  if (value.length > 50) throw new ValidationError("That's too many characters (50 at most)");
-  const seen = new Set<string>();
-  return value.map((item) => {
-    const raw = requireObject(item, "Each character");
-    const character = { name: name(raw.name, "Character name"), prefix: name(raw.prefix, "Prefix") };
-    if (/[\s:]/.test(character.prefix) || character.prefix.length > 20) {
-      throw new ValidationError(`The prefix "${character.prefix}" must be short, with no spaces or colons`);
-    }
-    const key = character.prefix.toLowerCase();
-    if (seen.has(key)) throw new ValidationError(`Two characters use the prefix "${character.prefix}"`);
-    seen.add(key);
-    return character;
-  });
-}
-
 /** Check a channel mode. */
 function mode(value: unknown): ChannelMode {
   if (value !== "literary" && value !== "casual") throw new ValidationError('mode must be "literary" or "casual"');
@@ -178,8 +143,6 @@ export interface NewChannel {
   kind: ChannelKind;
   /** RP channels: the first scene's mode. Defaults to literary. */
   mode?: ChannelMode;
-  characterName?: string;
-  characterSheet?: string;
 }
 
 /** Check the body of a "create channel" request. */
@@ -192,7 +155,6 @@ export function validateNewChannel(input: unknown): NewChannel {
     name: name(raw.name, "name"),
     kind: raw.kind,
     ...(raw.mode !== undefined ? { mode: mode(raw.mode) } : {}),
-    ...validateChannelUpdate({ characterName: raw.characterName, characterSheet: raw.characterSheet }),
   };
 }
 
@@ -200,20 +162,13 @@ export function validateNewChannel(input: unknown): NewChannel {
  * The channel fields that can be changed after creation. `mode` is the mode
  * you *ask* for; see `Store.updateChannel` for when it takes effect.
  */
-export type ChannelUpdate = Partial<Pick<Channel, "name" | "characterName" | "characterSheet" | "mode" | "theme">>;
+export type ChannelUpdate = Partial<Pick<Channel, "name" | "mode" | "theme">>;
 
 /** Check a partial channel update. The kind can't be changed, so it's ignored. */
 export function validateChannelUpdate(input: unknown): ChannelUpdate {
   const raw = requireObject(input, "Channel");
   const clean: ChannelUpdate = {};
   if (raw.name !== undefined) clean.name = name(raw.name, "name");
-  if (raw.characterName !== undefined) {
-    // Unlike other names, a character name may be empty (narration only).
-    if (typeof raw.characterName !== "string") throw new ValidationError("characterName must be text");
-    if (raw.characterName.length > LIMITS.name) throw new ValidationError("characterName is too long");
-    clean.characterName = raw.characterName.trim();
-  }
-  if (raw.characterSheet !== undefined) clean.characterSheet = longText(raw.characterSheet, "characterSheet");
   if (raw.mode !== undefined) clean.mode = mode(raw.mode);
   // `null` (or "") means "use the app theme".
   if (raw.theme !== undefined) clean.theme = raw.theme === null || raw.theme === "" ? null : themeId(raw.theme, "theme");
@@ -274,8 +229,6 @@ interface ChannelRow {
   pending_mode: ChannelMode | null;
   theme: string | null;
   position: number;
-  character_name: string;
-  character_sheet: string;
   created_at: string;
 }
 
@@ -303,8 +256,6 @@ function toChannel(row: ChannelRow): Channel {
     pendingMode: row.pending_mode,
     theme: row.theme,
     position: row.position,
-    characterName: row.character_name,
-    characterSheet: row.character_sheet,
     createdAt: row.created_at,
   };
 }
@@ -358,13 +309,15 @@ export interface NewMessage {
 
 export class Store {
   readonly db: Database;
+  /** Characters, lore and each channel's cast (see `src/notebook.ts`). */
+  readonly notebook: Notebook;
 
   /**
    * Open (or create) the database inside `dataDir`.
    *
    * The very first time, the database is filled with starting content: your
    * stage 1 chat if there is one (see `src/legacy.ts`), otherwise a `#story`
-   * channel with the example character and an `#ooc` channel.
+   * channel with the example character pinned to it, and an `#ooc` channel.
    *
    * @param dataDir  Folder for the database. Created if it doesn't exist.
    *                 Pass `":memory:"` for a throwaway database (for tests).
@@ -376,6 +329,7 @@ export class Store {
 
     const isNew = inMemory || !existsSync(path);
     this.db = openDatabase(path);
+    this.notebook = new Notebook(this.db);
 
     if (isNew) {
       const imported = !inMemory && importLegacyChat(this, dataDir);
@@ -385,9 +339,26 @@ export class Store {
 
   /** Starting content for a brand-new server. */
   private seed(): void {
-    const character = defaultCharacter();
-    this.createChannel({ name: "story", kind: "rp", characterName: character.name, characterSheet: character.sheet });
+    const story = this.createChannel({ name: "story", kind: "rp" });
     this.createChannel({ name: "ooc", kind: "ooc" });
+    const character = defaultCharacter();
+    this.addCharacterFromSheet(character.name, character.sheet, story.id);
+  }
+
+  /**
+   * Make a character entry of your partner's from a plain-text sheet, and
+   * pin it to a channel. Used for the example character and for importing
+   * a stage 1 chat.
+   */
+  addCharacterFromSheet(name: string, sheet: string, channelId: string): void {
+    const parsed = parseSheet(sheet);
+    const entry = this.notebook.createEntry("user", {
+      kind: "character",
+      owner: "partner",
+      name: name || parsed.name || "Unnamed character",
+      fields: parsed.fields,
+    });
+    this.notebook.pin("user", channelId, entry.id);
   }
 
   /** Close the database. Only needed in tests, which open many. */
@@ -441,8 +412,8 @@ export class Store {
     const id = crypto.randomUUID();
     this.db
       .query(
-        `INSERT INTO channels (id, name, kind, mode, position, character_name, character_sheet, created_at)
-         VALUES ($id, $name, $kind, $mode, $position, $characterName, $characterSheet, $createdAt)`,
+        `INSERT INTO channels (id, name, kind, mode, position, created_at)
+         VALUES ($id, $name, $kind, $mode, $position, $createdAt)`,
       )
       .run({
         id,
@@ -450,16 +421,14 @@ export class Store {
         kind: input.kind,
         mode: input.mode ?? "literary",
         position: next,
-        // OOC channels have no character.
-        characterName: input.kind === "rp" ? (input.characterName ?? "") : "",
-        characterSheet: input.kind === "rp" ? (input.characterSheet ?? "") : "",
         createdAt: new Date().toISOString(),
       });
     return this.getChannel(id);
   }
 
   /**
-   * Change a channel's name, character or mode. Returns the updated channel.
+   * Change a channel's name, mode or theme. Returns the updated channel.
+   * (Its cast is changed by pinning entries; see `src/notebook.ts`.)
    *
    * A mode change follows the design's rule that a scene never mixes
    * styles:
@@ -474,11 +443,6 @@ export class Store {
     const channel = this.getChannel(id); // throws if missing
     const { mode: requestedMode, ...rest } = update;
     const merged = { ...channel, ...rest };
-    // Character fields only mean something for RP channels.
-    if (channel.kind === "ooc") {
-      merged.characterName = "";
-      merged.characterSheet = "";
-    }
     if (requestedMode !== undefined && channel.kind === "rp") {
       if (this.currentSceneIsEmpty(id)) {
         merged.mode = requestedMode;
@@ -489,15 +453,12 @@ export class Store {
     }
     this.db
       .query(
-        `UPDATE channels SET name = $name, character_name = $characterName, character_sheet = $characterSheet,
-                mode = $mode, pending_mode = $pendingMode, theme = $theme
+        `UPDATE channels SET name = $name, mode = $mode, pending_mode = $pendingMode, theme = $theme
          WHERE id = $id`,
       )
       .run({
         id,
         name: merged.name,
-        characterName: merged.characterName,
-        characterSheet: merged.characterSheet,
         mode: merged.mode,
         pendingMode: merged.pendingMode,
         theme: merged.theme,

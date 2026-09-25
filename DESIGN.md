@@ -20,7 +20,7 @@ A small Bun server runs in Termux on the phone and holds all data; you use Aetti
 
 1. Partner identity and writing style (who is writing)
 2. Channel mode instructions (literary or casual)
-3. Character sheets and pinned notebook entries for the channel
+3. The channel's cast and lore: its pinned notebook entries, and entries they link to
 4. Connection profile's model-quirk prompt
 5. Scene summaries and recent messages
 
@@ -54,7 +54,8 @@ Each RP channel has a mode. A mode change takes effect at the next scene break, 
 | You post as | Just your post | A character, via proxy prefix (`k: *waves*`) or picker |
 
 - **Casual replies are split into bubbles** from `Name: text` lines, which the partner is asked to write. Only known names start a bubble, so text like `Note: ...` stays as text, and a reply with no names becomes one bubble.
-- **Your characters** (name and proxy prefix) are listed once in settings and usable in every casual channel. Several tagged lines in one message become several bubbles.
+- **Your characters** are notebook entries you own, each with an optional proxy prefix. Any of them can be used in any casual channel, and posting as one pins them to that channel's cast. Several tagged lines in one message become several bubbles.
+- **A literary post voices the characters it mentions** by full or first name. If it names none and the partner has one character in the cast, it's theirs; otherwise it's narration.
 - **In a casual scene, the prompt names your characters** so the partner doesn't write their lines.
 
 Delete is never direct for the partner; channel deletion needs your approval.
@@ -83,6 +84,17 @@ Every entry and folder has an owner, and only the owner changes its settings.
 - **Folders pass settings down** to their entries unless an entry overrides them.
 - **Shared lore is always suggest-only.** Changes appear as a before/after comparison the other person approves or rejects. Most lore discussion happens in OOC first.
 - Entries use Xoul-style fields and an optional per-entry system prompt, and link to each other Obsidian-style (`[[Character]]`).
+
+**Decided in stage 4:**
+
+- **Fields are flexible labelled pairs.** A new character starts from a template (Pronouns, Age, Appearance, Personality, Background, Speech) and new lore from Summary and Details, but any field can be renamed, added or removed. Stage 1 to 3.5 character sheets were read into fields line by line (`Label: value`).
+- **Characters are played by their owner:** yours by you, your partner's and shared ones by your partner.
+- **Links pull in one step.** Entries linked with `[[Name]]` (or `[[Name|shown text]]`) from a pinned entry join the prompt as "linked notes", but links from those don't, so the prompt stays small.
+- **You can make entries for your partner** (until stage 6 gives them their own tools), including handing over one of yours. Once given away, only the new owner can change its settings. Only the owner picks an entry's visibility and editing, even when making it.
+- **Deleting:** you delete your own entries. Your partner's are unpinned, not deleted, and deleting shared lore is a suggestion, like any other change to it.
+- **Suggestions wait.** Suggestions are stored with who made them. Your partner reviews yours from stage 6; until then they wait, and you can withdraw them.
+- **Unpinning always works,** even for an entry hidden from you: it's your story, and you can see that something is pinned.
+- **Folders are one level deep** and belong to whoever made them. Deleting a folder keeps its entries.
 
 ### Hidden items
 
@@ -170,7 +182,7 @@ The whole look of Aettica is themeable, including glassy, skeuomorphic styles li
 
 Each stage adds one new concept, so there's only ever one new thing to learn. Stage 1 is essentially Tiny RP.
 
-**Progress:** stages 1 to 3.5 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md), [docs/stage-3.md](docs/stage-3.md) and [docs/stage-3.5.md](docs/stage-3.5.md) for how they work.
+**Progress:** stages 1 to 4 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md), [docs/stage-3.md](docs/stage-3.md), [docs/stage-3.5.md](docs/stage-3.5.md) and [docs/stage-4.md](docs/stage-4.md) for how they work.
 
 | Stage | Adds | New concept learned |
 | --- | --- | --- |
@@ -200,11 +212,11 @@ These are parked until the core works.
 
 - [ ] How does the partner review your shared-lore proposals: immediately, or on their next wake-up? Can they reject?
 - [ ] Does the partner keep private notes about you and your friendship for OOC memory?
-- [ ] Which Xoul-style fields does a notebook entry have?
+- [x] Which Xoul-style fields does a notebook entry have? Flexible labelled fields, starting from a template per kind (see "Decided in stage 4").
 - [ ] Which of your nanoGPT models reliably handle tool calling?
 - [ ] How often do rolling channel summaries update (every N messages)?
 - [ ] Is there ever more than one partner per server?
 - [ ] Should a channel theme also restyle the sidebar while you're in that channel?
 - [ ] Can the partner pick or suggest a channel's theme (for example when creating a channel)?
-- [ ] Should your casual characters stay server-wide, or become notebook entries pinned to each channel's cast in stage 4?
+- [x] Should your casual characters stay server-wide, or become notebook entries pinned to each channel's cast in stage 4? They're notebook entries, usable anywhere, and posting as one pins it to the channel.
 - [ ] Do your models reliably write the casual `Name: text` format?

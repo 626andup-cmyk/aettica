@@ -15,10 +15,12 @@ import {
   RP_FRAMING,
   recentMessages,
   sceneBreakMarker,
+  SECRET_NOTE,
   toChatHistory,
   type PromptInput,
 } from "../src/prompt.ts";
-import type { Author, Channel, Message, Settings } from "../src/types.ts";
+import type { PromptEntry } from "../src/notebook.ts";
+import type { Author, Channel, Message, NotebookEntry, Settings } from "../src/types.ts";
 
 const settings: Settings = {
   partnerName: "Arlo",
@@ -27,7 +29,6 @@ const settings: Settings = {
   temperature: 0.9,
   maxTokens: 500,
   historyLimit: 40,
-  userCharacters: [],
   appTheme: "classic",
 };
 
@@ -40,15 +41,45 @@ function channel(overrides: Partial<Channel>): Channel {
     pendingMode: null,
     theme: null,
     position: 0,
-    characterName: "Ilse Marrow",
-    characterSheet: "Name: Ilse Marrow\nRole: lighthouse keeper",
     createdAt: new Date(0).toISOString(),
     ...overrides,
   };
 }
 
 const story = channel({});
-const ooc = channel({ id: "ooc", name: "ooc", kind: "ooc", position: 1, characterName: "", characterSheet: "" });
+const ooc = channel({ id: "ooc", name: "ooc", kind: "ooc", position: 1 });
+
+/** A notebook entry, as the prompt receives it. */
+function entry(name: string, extra: Partial<NotebookEntry> = {}, hiddenFromUser = false): PromptEntry {
+  return {
+    entry: {
+      id: name,
+      kind: "character",
+      name,
+      fields: [],
+      systemPrompt: "",
+      proxyPrefix: null,
+      folderId: null,
+      owner: "partner",
+      visibility: null,
+      editing: null,
+      createdAt: "",
+      updatedAt: "",
+      ...extra,
+    },
+    hiddenFromUser,
+  };
+}
+
+const ilse = entry("Ilse Marrow", {
+  fields: [
+    { label: "Role", value: "lighthouse keeper" },
+    { label: "Empty", value: "" },
+  ],
+  systemPrompt: "Ilse never raises her voice. She knows [[The Charted Sea|the sea]].",
+});
+const kestrel = entry("Kestrel", { owner: "user", proxyPrefix: "k" });
+const storyNotebook = { pinned: [ilse], linked: [] };
 
 let nextId = 0;
 function msg(author: Author, content: string, extra: Partial<Message> = {}): Message {
@@ -73,7 +104,15 @@ function sceneBreak(title: string): Message {
 
 /** Build a stack for `#story` unless told otherwise. */
 function build(overrides: Partial<PromptInput> = {}) {
-  return buildPromptStack({ settings, channel: story, channels: [story, ooc], messages: [msg("user", "Hi")], ...overrides });
+  return buildPromptStack({
+    settings,
+    channel: story,
+    channels: [story, ooc],
+    messages: [msg("user", "Hi")],
+    notebook: storyNotebook,
+    overview: { castNames: { story: ["Ilse Marrow"] }, entries: [ilse] },
+    ...overrides,
+  });
 }
 
 describe("buildPromptStack in an RP channel", () => {
@@ -84,13 +123,44 @@ describe("buildPromptStack in an RP channel", () => {
     const text = system!.content;
     const framing = text.indexOf(RP_FRAMING);
     const partner = text.indexOf(settings.partnerPrompt);
-    const character = text.indexOf(story.characterSheet);
+    const character = text.indexOf("### Ilse Marrow (you play this character)");
 
-    // Layer 1 (framing, then partner prompt) comes before layer 3 (character).
+    // Layer 1 (framing, then partner prompt) comes before layer 3 (the cast).
     expect(framing).toBeGreaterThanOrEqual(0);
     expect(partner).toBeGreaterThan(framing);
     expect(character).toBeGreaterThan(partner);
-    expect(text).toContain("## The character you play: Ilse Marrow");
+    expect(text).toContain("## The cast");
+  });
+
+  test("writes each pinned entry out with its fields and notes, and links as plain names", () => {
+    const [system] = build();
+    expect(system!.content).toContain(
+      "### Ilse Marrow (you play this character)\nRole: lighthouse keeper\nNotes for you: Ilse never raises her voice. She knows the sea.",
+    );
+    // Empty fields are left out.
+    expect(system!.content).not.toContain("Empty:");
+  });
+
+  test("puts lore and linked notes under their own headings", () => {
+    const sea = entry("The Charted Sea", { kind: "lore", fields: [{ label: "Summary", value: "Mapped waters." }] });
+    const bell = entry("The Bell", { kind: "lore", fields: [{ label: "Summary", value: "It rings." }] });
+    const [system] = build({ notebook: { pinned: [ilse, bell], linked: [sea] } });
+    expect(system!.content).toContain("## Lore\n\n### The Bell\nSummary: It rings.");
+    expect(system!.content).toContain("## Linked notes\n\n### The Charted Sea\nSummary: Mapped waters.");
+  });
+
+  test("says who plays whom, so the model leaves the user's characters alone", () => {
+    const [system] = build({ notebook: { pinned: [ilse, kestrel], linked: [] } });
+    expect(system!.content).toContain("### Kestrel (the user plays this character)");
+    expect(system!.content).toContain(
+      "You play Ilse Marrow. The user plays Kestrel. Never write their actions, dialogue or thoughts.",
+    );
+  });
+
+  test("marks entries hidden from the user as secrets", () => {
+    const secret = entry("The Drowned Man", {}, true);
+    const [system] = build({ notebook: { pinned: [ilse, secret], linked: [] } });
+    expect(system!.content).toContain(`### The Drowned Man (you play this character)\n(${SECRET_NOTE})`);
   });
 
   test("leaves out the layers that aren't built yet", () => {
@@ -103,24 +173,19 @@ describe("buildPromptStack in an RP channel", () => {
     const style = literary!.content.indexOf("## Style");
     expect(literary!.content).toContain(modeInstructions("literary", "Ilse Marrow"));
     expect(style).toBeGreaterThan(literary!.content.indexOf(RP_FRAMING));
-    expect(style).toBeLessThan(literary!.content.indexOf("## The character you play"));
+    expect(style).toBeLessThan(literary!.content.indexOf("## The cast"));
 
     const [casual] = build({ channel: channel({ mode: "casual" }) });
     expect(casual!.content).toContain(modeInstructions("casual", "Ilse Marrow"));
     expect(casual!.content).toContain("Ilse Marrow: *leans on the doorframe*");
   });
 
-  test("names your characters in casual scenes only", () => {
-    const withCharacters = { ...settings, userCharacters: [{ name: "Kestrel", prefix: "k" }] };
-    expect(build({ settings: withCharacters, channel: channel({ mode: "casual" }) })[0]!.content).toContain(
-      "The user plays Kestrel. Never write their messages.",
-    );
-    expect(build({ settings: withCharacters })[0]!.content).not.toContain("Kestrel");
-  });
-
-  test("leaves out an empty character sheet instead of sending an empty heading", () => {
-    const [system] = build({ channel: channel({ characterSheet: "   " }) });
-    expect(system!.content).not.toContain("The character you play");
+  test("leaves out empty cast, lore and linked sections instead of sending empty headings", () => {
+    const [system] = build({ notebook: { pinned: [], linked: [] } });
+    expect(system!.content).not.toContain("## The cast");
+    expect(system!.content).not.toContain("## Lore");
+    expect(system!.content).not.toContain("## Linked notes");
+    expect(system!.content).not.toContain("## Whose characters");
   });
 
   test("follows the system message with the conversation", () => {
@@ -189,7 +254,7 @@ describe("buildPromptStack in an OOC channel", () => {
     const [system] = build({ channel: ooc });
     expect(system!.content).toContain(OOC_FRAMING);
     expect(system!.content).not.toContain(RP_FRAMING);
-    expect(system!.content).not.toContain(story.characterSheet);
+    expect(system!.content).not.toContain("lighthouse keeper");
     // Your partner prompt still applies: it's who they are.
     expect(system!.content).toContain(settings.partnerPrompt);
   });
@@ -201,6 +266,18 @@ describe("buildPromptStack in an OOC channel", () => {
     expect(system!.content).toContain("#ooc: this conversation");
   });
 
+  test("lists the notebook, flagging secrets", () => {
+    const secret = entry("The Drowned Man", {}, true);
+    const sea = entry("The Charted Sea", { kind: "lore", owner: "joint" });
+    const [system] = build({ channel: ooc, overview: { castNames: {}, entries: [ilse, secret, sea, kestrel] } });
+    expect(system!.content).toContain("## Your shared notebook");
+    expect(system!.content).toContain("- Ilse Marrow (character, yours)");
+    expect(system!.content).toContain("- The Drowned Man (character, yours, hidden from the user)");
+    expect(system!.content).toContain("- The Charted Sea (lore, shared)");
+    expect(system!.content).toContain("- Kestrel (character, the user's)");
+    expect(system!.content).toContain("Don't reveal them here either.");
+  });
+
   test("uses the OOC nudges", () => {
     expect(build({ channel: ooc, messages: [] }).at(-1)!.content).toBe(NUDGES.ooc.opening);
   });
@@ -208,9 +285,9 @@ describe("buildPromptStack in an OOC channel", () => {
 
 describe("describeChannels", () => {
   test("describes each kind of channel", () => {
-    const other = channel({ id: "x", name: "side-chat", kind: "ooc", characterName: "" });
-    const noCharacter = channel({ id: "y", name: "draft", characterName: "" });
-    expect(describeChannels([story, other, noCharacter, ooc], ooc)).toBe(
+    const other = channel({ id: "x", name: "side-chat", kind: "ooc" });
+    const noCharacter = channel({ id: "y", name: "draft" });
+    expect(describeChannels([story, other, noCharacter, ooc], ooc, { story: ["Ilse Marrow"] })).toBe(
       [
         "- #story: roleplay, you play Ilse Marrow",
         "- #side-chat: another out-of-character chat",

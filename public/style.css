@@ -1163,3 +1163,257 @@ button:disabled {
   letter-spacing: normal;
   color: var(--button-text);
 }
+
+/* ============================================================ notebook */
+
+/* For screen readers only: a label that's clear from what's around it. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.notebook,
+.entry-editor {
+  width: min(760px, 100vw - 24px);
+}
+
+.notebook-actions {
+  margin-top: 8px;
+}
+
+.notebook-list {
+  margin-top: 12px;
+}
+
+.notebook-folder + .notebook-folder {
+  margin-top: 14px;
+}
+
+.notebook-folder-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  border-bottom: var(--input-border);
+}
+
+.notebook-folder-name {
+  font: 600 15px var(--font-heading);
+  color: var(--text-strong);
+}
+
+.notebook-folder-header .link-button {
+  margin-left: auto;
+}
+
+.notebook-entries {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One entry in the list: avatar, name, badges. The whole row opens it. */
+.notebook-entry {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 0 10px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notebook-entry:hover {
+  background: var(--message-hover-bg);
+}
+
+.notebook-entry .avatar {
+  grid-row: span 2;
+}
+
+.notebook-entry-name {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.notebook-entry-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.entry-badge {
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--channel-link-active-bg);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* Characters' avatars in their own colour, like their messages. */
+.entry-avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  background: hsl(var(--avatar-hue) var(--avatar-saturation) var(--avatar-lightness));
+}
+
+.entry-avatar[data-kind="lore"] {
+  border-radius: var(--radius-sm);
+}
+
+/* Suggested changes waiting for review, above the entries. */
+.suggestion-list {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--update-bg);
+}
+
+.suggestion-title {
+  margin: 0 0 4px;
+  font: 600 15px var(--font-heading);
+  color: var(--text-strong);
+}
+
+.suggestion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 4px 0;
+}
+
+.suggestion-text {
+  flex: 1 1 240px;
+}
+
+.suggestion .hint {
+  margin: 0;
+}
+
+/* ------------------------------------------------------ entry editor */
+
+.entry-access {
+  margin-top: -6px;
+}
+
+/* A field: label on the left, value on the right (stacked on phones). */
+.entry-field {
+  display: grid;
+  grid-template-columns: minmax(90px, 160px) 1fr auto;
+  gap: 6px;
+  align-items: start;
+  margin-top: 6px;
+}
+
+.entry-field-label {
+  font-weight: 600;
+}
+
+.entry-field-remove {
+  padding: 10px 4px;
+}
+
+.add-field {
+  margin-top: 8px;
+}
+
+.entry-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+
+.entry-links-label {
+  color: var(--text-muted);
+}
+
+.entry-link {
+  font-size: inherit;
+  color: var(--accent);
+}
+
+.entry-link.missing {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.entry-settings {
+  margin: 18px 0 0;
+  padding: 4px 12px 12px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+}
+
+.entry-settings legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.folder-settings-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+@media (max-width: 599px) {
+  .entry-field {
+    grid-template-columns: 1fr auto;
+  }
+
+  .entry-field-value {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .entry-settings-grid,
+  .folder-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------ cast (channel settings) */
+
+.cast-list {
+  margin: 4px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.cast-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.cast-member-name {
+  font-size: var(--font-size);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.cast-member.hidden-entry .cast-member-name {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.cast-unpin {
+  margin-left: auto;
+}

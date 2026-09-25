@@ -25,11 +25,20 @@ afterEach(() => {
 });
 
 describe("a new server", () => {
-  test("starts with #story (the example character) and #ooc", () => {
+  test("starts with #story and #ooc", () => {
     const [story, ooc] = store.listChannels();
-    expect(story).toMatchObject({ name: "story", kind: "rp", position: 0, characterName: "Ilse Marrow" });
-    expect(story!.characterSheet).toContain("lighthouse");
-    expect(ooc).toMatchObject({ name: "ooc", kind: "ooc", position: 1, characterName: "", characterSheet: "" });
+    expect(story).toMatchObject({ name: "story", kind: "rp", position: 0 });
+    expect(ooc).toMatchObject({ name: "ooc", kind: "ooc", position: 1 });
+  });
+
+  test("has the example character in the notebook, pinned to #story", () => {
+    const [story, ooc] = store.listChannels();
+    const [ilse] = store.notebook.listEntries("user");
+    expect(ilse).toMatchObject({ name: "Ilse Marrow", kind: "character", owner: "partner" });
+    // The sheet was read into fields.
+    expect(ilse!.fields.find((f) => f.label === "Background")!.value).toContain("logbook");
+    expect(store.notebook.castFor("user", story!.id).map((c) => c.name)).toEqual(["Ilse Marrow"]);
+    expect(store.notebook.castFor("user", ooc!.id)).toEqual([]);
   });
 
   test("starts with the default settings", () => {
@@ -57,7 +66,7 @@ describe("the database layout", () => {
     // Build a database the way stage 2 left it: only the first migration.
     const path = join(dir.path, "stage2.db");
     const old = new Database(path);
-    old.exec(MIGRATIONS[0]!);
+    old.exec(MIGRATIONS[0] as string);
     old.exec("PRAGMA user_version = 1");
     old.exec(`INSERT INTO channels (id, name, kind, position, created_at) VALUES ('rp', 'story', 'rp', 0, 'then')`);
     old.exec(`INSERT INTO channels (id, name, kind, position, created_at) VALUES ('ooc', 'ooc', 'ooc', 1, 'then')`);
@@ -76,6 +85,59 @@ describe("the database layout", () => {
       { id: "m1", kind: "post", mode: "literary", turn_id: null },
       { id: "m2", kind: "post", mode: null, turn_id: null },
     ]);
+    db.close();
+  });
+
+  test("moves stage 3.5's characters into the notebook", () => {
+    // A database as stage 3.5 left it: three migrations, a character in
+    // each RP channel (two identical), and your casual characters in settings.
+    const path = join(dir.path, "stage35.db");
+    const old = new Database(path);
+    for (const step of MIGRATIONS.slice(0, 3)) old.exec(step as string);
+    old.exec("PRAGMA user_version = 3");
+    const channel = old.query(
+      `INSERT INTO channels (id, name, kind, position, character_name, character_sheet, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'then')`,
+    );
+    channel.run("a", "story", "rp", 0, "Ilse Marrow", "Age: 34\nBackground: A keeper.");
+    channel.run("b", "sequel", "rp", 1, "Ilse Marrow", "Age: 34\nBackground: A keeper.");
+    channel.run("c", "heist", "rp", 2, "", "Name: Vee\nA getaway driver.");
+    channel.run("d", "ooc", "ooc", 3, "", "");
+    old.exec(`INSERT INTO settings (key, value) VALUES ('userCharacters', '[{"name":"Kestrel","prefix":"k"}]')`);
+    old.close();
+
+    const db = openDatabase(path);
+    const entries = db.query("SELECT id, name, owner, proxy_prefix, fields FROM notebook_entries ORDER BY name").all() as {
+      id: string;
+      name: string;
+      owner: string;
+      proxy_prefix: string | null;
+      fields: string;
+    }[];
+    expect(entries.map((e) => [e.name, e.owner, e.proxy_prefix])).toEqual([
+      ["Ilse Marrow", "partner", null],
+      ["Kestrel", "user", "k"],
+      ["Vee", "partner", null],
+    ]);
+    expect(JSON.parse(entries[0]!.fields)).toEqual([
+      { label: "Age", value: "34" },
+      { label: "Background", value: "A keeper." },
+    ]);
+    expect(JSON.parse(entries[2]!.fields)).toEqual([{ label: "Notes", value: "A getaway driver." }]);
+
+    const cast = (id: string) =>
+      (db.query("SELECT e.name FROM channel_cast c JOIN notebook_entries e ON e.id = c.entry_id WHERE channel_id = ? ORDER BY c.position, e.name").all(id) as { name: string }[]).map(
+        (r) => r.name,
+      );
+    // The identical character is one entry pinned to both channels.
+    expect(cast("a")).toEqual(["Ilse Marrow", "Kestrel"]);
+    expect(cast("b")).toEqual(["Ilse Marrow", "Kestrel"]);
+    expect(cast("c")).toEqual(["Vee", "Kestrel"]);
+    expect(cast("d")).toEqual([]);
+
+    expect(db.query("SELECT * FROM settings WHERE key = 'userCharacters'").get()).toBeNull();
+    const columns = (db.query("PRAGMA table_info(channels)").all() as { name: string }[]).map((c) => c.name);
+    expect(columns).not.toContain("character_name");
     db.close();
   });
 
@@ -99,21 +161,14 @@ describe("settings", () => {
 
 describe("channels", () => {
   test("new channels go to the bottom of the sidebar", () => {
-    const created = store.createChannel({ name: "heist", kind: "rp", characterName: "Vee" });
+    const created = store.createChannel({ name: "heist", kind: "rp" });
     expect(created.position).toBe(2);
     expect(store.listChannels().at(-1)!.id).toBe(created.id);
   });
 
-  test("OOC channels never keep a character", () => {
-    const ooc = store.createChannel({ name: "chat", kind: "ooc", characterName: "Nope", characterSheet: "Nope" });
-    expect(ooc).toMatchObject({ characterName: "", characterSheet: "" });
-    expect(store.updateChannel(ooc.id, { characterName: "Still no" }).characterName).toBe("");
-  });
-
-  test("can be renamed and have their character changed", () => {
+  test("can be renamed", () => {
     const story = store.listChannels()[0]!;
-    const updated = store.updateChannel(story.id, { name: "lighthouse", characterName: "Ilse" });
-    expect(updated).toMatchObject({ name: "lighthouse", characterName: "Ilse", characterSheet: story.characterSheet });
+    expect(store.updateChannel(story.id, { name: "lighthouse" })).toMatchObject({ name: "lighthouse" });
   });
 
   test("can be reordered, but only with every channel listed exactly once", () => {
@@ -132,6 +187,10 @@ describe("channels", () => {
     expect(() => store.getMessage(message.id)).toThrow(NotFoundError);
     const leftovers = store.db.query("SELECT COUNT(*) AS n FROM message_characters").get() as { n: number };
     expect(leftovers.n).toBe(0);
+    // Its cast is unpinned, but the characters stay in the notebook.
+    const pins = store.db.query("SELECT COUNT(*) AS n FROM channel_cast").get() as { n: number };
+    expect(pins.n).toBe(0);
+    expect(store.notebook.listEntries("user")).toHaveLength(1);
   });
 
   test("unknown channel ids are reported as not found", () => {
@@ -262,19 +321,6 @@ describe("validation", () => {
     [{ model: "" }, /model must be/],
     [{ partnerName: "  " }, /partnerName must be non-empty/],
     [{ partnerPrompt: 42 }, /partnerPrompt must be text/],
-    [{ userCharacters: "Kestrel" }, /must be a list/],
-    [{ userCharacters: [{ name: "Kestrel", prefix: "k k" }] }, /no spaces or colons/],
-    [{ userCharacters: [{ name: "Kestrel", prefix: "k:" }] }, /no spaces or colons/],
-    [{ userCharacters: [{ name: "", prefix: "k" }] }, /Character name must be non-empty/],
-    [
-      {
-        userCharacters: [
-          { name: "Kestrel", prefix: "k" },
-          { name: "Kit", prefix: "K" },
-        ],
-      },
-      /Two characters use the prefix/,
-    ],
     [[], /must be a JSON object/],
   ])("rejects settings %j", (input, error) => {
     expect(() => validateSettings(input)).toThrow(error);
@@ -284,7 +330,6 @@ describe("validation", () => {
     [{ name: "x", kind: "dm" }, /kind must be/],
     [{ name: "", kind: "rp" }, /name must be non-empty/],
     [{ name: "x".repeat(101), kind: "rp" }, /name is too long/],
-    [{ name: "x", kind: "rp", characterName: 7 }, /characterName must be text/],
     [{ name: "x", kind: "rp", mode: "noir" }, /mode must be/],
   ])("rejects new channel %j", (input, error) => {
     expect(() => validateNewChannel(input)).toThrow(error);

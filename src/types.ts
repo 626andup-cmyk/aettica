@@ -4,8 +4,8 @@
  * Everything the server saves or sends to the browser is described here, so
  * this file doubles as a map of the data model. Each stage grows it:
  * stage 2 added channels and message authorship; stage 3 added scene breaks
- * and channel modes; stage 3.5 added themes; stage 4 will add notebook
- * entries, and so on.
+ * and channel modes; stage 3.5 added themes; stage 4 added the notebook and
+ * the cast; and so on.
  *
  * How these shapes are stored in the database is in `src/db.ts`.
  */
@@ -21,7 +21,8 @@ export type Author = "user" | "partner";
 /**
  * What a channel is for.
  *
- * - `"rp"`: a storyline. Your partner writes as the channel's character.
+ * - `"rp"`: a storyline. Its cast is the notebook entries pinned to it: your
+ *   partner writes their characters (and shared ones), you write yours.
  * - `"ooc"`: out of character. Your partner talks to you as themselves, like
  *   a friend, and can see which storylines exist on the server.
  */
@@ -49,16 +50,133 @@ export type ChannelMode = "literary" | "casual";
  */
 export type MessageKind = "post" | "scene_break";
 
+// ------------------------------------------------------------- notebook
+
 /**
- * One of your characters, for posting in casual mode.
+ * Who something in the notebook belongs to. Only the owner changes its
+ * settings (see `src/permissions.ts`).
  *
- * Starting a line with the prefix and a colon (`k: *waves*`) posts that line
- * as the character, like Tupperbox on Discord.
+ * - `"user"`: you.
+ * - `"partner"`: your partner.
+ * - `"joint"`: shared lore. Always visible to both, and always
+ *   suggest-only: changes go through a suggestion the other person reviews.
  */
-export interface UserCharacter {
+export type Owner = "user" | "partner" | "joint";
+
+/** Whether the *other* person (not the owner) can see an entry. */
+export type Visibility = "visible" | "hidden";
+
+/**
+ * What the *other* person (not the owner) may do to an entry's contents:
+ *
+ * - `"open"`: edit it directly.
+ * - `"suggest"`: suggest changes, which the owner accepts or rejects.
+ * - `"locked"`: nothing.
+ */
+export type Editing = "open" | "suggest" | "locked";
+
+/** Characters can be in a channel's cast and voice messages; lore can't. */
+export type EntryKind = "character" | "lore";
+
+/** One labelled field of an entry, e.g. `{ label: "Age", value: "34" }`. */
+export interface EntryField {
+  label: string;
+  value: string;
+}
+
+/**
+ * A folder of entries. Its visibility and editing settings pass down to the
+ * entries in it, unless an entry sets its own.
+ */
+export interface NotebookFolder {
+  id: string;
   name: string;
-  /** Short proxy tag, e.g. `k`. No spaces or colons. */
-  prefix: string;
+  owner: Owner;
+  visibility: Visibility;
+  editing: Editing;
+  position: number;
+  createdAt: string;
+}
+
+/** One notebook entry: a character or a piece of lore. */
+export interface NotebookEntry {
+  id: string;
+  kind: EntryKind;
+  /** The entry's title: the character's name, or the lore's subject. */
+  name: string;
+  /** Xoul-style labelled fields, in order. */
+  fields: EntryField[];
+  /**
+   * Optional instructions for your partner, added to the prompt whenever
+   * this entry is in play (e.g. "Ilse never raises her voice").
+   */
+  systemPrompt: string;
+  /**
+   * Your characters only: a short proxy tag for casual scenes, e.g. `k`, so
+   * `k: *waves*` posts as this character. `null` if none.
+   */
+  proxyPrefix: string | null;
+  /** The folder it's in, or `null` for none. */
+  folderId: string | null;
+  owner: Owner;
+  /** Its own visibility, or `null` to use its folder's. */
+  visibility: Visibility | null;
+  /** Its own editing setting, or `null` to use its folder's. */
+  editing: Editing | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The settings that actually apply to an entry, after folder inheritance
+ * and the rules for shared lore. Worked out by `effectiveSettings`.
+ */
+export interface EffectiveSettings {
+  owner: Owner;
+  visibility: Visibility;
+  editing: Editing;
+}
+
+/** What a suggestion would change: any of these, or deleting the entry. */
+export interface SuggestedChange {
+  name?: string;
+  fields?: EntryField[];
+  systemPrompt?: string;
+  delete?: true;
+}
+
+/**
+ * A suggested change to an entry you can't edit directly: shown to the
+ * owner as a before/after comparison to accept or reject.
+ */
+export interface Suggestion {
+  id: string;
+  entryId: string;
+  /** Who suggested it. */
+  author: Author;
+  change: SuggestedChange;
+  status: "pending" | "accepted" | "rejected" | "withdrawn";
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+/**
+ * Someone in a channel's cast, as one person sees them. If the entry is
+ * hidden from that person, only `hidden: true` and a placeholder name are
+ * given away.
+ */
+export interface CastMember {
+  entryId: string;
+  /** The character's name, or "??? (hidden)". */
+  name: string;
+  /** Who plays them: your characters are yours; everyone else is your partner's to voice. */
+  playedBy: Author;
+  owner: Owner;
+  /** Characters make up the cast; lore can be pinned too, for reference. */
+  kind: EntryKind;
+  /** Hidden from the person looking. */
+  hidden: boolean;
+  proxyPrefix: string | null;
 }
 
 /** A channel: one storyline, or one out-of-character conversation. */
@@ -86,17 +204,6 @@ export interface Channel {
   theme: string | null;
   /** Where the channel sits in the sidebar: 0 is the top. */
   position: number;
-  /**
-   * RP channels only: the name of the character your partner plays here.
-   * Recorded on each partner message as the character it voices, and shown
-   * as the author name. Empty for OOC channels.
-   */
-  characterName: string;
-  /**
-   * RP channels only: that character's sheet (layer 3 of the prompt stack).
-   * Stage 4 replaces this with notebook entries pinned to the channel.
-   */
-  characterSheet: string;
   /** When the channel was created, as an ISO 8601 timestamp. */
   createdAt: string;
 }
@@ -167,8 +274,6 @@ export interface Settings {
   temperature: number;
   /** Upper limit on the length of one partner reply, in tokens. */
   maxTokens: number;
-  /** Your characters, for posting in casual mode. */
-  userCharacters: UserCharacter[];
   /** The app theme's id (see `src/themes.ts`). "classic" is the default look. */
   appTheme: string;
   /**

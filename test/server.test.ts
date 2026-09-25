@@ -82,7 +82,8 @@ describe("sending a message", () => {
     expect(request.model).toBe("some/model");
     expect(request.temperature).toBe(0.7);
     expect(request.max_tokens).toBe(321);
-    expect(request.messages[0]!.content).toContain(story.characterSheet);
+    // The cast's notebook entry is in the prompt.
+    expect(request.messages[0]!.content).toContain("### Ilse Marrow (you play this character)");
     expect(request.messages.at(-1)).toEqual({ role: "user", content: "Hello" });
   });
 
@@ -93,7 +94,8 @@ describe("sending a message", () => {
     const system = fake.requests[0]!.messages[0]!.content;
     expect(system).toContain(OOC_FRAMING);
     expect(system).toContain("#story: roleplay, you play Ilse Marrow");
-    expect(system).not.toContain(story.characterSheet);
+    // The notebook is summarised, not the whole of each entry.
+    expect(system).toContain("Your shared notebook");
   });
 
   test("only the channel's own messages are sent", async () => {
@@ -355,7 +357,8 @@ describe("scene breaks", () => {
 describe("casual mode", () => {
   beforeEach(() => {
     app.store.updateChannel(story.id, { mode: "casual" });
-    app.store.updateSettings({ userCharacters: [{ name: "Kestrel", prefix: "k" }, { name: "Jun", prefix: "j" }] });
+    app.store.notebook.createEntry("user", { kind: "character", name: "Kestrel", proxyPrefix: "k" });
+    app.store.notebook.createEntry("user", { kind: "character", name: "Jun", proxyPrefix: "j" });
   });
 
   test("your post is split into bubbles by proxy tag and the character you picked", async () => {
@@ -368,6 +371,12 @@ describe("casual mode", () => {
       [["Kestrel"], "*waves*", "casual"],
     ]);
     expect(data.userMessages[0].turnId).toBe(data.userMessages[1].turnId);
+    // Both joined the channel's cast by posting.
+    expect(data.channel.cast.map((c: any) => [c.name, c.playedBy])).toEqual([
+      ["Ilse Marrow", "partner"],
+      ["Jun", "user"],
+      ["Kestrel", "user"],
+    ]);
   });
 
   test("posting as someone who isn't one of your characters is refused", async () => {
@@ -400,13 +409,13 @@ describe("casual mode", () => {
 
 describe("channels", () => {
   test("can be created, renamed, reordered and deleted", async () => {
-    const created = await call("POST", "/api/channels", { name: " heist ", kind: "rp", characterName: "Vee" });
+    const created = await call("POST", "/api/channels", { name: " heist ", kind: "rp" });
     expect(created.status).toBe(200);
-    expect(created.data.channel).toMatchObject({ name: "heist", kind: "rp", characterName: "Vee", position: 2 });
+    expect(created.data.channel).toMatchObject({ name: "heist", kind: "rp", position: 2, cast: [] });
     const heist = created.data.channel.id;
 
-    const renamed = await call("PATCH", `/api/channels/${heist}`, { name: "the-heist", characterSheet: "A thief." });
-    expect(renamed.data.channel).toMatchObject({ name: "the-heist", characterSheet: "A thief.", characterName: "Vee" });
+    const renamed = await call("PATCH", `/api/channels/${heist}`, { name: "the-heist" });
+    expect(renamed.data.channel).toMatchObject({ name: "the-heist" });
 
     const reordered = await call("PUT", "/api/channels/order", { ids: [heist, story.id, ooc.id] });
     expect(reordered.data.channels.map((c: Channel) => c.name)).toEqual(["the-heist", "story", "ooc"]);
@@ -424,7 +433,8 @@ describe("channels", () => {
   });
 
   test("renaming the character changes who the partner's next reply voices", async () => {
-    await call("PATCH", `/api/channels/${story.id}`, { characterName: "The Keeper" });
+    const [ilse] = app.store.notebook.listEntries("user");
+    await call("PATCH", `/api/notebook/entries/${ilse!.id}`, { name: "The Keeper" });
     const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
     expect(data.partnerMessages[0].characters).toEqual(["The Keeper"]);
   });
@@ -588,5 +598,76 @@ describe("safety", () => {
     // does ask for "/../package.json" (a file that exists one folder up).
     expect((await call("GET", "/..%2Fpackage.json")).status).toBe(404);
     expect((await call("GET", "/nope.txt")).status).toBe(404);
+  });
+});
+
+describe("the notebook", () => {
+  const entryIn = async (name: string) =>
+    ((await call("GET", "/api/notebook")).data.entries as any[]).find((e) => e.name === name);
+
+  test("lists entries, folders, suggestions and the field templates", async () => {
+    const { data } = await call("GET", "/api/notebook");
+    expect(data.entries.map((e: any) => [e.name, e.owner, e.access])).toEqual([
+      ["Ilse Marrow", "partner", { edit: "direct", settings: false, delete: false }],
+    ]);
+    expect(data.entries[0].pinnedIn).toEqual([story.id]);
+    expect(data.folders).toEqual([]);
+    expect(data.suggestions).toEqual([]);
+    expect(data.templates.character).toContain("Appearance");
+  });
+
+  test("creates, edits and deletes your own entries", async () => {
+    const created = await call("POST", "/api/notebook/entries", { kind: "lore", name: "The Charted Sea" });
+    expect(created.data.entry).toMatchObject({ owner: "user", fields: [{ label: "Summary" }, { label: "Details" }] });
+    const id = created.data.entry.id;
+
+    const edited = await call("PATCH", `/api/notebook/entries/${id}`, { fields: [{ label: "Summary", value: "Cold." }] });
+    expect(edited.data.entry.fields).toEqual([{ label: "Summary", value: "Cold." }]);
+
+    expect((await call("DELETE", `/api/notebook/entries/${id}`, {})).data).toEqual({ deleted: true });
+    expect(await entryIn("The Charted Sea")).toBeUndefined();
+  });
+
+  test("changes to shared lore become suggestions", async () => {
+    const { data } = await call("POST", "/api/notebook/entries", { kind: "lore", name: "The Light", owner: "joint" });
+    const suggested = await call("PATCH", `/api/notebook/entries/${data.entry.id}`, { name: "The Lamp" });
+    expect(suggested.data.suggestion).toMatchObject({ author: "user", status: "pending", change: { name: "The Lamp" } });
+    expect((await entryIn("The Light"))).toBeDefined();
+
+    // You can't accept your own suggestion, only withdraw it.
+    const id = suggested.data.suggestion.id;
+    expect((await call("POST", `/api/notebook/suggestions/${id}/accept`, {})).status).toBe(403);
+    expect((await call("POST", `/api/notebook/suggestions/${id}/withdraw`, {})).status).toBe(200);
+    expect((await call("GET", "/api/notebook")).data.suggestions).toEqual([]);
+  });
+
+  test("hiding an entry of your partner's is refused", async () => {
+    const ilse = await entryIn("Ilse Marrow");
+    const { status } = await call("PUT", `/api/notebook/entries/${ilse.id}/settings`, { visibility: "hidden" });
+    expect(status).toBe(403);
+  });
+
+  test("pinning and unpinning changes a channel's cast", async () => {
+    const { data } = await call("POST", "/api/notebook/entries", { kind: "character", name: "Tamsin Hale", owner: "partner" });
+    const pinned = await call("PUT", `/api/channels/${story.id}/cast/${data.entry.id}`, {});
+    expect(pinned.data.channel.cast.map((c: any) => c.name)).toEqual(["Ilse Marrow", "Tamsin Hale"]);
+
+    // The partner now plays both, and the prompt says so.
+    await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(fake.requests[0]!.messages[0]!.content).toContain("### Tamsin Hale (you play this character)");
+
+    const unpinned = await call("DELETE", `/api/channels/${story.id}/cast/${data.entry.id}`, {});
+    expect(unpinned.data.channel.cast.map((c: any) => c.name)).toEqual(["Ilse Marrow"]);
+  });
+
+  test("folders can be created, renamed and deleted, keeping their entries", async () => {
+    const folder = (await call("POST", "/api/notebook/folders", { name: "Secrets", visibility: "hidden" })).data.folder;
+    expect(folder).toMatchObject({ name: "Secrets", owner: "user", visibility: "hidden" });
+    const entry = (await call("POST", "/api/notebook/entries", { kind: "lore", name: "The Wreck", folderId: folder.id })).data.entry;
+    expect(entry.settings.visibility).toBe("hidden");
+
+    expect((await call("PATCH", `/api/notebook/folders/${folder.id}`, { name: "Plans" })).data.folder.name).toBe("Plans");
+    await call("DELETE", `/api/notebook/folders/${folder.id}`, {});
+    expect((await entryIn("The Wreck")).folderId).toBeNull();
   });
 });

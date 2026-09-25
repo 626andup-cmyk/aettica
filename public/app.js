@@ -20,10 +20,24 @@
 const state = {
   /** Server-wide settings: partnerName, partnerPrompt, model, temperature, maxTokens, historyLimit. */
   settings: null,
-  /** Every channel, in sidebar order: {id, name, kind, position, characterName, characterSheet}. */
+  /**
+   * Every channel, in sidebar order: {id, name, kind, mode, pendingMode,
+   * theme, position, cast}. `cast` is the entries pinned to it, as you see
+   * them: {entryId, name, playedBy, owner, kind, hidden, proxyPrefix}.
+   */
   channels: [],
   /** Id of the open channel, or null if there are no channels. */
   channelId: null,
+  /**
+   * The notebook, as you see it: {folders, entries, suggestions, templates}.
+   * Each entry carries its effective `settings`, what you may do with it
+   * (`access`), and the channels it's pinned to (`pinnedIn`).
+   */
+  notebook: { folders: [], entries: [], suggestions: [], templates: { character: [], lore: [] } },
+  /** The entry open in the entry editor, or a new one: {kind, owner} without an id. */
+  editingEntry: null,
+  /** The folder open in the folder dialog (null for a new one). */
+  editingFolder: null,
   /** Messages in the open channel: {id, channelId, author, content, characters, createdAt, editedAt?, model?}. */
   messages: [],
   /** Ids of channels where the partner is writing right now. */
@@ -213,13 +227,14 @@ async function createChannel(event) {
   const form = els.newChannelForm.elements;
   const kind = form.kind.value;
   const body = { name: form.name.value, kind };
-  if (kind === "rp") {
-    body.mode = form.mode.value;
-    body.characterName = form.characterName.value;
-    body.characterSheet = form.characterSheet.value;
-  }
+  if (kind === "rp") body.mode = form.mode.value;
   try {
-    const { channel } = await api("POST", "/api/channels", body);
+    let { channel } = await api("POST", "/api/channels", body);
+    // Pin the character picked for your partner, if any.
+    if (kind === "rp" && form.cast.value) {
+      ({ channel } = await api("PUT", channelPath(`cast/${encodeURIComponent(form.cast.value)}`, channel.id), {}));
+      await loadNotebook();
+    }
     state.channels.push(channel);
     els.newChannelDialog.close();
     closeSidebar();
@@ -234,11 +249,7 @@ async function saveChannel(event) {
   const channel = currentChannel();
   const form = els.channelForm.elements;
   const body = { name: form.name.value, theme: form.theme.value || null };
-  if (channel.kind === "rp") {
-    body.mode = form.mode.value;
-    body.characterName = form.characterName.value;
-    body.characterSheet = form.characterSheet.value;
-  }
+  if (channel.kind === "rp") body.mode = form.mode.value;
   try {
     const { channel: updated } = await api("PATCH", `/api/channels/${encodeURIComponent(channel.id)}`, body);
     state.channels = state.channels.map((c) => (c.id === updated.id ? updated : c));
@@ -500,6 +511,8 @@ async function sendMessage() {
         const data = await api("POST", channelPath("messages", channelId), { content, postingAs });
         if (!stillMine()) return; // abandoned; the channel was already reloaded
         if (state.channelId !== channelId) return; // you've moved on; it'll load when you return
+        // Posting as one of your characters adds them to the cast.
+        if (data.channel) updateChannelInState(data.channel);
         state.messages = state.messages.filter((m) => m !== placeholder);
         state.messages.push(...data.userMessages);
         if (data.partnerMessages) {
@@ -654,7 +667,7 @@ function renderSidebar() {
       link.href = `#/channel/${channel.id}`;
       link.dataset.kind = channel.kind;
       if (channel.id === state.channelId) link.setAttribute("aria-current", "page");
-      link.title = channel.kind === "ooc" ? "Out of character" : channel.characterName || "Roleplay";
+      link.title = channel.kind === "ooc" ? "Out of character" : castNames(channel, "partner").join(", ") || "Roleplay";
 
       const name = document.createElement("span");
       name.className = "channel-link-name";
@@ -706,13 +719,16 @@ function renderChannelHeader() {
 
 /**
  * The line next to the channel name, e.g.
- * "Arlo plays Ilse Marrow · Literary (casual from the next scene)".
+ * "Arlo plays Ilse Marrow, ??? (hidden) · you play Kestrel · Literary (casual from the next scene)".
  */
 function channelTopic(channel) {
   const partnerName = state.settings.partnerName;
   if (channel.kind === "ooc") return `Out of character with ${partnerName}`;
   const parts = [];
-  if (channel.characterName) parts.push(`${partnerName} plays ${channel.characterName}`);
+  const theirs = castNames(channel, "partner");
+  const yours = castNames(channel, "user");
+  if (theirs.length) parts.push(`${partnerName} plays ${theirs.join(", ")}`);
+  if (yours.length) parts.push(`you play ${yours.join(", ")}`);
   let mode = MODE_NAMES[channel.mode];
   if (channel.pendingMode) mode += ` (${MODE_NAMES[channel.pendingMode].toLowerCase()} from the next scene)`;
   parts.push(mode);
@@ -720,6 +736,11 @@ function channelTopic(channel) {
 }
 
 const MODE_NAMES = { literary: "Literary", casual: "Casual" };
+
+/** Names of the characters in a channel's cast played by `who` ("user" or "partner"). */
+function castNames(channel, who) {
+  return (channel.cast ?? []).filter((c) => c.kind === "character" && c.playedBy === who).map((c) => c.name);
+}
 
 /**
  * Whether the open channel's current scene has no posts yet (nothing since
@@ -1000,22 +1021,28 @@ function renderComposer() {
   if (channel.kind === "ooc") {
     els.input.placeholder = `Message ${state.settings.partnerName}…`;
   } else if (casual) {
-    const example = state.settings.userCharacters[0];
+    const example = yourCharacters().find((c) => c.proxyPrefix);
     els.input.placeholder = example
-      ? `Chat in #${channel.name}… (start a line with ${example.prefix}: to post as ${example.name})`
+      ? `Chat in #${channel.name}… (start a line with ${example.proxyPrefix}: to post as ${example.name})`
       : `Chat in #${channel.name}…`;
   } else {
     els.input.placeholder = `Write your post in #${channel.name}…  (===== starts a new scene)`;
   }
 }
 
+/** Your characters in the notebook: the ones you can post as. */
+function yourCharacters() {
+  return state.notebook.entries.filter((e) => e.kind === "character" && e.owner === "user");
+}
+
 /**
  * The "posting as" picker, shown in casual scenes: yourself, or one of your
- * characters. Lines starting with a character's prefix override it.
+ * characters (from the notebook). Lines starting with a character's prefix
+ * override it.
  */
 function renderPostingAs(visible) {
   const select = $("posting-as");
-  const characters = state.settings.userCharacters;
+  const characters = yourCharacters();
   const row = $("posting-as-row");
   row.hidden = !visible || characters.length === 0;
   if (row.hidden) return;
@@ -1489,7 +1516,6 @@ function openSettings() {
   form.temperature.value = s.temperature;
   form.maxTokens.value = s.maxTokens;
   form.historyLimit.value = s.historyLimit;
-  form.userCharacters.value = s.userCharacters.map((c) => `${c.prefix}: ${c.name}`).join("\n");
   hideFormError(els.settingsForm);
   els.settingsDialog.showModal();
 }
@@ -1501,7 +1527,6 @@ async function saveSettings(event) {
   const form = els.settingsForm.elements;
   try {
     const data = await api("PUT", "/api/settings", {
-      userCharacters: parseUserCharacters(form.userCharacters.value),
       partnerName: form.partnerName.value,
       partnerPrompt: form.partnerPrompt.value,
       model: form.model.value,
@@ -1516,23 +1541,6 @@ async function saveSettings(event) {
   } catch (error) {
     showFormError(els.settingsForm, error.message);
   }
-}
-
-/**
- * Read the "Your characters" box: one `prefix: Name` per line, blank lines
- * ignored. Throws an Error naming the first line it can't read. (The server
- * checks the result again, e.g. for duplicate prefixes.)
- */
-function parseUserCharacters(text) {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "")
-    .map((line) => {
-      const match = line.match(/^([^\s:]+)\s*:\s*(.+)$/);
-      if (!match) throw new Error(`Couldn't read "${line}". Write each character as prefix: Name, like k: Kestrel.`);
-      return { prefix: match[1], name: match[2].trim() };
-    });
 }
 
 /** Ask the server which models nanoGPT offers and offer them as suggestions. */
@@ -1565,8 +1573,6 @@ function openChannelSettings() {
   if (!channel) return;
   const form = els.channelForm.elements;
   form.name.value = channel.name;
-  form.characterName.value = channel.characterName;
-  form.characterSheet.value = channel.characterSheet;
   form.theme.replaceChildren(
     new Option("Same as the app theme", ""),
     ...state.themes.map((t) => new Option(t.name, t.id)),
@@ -1575,10 +1581,11 @@ function openChannelSettings() {
   // Show the mode you'll get: a waiting change if there is one.
   form.mode.value = channel.pendingMode ?? channel.mode;
   updateModeNote();
+  renderCastEditor();
   els.channelForm.querySelector(".rp-only").hidden = channel.kind !== "rp";
   $("channel-kind-note").textContent =
     channel.kind === "rp"
-      ? "A roleplay channel. Your partner writes as the character below."
+      ? "A roleplay channel: a storyline with its own cast."
       : "An out-of-character channel. Your partner talks to you as themselves.";
   hideFormError(els.channelForm);
   els.channelDialog.showModal();
@@ -1603,12 +1610,19 @@ function updateModeNote() {
 
 function openNewChannel() {
   els.newChannelForm.reset();
+  // Your partner's characters (and shared ones), to start the cast with.
+  $("new-channel-cast").replaceChildren(
+    new Option("Nobody yet", ""),
+    ...state.notebook.entries
+      .filter((e) => e.kind === "character" && e.owner !== "user")
+      .map((e) => new Option(e.name, e.id)),
+  );
   hideFormError(els.newChannelForm);
   updateNewChannelKind();
   els.newChannelDialog.showModal();
 }
 
-/** Show the character fields only when "Roleplay" is picked. */
+/** Show the style and cast choices only when "Roleplay" is picked. */
 function updateNewChannelKind() {
   els.newChannelForm.querySelector(".rp-only").hidden = els.newChannelForm.elements.kind.value !== "rp";
 }
@@ -1634,6 +1648,693 @@ async function previewPrompt() {
       }),
     );
     els.promptDialog.showModal();
+  } catch (error) {
+    showFormError(els.channelForm, error.message);
+  }
+}
+
+// --------------------------------------------------------------- notebook
+
+/*
+ * The notebook holds characters and lore, yours, your partner's and shared
+ * ones. The server decides what you can see and do with each entry (see
+ * src/permissions.ts) and says so in `entry.access`; the app only uses that
+ * to show the right buttons. Pinning an entry to a channel puts it in that
+ * channel's cast.
+ */
+
+/** Fetch the notebook from the server. */
+async function loadNotebook() {
+  state.notebook = await api("GET", "/api/notebook");
+}
+
+/**
+ * Reload the notebook and the channels (whose casts show entry names), then
+ * redraw whatever's open. Called after any change to the notebook.
+ */
+async function refreshNotebook() {
+  const [notebook, { channels }] = await Promise.all([api("GET", "/api/notebook"), api("GET", "/api/state")]);
+  state.notebook = notebook;
+  state.channels = channels;
+  renderAll();
+  if ($("notebook-dialog").open) renderNotebook();
+  if (els.channelDialog.open) renderCastEditor();
+}
+
+/** An entry by id, if you can see it. */
+function findEntry(id) {
+  return state.notebook.entries.find((e) => e.id === id);
+}
+
+/** "Arlo's", "yours" or "shared": whose an entry is, for badges. */
+function ownerLabel(owner) {
+  if (owner === "user") return "yours";
+  if (owner === "joint") return "shared";
+  return `${state.settings.partnerName}'s`;
+}
+
+/** Short badges for an entry in lists: its kind, owner, and what's special about it. */
+function entryBadges(entry) {
+  const partner = state.settings.partnerName;
+  const badges = [entry.kind === "lore" ? "lore" : "character", ownerLabel(entry.owner)];
+  if (entry.owner === "user") {
+    if (entry.settings.visibility === "hidden") badges.push(`hidden from ${partner}`);
+    if (entry.settings.editing === "suggest") badges.push(`${partner} suggests`);
+    if (entry.settings.editing === "locked") badges.push("locked");
+    if (entry.proxyPrefix) badges.push(`${entry.proxyPrefix}:`);
+  } else if (entry.owner === "partner") {
+    if (entry.access.edit === "suggest") badges.push("you suggest");
+    if (entry.access.edit === "none") badges.push("read only");
+  }
+  return badges;
+}
+
+/** A small round avatar in a character's colour (a book mark for lore). */
+function entryAvatar(name, kind) {
+  const avatar = document.createElement("span");
+  avatar.className = "avatar entry-avatar";
+  avatar.dataset.kind = kind;
+  avatar.style.setProperty("--avatar-hue", hueFor(name));
+  avatar.textContent = kind === "lore" ? "§" : initial(name);
+  avatar.setAttribute("aria-hidden", "true");
+  return avatar;
+}
+
+function badge(text) {
+  const span = document.createElement("span");
+  span.className = "entry-badge";
+  span.textContent = text;
+  return span;
+}
+
+function openNotebook() {
+  hideFormError($("notebook-dialog"));
+  renderNotebook();
+  $("notebook-dialog").showModal();
+  // Get the latest (your partner may change it, from stage 6).
+  refreshNotebook().catch((error) => showFormError($("notebook-dialog"), error.message));
+}
+
+/** Draw the notebook dialog: suggestions waiting, then entries by folder. */
+function renderNotebook() {
+  renderSuggestions();
+
+  const { folders, entries } = state.notebook;
+  const folderIds = new Set(folders.map((f) => f.id));
+  const groups = [
+    { folder: null, entries: entries.filter((e) => !e.folderId || !folderIds.has(e.folderId)) },
+    ...folders.map((folder) => ({ folder, entries: entries.filter((e) => e.folderId === folder.id) })),
+  ];
+
+  const list = $("notebook-list");
+  if (entries.length === 0 && folders.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty notebook-empty";
+    empty.textContent = "The notebook is empty. Add a character to start a cast.";
+    list.replaceChildren(empty);
+    return;
+  }
+
+  list.replaceChildren(
+    ...groups
+      .filter((group) => group.folder || group.entries.length > 0)
+      .map(({ folder, entries }) => {
+        const section = document.createElement("section");
+        section.className = "notebook-folder";
+        if (folder) {
+          const header = document.createElement("header");
+          header.className = "notebook-folder-header";
+          const name = document.createElement("span");
+          name.className = "notebook-folder-name";
+          name.textContent = folder.name;
+          header.append(name);
+          if (folder.owner !== "user") header.append(badge(ownerLabel(folder.owner)));
+          if (folder.visibility === "hidden") header.append(badge(`hidden from ${state.settings.partnerName}`));
+          if (folder.owner === "user") {
+            const edit = document.createElement("button");
+            edit.type = "button";
+            edit.className = "link-button";
+            edit.textContent = "Edit folder";
+            edit.addEventListener("click", () => openFolder(folder));
+            header.append(edit);
+          }
+          section.append(header);
+        }
+
+        const items = document.createElement("ul");
+        items.className = "notebook-entries";
+        for (const entry of entries) {
+          const item = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "notebook-entry";
+          button.dataset.kind = entry.kind;
+          button.dataset.owner = entry.owner;
+          const name = document.createElement("span");
+          name.className = "notebook-entry-name";
+          name.textContent = entry.name;
+          const badges = document.createElement("span");
+          badges.className = "notebook-entry-badges";
+          badges.append(...entryBadges(entry).map(badge));
+          if (entry.pinnedIn.includes(state.channelId) && currentChannel()) {
+            badges.append(badge(`in #${currentChannel().name}`));
+          }
+          button.append(entryAvatar(entry.name, entry.kind), name, badges);
+          button.addEventListener("click", () => openEntry(entry));
+          item.append(button);
+          items.append(item);
+        }
+        if (entries.length === 0) {
+          const empty = document.createElement("li");
+          empty.className = "hint";
+          empty.textContent = "Empty. Move entries here from their settings.";
+          items.append(empty);
+        }
+        section.append(items);
+        return section;
+      }),
+  );
+}
+
+/**
+ * Suggested changes still waiting: yours (waiting for your partner, who
+ * reviews them from stage 6) and theirs (waiting for you).
+ */
+function renderSuggestions() {
+  const box = $("suggestion-list");
+  const suggestions = state.notebook.suggestions;
+  box.hidden = suggestions.length === 0;
+  if (box.hidden) return;
+
+  const partner = state.settings.partnerName;
+  const title = document.createElement("h3");
+  title.className = "suggestion-title";
+  title.textContent = "Suggestions";
+  box.replaceChildren(
+    title,
+    ...suggestions.map((suggestion) => {
+      const entry = findEntry(suggestion.entryId);
+      const row = document.createElement("div");
+      row.className = "suggestion";
+      row.dataset.author = suggestion.author;
+
+      const text = document.createElement("span");
+      text.className = "suggestion-text";
+      const who = suggestion.author === "user" ? "You suggested" : `${partner} suggested`;
+      text.textContent = `${who} ${describeChange(suggestion.change)} for ${entry?.name ?? "an entry"}.`;
+      row.append(text);
+
+      // Who reviews it: the owner, or for shared lore, whoever didn't suggest it.
+      const reviewer = entry?.owner === "joint" ? (suggestion.author === "user" ? "partner" : "user") : entry?.owner;
+      if (reviewer === "user") {
+        row.append(
+          suggestionButton("Accept", suggestion.id, "accept"),
+          suggestionButton("Reject", suggestion.id, "reject"),
+        );
+      } else {
+        const waiting = document.createElement("span");
+        waiting.className = "hint";
+        waiting.textContent = `Waiting for ${partner}.`;
+        row.append(waiting);
+      }
+      if (suggestion.author === "user") row.append(suggestionButton("Withdraw", suggestion.id, "withdraw"));
+      return row;
+    }),
+  );
+}
+
+/** "renaming it to X", "changes to its fields", ... for the suggestion list. */
+function describeChange(change) {
+  if (change.delete) return "deleting it";
+  const parts = [];
+  if (change.name !== undefined) parts.push(`renaming it to "${change.name}"`);
+  if (change.fields !== undefined) parts.push("changes to its fields");
+  if (change.systemPrompt !== undefined) parts.push("changes to its notes");
+  return parts.join(" and ") || "a change";
+}
+
+function suggestionButton(label, id, action) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "link-button";
+  button.textContent = label;
+  button.addEventListener("click", async () => {
+    try {
+      await api("POST", `/api/notebook/suggestions/${encodeURIComponent(id)}/${action}`, {});
+      await refreshNotebook();
+    } catch (error) {
+      showFormError($("notebook-dialog"), error.message);
+    }
+  });
+  return button;
+}
+
+// ------------------------------------------------------ the entry editor
+
+/**
+ * Open an entry in the editor, or start a new one.
+ *
+ * @param entry  An entry from `state.notebook.entries`, or `{kind}` for a new one.
+ * @param pinTo  For a new entry: a channel to pin it to once it's made.
+ */
+function openEntry(entry, pinTo = null) {
+  const isNew = !entry.id;
+  if (isNew) {
+    entry = {
+      kind: entry.kind,
+      name: "",
+      fields: state.notebook.templates[entry.kind].map((label) => ({ label, value: "" })),
+      systemPrompt: "",
+      proxyPrefix: null,
+      folderId: null,
+      owner: entry.owner ?? "user",
+      visibility: null,
+      editing: null,
+      settings: { owner: "user", visibility: "visible", editing: "open" },
+      access: { edit: "direct", settings: true, delete: false },
+      pinnedIn: [],
+    };
+  }
+  state.editingEntry = { ...entry, isNew, pinTo };
+
+  const form = $("entry-form");
+  const fields = form.elements;
+  hideFormError(form);
+  const kindName = entry.kind === "lore" ? "lore" : "character";
+  $("entry-title").textContent = isNew ? `New ${kindName}` : entry.name;
+  fields.name.value = entry.name;
+  fields.systemPrompt.value = entry.systemPrompt;
+  fields.proxyPrefix.value = entry.proxyPrefix ?? "";
+  renderEntryFields(entry.fields);
+
+  // Contents: editable unless the entry is locked to you.
+  const readOnly = entry.access.edit === "none";
+  for (const input of [fields.name, fields.systemPrompt, fields.proxyPrefix]) input.readOnly = readOnly;
+  $("entry-add-field").hidden = readOnly;
+
+  // Settings: only the owner can change them.
+  renderEntrySettings(entry);
+  $("entry-settings").disabled = !entry.access.settings;
+
+  $("entry-access").textContent = accessNote(entry, isNew);
+  const save = $("entry-save");
+  save.hidden = readOnly && !entry.access.settings;
+  save.textContent = isNew ? "Create" : entry.access.edit === "suggest" && !entry.access.settings ? "Suggest changes" : "Save";
+
+  const del = $("entry-delete");
+  del.hidden = isNew || !(entry.access.delete || entry.access.edit === "suggest");
+  del.textContent = entry.access.delete ? "Delete" : "Suggest deleting";
+
+  renderEntryPin();
+  renderEntryLinks();
+  updateEntryForm();
+  $("entry-dialog").showModal();
+  // Sized once the dialog is showing, when the boxes have a width.
+  for (const box of $("entry-fields").querySelectorAll(".entry-field-value")) fitToText(box);
+}
+
+/** Grow a text box to show all its text, up to about 12 lines (then it scrolls). */
+function fitToText(box) {
+  box.style.height = "auto";
+  box.style.height = `${Math.min(box.scrollHeight + 2, 300)}px`;
+}
+
+/** The line under the entry's title: whose it is, and what you can do with it. */
+function accessNote(entry, isNew) {
+  const partner = state.settings.partnerName;
+  if (isNew) return `Pick who owns it below: you, ${partner}, or both of you (shared).`;
+  if (entry.owner === "joint") {
+    return "Shared by both of you. Changes are suggestions, for the other one to accept.";
+  }
+  if (entry.owner === "user") {
+    return entry.kind === "character" ? "Your character: you play them." : "Your lore.";
+  }
+  const whose = entry.kind === "character" ? `${partner}'s character: they play them.` : `${partner}'s lore.`;
+  if (entry.access.edit === "direct") return `${whose} You can edit it.`;
+  if (entry.access.edit === "suggest") return `${whose} Your changes are sent to ${partner} as suggestions.`;
+  return `${whose} Only ${partner} can change it.`;
+}
+
+/** The labelled fields, one row each: label, value, and a remove button. */
+function renderEntryFields(fields) {
+  const readOnly = state.editingEntry.access.edit === "none";
+  $("entry-fields").replaceChildren(
+    ...fields.map((field) => {
+      const row = document.createElement("div");
+      row.className = "entry-field";
+      const label = document.createElement("input");
+      label.className = "entry-field-label";
+      label.value = field.label;
+      label.placeholder = "Label";
+      label.setAttribute("aria-label", "Field label");
+      const value = document.createElement("textarea");
+      value.className = "entry-field-value";
+      value.value = field.value;
+      value.rows = 1;
+      value.setAttribute("aria-label", field.label || "Field value");
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "link-button entry-field-remove";
+      remove.textContent = "✕";
+      remove.title = "Remove this field";
+      remove.setAttribute("aria-label", "Remove this field");
+      remove.addEventListener("click", () => {
+        row.remove();
+        renderEntryLinks();
+      });
+      label.readOnly = value.readOnly = readOnly;
+      remove.hidden = readOnly;
+      row.append(label, value, remove);
+      return row;
+    }),
+  );
+}
+
+/**
+ * The fields as typed in the editor. Rows with no label are skipped, unless
+ * `keepBlank` (for redrawing the editor without losing a half-typed row).
+ */
+function readEntryFields(keepBlank = false) {
+  return [...$("entry-fields").querySelectorAll(".entry-field")]
+    .map((row) => ({
+      label: row.querySelector(".entry-field-label").value.trim(),
+      value: row.querySelector(".entry-field-value").value,
+    }))
+    .filter((field) => keepBlank || field.label !== "");
+}
+
+/** Fill the settings selects for an entry. */
+function renderEntrySettings(entry) {
+  const partner = state.settings.partnerName;
+  const fields = $("entry-form").elements;
+  fields.owner.replaceChildren(
+    new Option("You", "user"),
+    new Option(partner, "partner"),
+    new Option("Shared (both of you)", "joint"),
+  );
+  fields.owner.value = entry.owner;
+  fields.folderId.replaceChildren(
+    new Option("No folder", ""),
+    ...state.notebook.folders.map((f) => new Option(f.name, f.id)),
+  );
+  fields.folderId.value = entry.folderId ?? "";
+  fillEntrySettingChoices(entry.visibility, entry.editing);
+}
+
+/**
+ * The visibility and editing choices depend on the owner (hidden from
+ * whom?) and the folder (what "the folder's setting" means), so they're
+ * redrawn when either changes. Keeps the current choice.
+ */
+function fillEntrySettingChoices(visibility, editing) {
+  const fields = $("entry-form").elements;
+  const owner = fields.owner.value;
+  const folder = state.notebook.folders.find((f) => f.id === fields.folderId.value);
+  const other = owner === "partner" ? "you" : state.settings.partnerName;
+
+  const visibilityNames = { visible: "Visible to both", hidden: `Hidden from ${other}` };
+  const editingNames = { open: "Edit it", suggest: "Suggest changes", locked: "Only read it" };
+  fields.visibility.replaceChildren(
+    new Option(`Folder's setting (${visibilityNames[folder?.visibility ?? "visible"].toLowerCase()})`, ""),
+    new Option(visibilityNames.visible, "visible"),
+    new Option(visibilityNames.hidden, "hidden"),
+  );
+  fields.editing.replaceChildren(
+    new Option(`Folder's setting (${editingNames[folder?.editing ?? "open"].toLowerCase()})`, ""),
+    new Option(editingNames.open, "open"),
+    new Option(editingNames.suggest, "suggest"),
+    new Option(editingNames.locked, "locked"),
+  );
+  fields.visibility.value = visibility ?? "";
+  fields.editing.value = editing ?? "";
+  $("entry-editing-label").textContent = owner === "partner" ? "You can" : `${state.settings.partnerName} can`;
+}
+
+/**
+ * Keep the form consistent with the chosen owner: shared lore is always
+ * visible and suggest-only, and only your characters have a proxy prefix.
+ */
+function updateEntryForm() {
+  const entry = state.editingEntry;
+  const fields = $("entry-form").elements;
+  const owner = fields.owner.value;
+  const fixed = owner === "joint" || (entry.isNew && owner === "partner");
+  fields.visibility.disabled = fields.editing.disabled = fixed;
+  $("entry-prefix-row").hidden = !(entry.kind === "character" && owner === "user");
+}
+
+/** The pin button: pin to, or unpin from, the open roleplay channel. */
+function renderEntryPin() {
+  const entry = state.editingEntry;
+  const channel = currentChannel();
+  const button = $("entry-pin");
+  button.hidden = entry.isNew || !channel || channel.kind !== "rp";
+  if (button.hidden) return;
+  button.textContent = entry.pinnedIn.includes(channel.id) ? `Unpin from #${channel.name}` : `Pin to #${channel.name}`;
+}
+
+async function toggleEntryPin() {
+  const entry = state.editingEntry;
+  const channel = currentChannel();
+  const pinned = entry.pinnedIn.includes(channel.id);
+  try {
+    await api(pinned ? "DELETE" : "PUT", channelPath(`cast/${encodeURIComponent(entry.id)}`, channel.id), {});
+    await refreshNotebook();
+    state.editingEntry = { ...state.editingEntry, pinnedIn: findEntry(entry.id)?.pinnedIn ?? [] };
+    renderEntryPin();
+  } catch (error) {
+    showFormError($("entry-form"), error.message);
+  }
+}
+
+/**
+ * Under the text: the entries it links to with [[Name]], as buttons that
+ * open them. Links to names that aren't in the notebook are listed too, so
+ * a typo shows.
+ */
+function renderEntryLinks() {
+  const text = [$("entry-form").elements.systemPrompt.value, ...readEntryFields().map((f) => f.value)].join("\n");
+  const names = [...new Set([...text.matchAll(/\[\[([^\]|\n]{1,100})(?:\|[^\]\n]*)?\]\]/g)].map((m) => m[1].trim()))];
+  const box = $("entry-links");
+  box.hidden = names.length === 0;
+  if (box.hidden) return;
+
+  const label = document.createElement("span");
+  label.className = "entry-links-label";
+  label.textContent = "Links to:";
+  box.replaceChildren(
+    label,
+    ...names.map((name) => {
+      const target = state.notebook.entries.find((e) => e.name.toLowerCase() === name.toLowerCase());
+      if (!target) {
+        const missing = document.createElement("span");
+        missing.className = "entry-link missing";
+        missing.textContent = name;
+        missing.title = "Nothing in the notebook has this name";
+        return missing;
+      }
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "link-button entry-link";
+      link.textContent = target.name;
+      link.addEventListener("click", () => {
+        $("entry-dialog").close();
+        openEntry(target);
+      });
+      return link;
+    }),
+  );
+}
+
+/** Save the entry editor: create, edit (or suggest), and change settings. */
+async function saveEntry(event) {
+  event.preventDefault();
+  const entry = state.editingEntry;
+  const form = $("entry-form");
+  const fields = form.elements;
+  const owner = fields.owner.value;
+  const contents = {
+    name: fields.name.value,
+    fields: readEntryFields(),
+    systemPrompt: fields.systemPrompt.value,
+  };
+  const prefix = entry.kind === "character" && owner === "user" ? fields.proxyPrefix.value.trim() || null : null;
+  // Shared lore's settings are fixed, and only an entry's owner picks them.
+  const settings = {
+    owner,
+    folderId: fields.folderId.value || null,
+    visibility: fields.visibility.disabled ? null : fields.visibility.value || null,
+    editing: fields.editing.disabled ? null : fields.editing.value || null,
+  };
+
+  try {
+    if (entry.isNew) {
+      const { entry: created } = await api("POST", "/api/notebook/entries", {
+        kind: entry.kind,
+        ...contents,
+        proxyPrefix: prefix,
+        ...settings,
+      });
+      if (entry.pinTo) await api("PUT", channelPath(`cast/${encodeURIComponent(created.id)}`, entry.pinTo), {});
+    } else {
+      // Send only what changed, so a suggestion says exactly what you suggest.
+      const changes = {};
+      if (contents.name !== entry.name) changes.name = contents.name;
+      if (JSON.stringify(contents.fields) !== JSON.stringify(entry.fields)) changes.fields = contents.fields;
+      if (contents.systemPrompt !== entry.systemPrompt) changes.systemPrompt = contents.systemPrompt;
+      if (entry.owner === "user" && prefix !== entry.proxyPrefix) changes.proxyPrefix = prefix;
+      if (Object.keys(changes).length > 0 && entry.access.edit !== "none") {
+        await api("PATCH", `/api/notebook/entries/${encodeURIComponent(entry.id)}`, changes);
+      }
+      const settingsChanged =
+        settings.owner !== entry.owner ||
+        settings.folderId !== entry.folderId ||
+        settings.visibility !== entry.visibility ||
+        settings.editing !== entry.editing;
+      if (settingsChanged && entry.access.settings) {
+        await api("PUT", `/api/notebook/entries/${encodeURIComponent(entry.id)}/settings`, settings);
+      }
+    }
+    $("entry-dialog").close();
+    await refreshNotebook();
+  } catch (error) {
+    showFormError(form, error.message);
+  }
+}
+
+/** Delete an entry, or suggest deleting it when it isn't yours to delete. */
+async function deleteEntry() {
+  const entry = state.editingEntry;
+  const question = entry.access.delete
+    ? `Delete ${entry.name}? It's unpinned from every channel. This can't be undone.`
+    : `Suggest deleting ${entry.name}? It stays until the suggestion is accepted.`;
+  if (!confirm(question)) return;
+  try {
+    await api("DELETE", `/api/notebook/entries/${encodeURIComponent(entry.id)}`, {});
+    $("entry-dialog").close();
+    await refreshNotebook();
+  } catch (error) {
+    showFormError($("entry-form"), error.message);
+  }
+}
+
+// ------------------------------------------------------------- folders
+
+function openFolder(folder = null) {
+  state.editingFolder = folder;
+  const form = $("folder-form");
+  hideFormError(form);
+  $("folder-title").textContent = folder ? "Edit folder" : "New folder";
+  form.elements.name.value = folder?.name ?? "";
+  form.elements.visibility.value = folder?.visibility ?? "visible";
+  form.elements.editing.value = folder?.editing ?? "open";
+  $("folder-delete").hidden = !folder;
+  $("folder-dialog").showModal();
+}
+
+async function saveFolder(event) {
+  event.preventDefault();
+  const form = $("folder-form");
+  const body = {
+    name: form.elements.name.value,
+    visibility: form.elements.visibility.value,
+    editing: form.elements.editing.value,
+  };
+  try {
+    const folder = state.editingFolder;
+    if (folder) await api("PATCH", `/api/notebook/folders/${encodeURIComponent(folder.id)}`, body);
+    else await api("POST", "/api/notebook/folders", body);
+    $("folder-dialog").close();
+    await refreshNotebook();
+  } catch (error) {
+    showFormError(form, error.message);
+  }
+}
+
+async function deleteFolder() {
+  const folder = state.editingFolder;
+  if (!confirm(`Delete the folder "${folder.name}"? The entries in it are kept, outside any folder.`)) return;
+  try {
+    await api("DELETE", `/api/notebook/folders/${encodeURIComponent(folder.id)}`, {});
+    $("folder-dialog").close();
+    await refreshNotebook();
+  } catch (error) {
+    showFormError($("folder-form"), error.message);
+  }
+}
+
+// ---------------------------------------------------------------- cast
+
+/**
+ * The cast in channel settings: who's pinned, with a button to unpin each,
+ * and a menu to pin more from the notebook (or make a new entry).
+ */
+function renderCastEditor() {
+  const channel = currentChannel();
+  if (!channel || channel.kind !== "rp") return;
+  const partner = state.settings.partnerName;
+
+  const list = $("cast-list");
+  list.replaceChildren(
+    ...channel.cast.map((member) => {
+      const item = document.createElement("li");
+      item.className = "cast-member";
+      item.dataset.playedBy = member.playedBy;
+      item.dataset.kind = member.kind;
+      if (member.hidden) item.classList.add("hidden-entry");
+
+      const name = document.createElement(member.hidden ? "span" : "button");
+      name.className = member.hidden ? "cast-member-name" : "link-button cast-member-name";
+      name.textContent = member.name;
+      if (!member.hidden) {
+        name.type = "button";
+        name.addEventListener("click", () => {
+          const entry = findEntry(member.entryId);
+          if (entry) openEntry(entry);
+        });
+      }
+
+      const role =
+        member.kind === "lore" ? "lore" : member.playedBy === "user" ? "you play" : `${partner} plays`;
+      const unpin = document.createElement("button");
+      unpin.type = "button";
+      unpin.className = "link-button cast-unpin";
+      unpin.textContent = "Unpin";
+      unpin.addEventListener("click", () => changeCast(member.entryId, false));
+      item.append(entryAvatar(member.hidden ? "?" : member.name, member.kind), name, badge(role), unpin);
+      return item;
+    }),
+  );
+  if (channel.cast.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "hint";
+    empty.textContent = `Nobody yet. Without a cast, ${partner} narrates.`;
+    list.append(empty);
+  }
+
+  // Everything you can see that isn't pinned yet, characters first.
+  const pinned = new Set(channel.cast.map((c) => c.entryId));
+  const unpinned = state.notebook.entries.filter((e) => !pinned.has(e.id));
+  const group = (label, kind) => {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = label;
+    optgroup.append(...unpinned.filter((e) => e.kind === kind).map((e) => new Option(`${e.name} (${ownerLabel(e.owner)})`, e.id)));
+    return optgroup;
+  };
+  const make = document.createElement("optgroup");
+  make.label = "New";
+  make.append(new Option("New character…", "new:character"), new Option("New lore…", "new:lore"));
+  $("cast-add").replaceChildren(new Option("Add to the cast…", ""), group("Characters", "character"), group("Lore", "lore"), make);
+}
+
+/** Pin (`true`) or unpin (`false`) an entry in the open channel, straight away. */
+async function changeCast(entryId, pin) {
+  try {
+    const { channel } = await api(pin ? "PUT" : "DELETE", channelPath(`cast/${encodeURIComponent(entryId)}`), {});
+    updateChannelInState(channel);
+    await loadNotebook(); // each entry lists where it's pinned
+    renderAll();
+    renderCastEditor();
   } catch (error) {
     showFormError(els.channelForm, error.message);
   }
@@ -1733,6 +2434,39 @@ $("preview-prompt").addEventListener("click", previewPrompt);
 $("clear-channel").addEventListener("click", clearChannel);
 $("delete-channel").addEventListener("click", deleteChannel);
 
+$("cast-add").addEventListener("change", (event) => {
+  const value = event.target.value;
+  event.target.value = "";
+  if (value.startsWith("new:")) openEntry({ kind: value.slice(4), owner: "partner" }, state.channelId);
+  else if (value) changeCast(value, true);
+});
+
+$("notebook-button").addEventListener("click", openNotebook);
+$("notebook-new-character").addEventListener("click", () => openEntry({ kind: "character" }));
+$("notebook-new-lore").addEventListener("click", () => openEntry({ kind: "lore", owner: "joint" }));
+$("notebook-new-folder").addEventListener("click", () => openFolder());
+$("entry-form").addEventListener("submit", saveEntry);
+$("entry-form").addEventListener("change", (event) => {
+  const fields = event.currentTarget.elements;
+  if (event.target === fields.owner || event.target === fields.folderId) {
+    fillEntrySettingChoices(fields.visibility.value || null, fields.editing.value || null);
+    updateEntryForm();
+  }
+});
+$("entry-form").addEventListener("input", (event) => {
+  if (event.target.classList.contains("entry-field-value")) fitToText(event.target);
+  renderEntryLinks();
+});
+$("entry-add-field").addEventListener("click", () => {
+  renderEntryFields([...readEntryFields(true), { label: "", value: "" }]);
+  for (const box of $("entry-fields").querySelectorAll(".entry-field-value")) fitToText(box);
+  $("entry-fields").querySelector(".entry-field:last-child .entry-field-label").focus();
+});
+$("entry-pin").addEventListener("click", toggleEntryPin);
+$("entry-delete").addEventListener("click", deleteEntry);
+$("folder-form").addEventListener("submit", saveFolder);
+$("folder-delete").addEventListener("click", deleteFolder);
+
 $("new-channel-button").addEventListener("click", openNewChannel);
 els.newChannelForm.addEventListener("submit", createChannel);
 els.newChannelForm.addEventListener("change", updateNewChannelKind);
@@ -1755,7 +2489,7 @@ if ("serviceWorker" in navigator) {
 // default look while the server answers. (applyThemes corrects it after.)
 if (readLocal(LAST_THEME_KEY)) setStylesheet("theme-app", `/themes/${readLocal(LAST_THEME_KEY)}/theme.css?v=0`);
 
-Promise.all([loadState(), loadThemes()])
+Promise.all([loadState(), loadThemes(), loadNotebook()])
   .then(() => {
     // A turn may already be running (from another tab, or from before a
     // reload): keep an eye on it.
