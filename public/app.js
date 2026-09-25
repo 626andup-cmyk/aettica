@@ -34,8 +34,6 @@ const state = {
   retry: null,
   /** Unsent text for each channel, so switching channels doesn't lose it. */
   drafts: new Map(),
-  /** Timer for checking back on a turn started elsewhere (another tab, or before a reload). */
-  pollTimer: null,
 };
 
 // Shortcut for looking up elements by id.
@@ -148,7 +146,6 @@ async function openChannel(channelId) {
   autoGrow();
   renderAll();
   scrollToBottom();
-  watchBusyChannel();
 }
 
 /** The channel named in the address bar, if it exists. */
@@ -156,30 +153,6 @@ function channelFromAddress() {
   const match = location.hash.match(/^#\/channel\/(.+)$/);
   const id = match && decodeURIComponent(match[1]);
   return state.channels.some((c) => c.id === id) ? id : null;
-}
-
-/**
- * If the partner is writing in the open channel because of a request made
- * somewhere else (another tab, or before you reloaded), check back every few
- * seconds until they're done, then show the new message.
- */
-function watchBusyChannel() {
-  clearTimeout(state.pollTimer);
-  if (!state.busy.has(state.channelId) || pendingRequests.has(state.channelId)) return;
-
-  state.pollTimer = setTimeout(async () => {
-    try {
-      await loadState();
-    } catch {
-      // Server unreachable for a moment; keep trying.
-    }
-    if (state.busy.has(state.channelId)) {
-      renderSidebar();
-      watchBusyChannel();
-    } else {
-      openChannel(state.channelId);
-    }
-  }, 3000);
 }
 
 async function createChannel(event) {
@@ -268,27 +241,142 @@ async function clearChannel() {
 // ------------------------------------------------------ messages & turns
 
 /**
- * Channels with a request in flight from *this* page. Used so this page
- * doesn't also poll for a turn it's already waiting on.
+ * Requests from *this* page that make the partner write, by channel id.
+ * Each is `{ startedAt, onAbandon }`; see `withBusyChannel` and `checkBusy`.
  */
-const pendingRequests = new Set();
+const pendingRequests = new Map();
 
 /**
  * Run a request that makes the partner write in a channel: marks the channel
- * busy while it runs, and redraws afterwards. Returns what `work` returns.
+ * busy while it runs, and redraws afterwards.
+ *
+ * @param work       Does the request. It receives `stillMine()`, which turns
+ *                   false if the request was abandoned (you pressed Stop, or
+ *                   the page decided the request was lost). An abandoned
+ *                   request's late answer must be ignored: the channel has
+ *                   already been reloaded from the server.
+ * @param onAbandon  Optional. Called with the reloaded messages if the
+ *                   request is abandoned while you're in its channel.
  */
-async function withBusyChannel(channelId, work) {
+async function withBusyChannel(channelId, work, onAbandon) {
+  const request = { startedAt: Date.now(), onAbandon };
+  pendingRequests.set(channelId, request);
   state.busy.add(channelId);
-  pendingRequests.add(channelId);
+  renderAll();
+  if (channelId === state.channelId) scrollToBottom();
+  startBusyWatch();
+
+  const stillMine = () => pendingRequests.get(channelId) === request;
+  try {
+    await work(stillMine);
+  } finally {
+    if (stillMine()) {
+      pendingRequests.delete(channelId);
+      state.busy.delete(channelId);
+      renderAll();
+      if (channelId === state.channelId) scrollToBottom();
+    }
+  }
+}
+
+/**
+ * Stop waiting for this page's request in a channel. Returns the request
+ * (or undefined if there wasn't one), so its `onAbandon` can still be run.
+ */
+function abandonRequest(channelId) {
+  const request = pendingRequests.get(channelId);
+  pendingRequests.delete(channelId);
+  state.busy.delete(channelId);
+  return request;
+}
+
+/** Reload the open channel's messages, e.g. after a turn was stopped. */
+async function refreshMessages(onAbandon) {
+  const channelId = state.channelId;
+  if (!channelId) return;
+  try {
+    const { messages } = await api("GET", channelPath("messages", channelId));
+    if (state.channelId !== channelId) return;
+    state.messages = messages;
+    onAbandon?.(messages);
+  } catch (error) {
+    showError(`Couldn't reload this channel: ${error.message}`, () => refreshMessages());
+  }
+  renderAll();
+  scrollToBottom();
+}
+
+/**
+ * The Stop button: ask the server to stop your partner's turn in the open
+ * channel, stop waiting for it here, and reload the channel so it shows
+ * exactly what was saved (your message, if you'd just sent one; no reply).
+ */
+async function stopTurn() {
+  const channelId = state.channelId;
+  const request = abandonRequest(channelId);
+  hideError();
   renderAll();
   try {
-    return await work();
-  } finally {
-    state.busy.delete(channelId);
-    pendingRequests.delete(channelId);
-    renderAll();
-    if (channelId === state.channelId) scrollToBottom();
+    await api("POST", channelPath("cancel", channelId), {});
+  } catch (error) {
+    showError(`Couldn't reach the server to stop the reply: ${error.message}`, null);
   }
+  await refreshMessages(request?.onAbandon);
+}
+
+/*
+ * Checking in with the server while anything is busy.
+ *
+ * A request can be lost without ever failing: on a phone, the connection
+ * can quietly drop when the app goes to the background or the screen locks,
+ * and the page would wait for an answer that never comes, with the channel
+ * stuck on "writing…". So while any channel is busy, the page asks the
+ * server every few seconds which channels are *really* busy, and:
+ *
+ *   - a channel the server has finished with is un-stuck and reloaded, so
+ *     the reply (or your saved message) appears
+ *   - a channel the server is busy with, but this page didn't know about
+ *     (a turn from another tab, or from before a reload), is marked busy
+ */
+
+/** How often to check, in milliseconds. */
+const BUSY_CHECK_INTERVAL = 3000;
+/**
+ * A request younger than this is never treated as lost: it may simply not
+ * have reached the server yet.
+ */
+const LOST_REQUEST_GRACE = 8000;
+
+let busyWatch = null;
+
+function startBusyWatch() {
+  if (!busyWatch) busyWatch = setInterval(checkBusy, BUSY_CHECK_INTERVAL);
+}
+
+async function checkBusy() {
+  if (state.busy.size === 0) {
+    clearInterval(busyWatch);
+    busyWatch = null;
+    return;
+  }
+
+  let serverBusy;
+  try {
+    serverBusy = new Set((await api("GET", "/api/state")).busyChannels);
+  } catch {
+    return; // server unreachable for a moment; try again next time
+  }
+
+  for (const channelId of [...state.busy]) {
+    if (serverBusy.has(channelId)) continue;
+    const request = pendingRequests.get(channelId);
+    if (request && Date.now() - request.startedAt < LOST_REQUEST_GRACE) continue;
+    // The server is done, but this page never heard back. Catch up.
+    abandonRequest(channelId);
+    if (channelId === state.channelId) await refreshMessages(request?.onAbandon);
+  }
+  for (const channelId of serverBusy) state.busy.add(channelId);
+  renderAll();
 }
 
 /**
@@ -316,32 +404,50 @@ async function sendMessage() {
   state.drafts.delete(channelId);
   autoGrow();
 
-  await withBusyChannel(channelId, async () => {
-    try {
-      const data = await api("POST", channelPath("messages", channelId), { content });
-      if (state.channelId !== channelId) return; // you've moved on; it'll load when you return
-      state.messages = state.messages.filter((m) => m !== placeholder);
-      state.messages.push(data.userMessage);
-      if (data.partnerMessage) {
-        state.messages.push(data.partnerMessage);
-      } else if (data.error) {
-        // Your message is saved but the reply failed. "Try again" asks the
-        // partner for a turn, which answers the message you already sent.
-        showError(data.error, partnerTurn);
-      }
-    } catch (error) {
-      // Nothing was saved (e.g. the server is down), so put your text back
-      // in the box; "Try again" simply sends it again.
-      state.messages = state.messages.filter((m) => m !== placeholder);
-      if (state.channelId === channelId) {
-        els.input.value = content;
-        autoGrow();
-        showError(error.message, sendMessage);
-      } else {
-        state.drafts.set(channelId, content);
-      }
+  // If the request is abandoned (Stop, or lost) and the server never saved
+  // your message, put your text back in the box so it isn't lost.
+  const restoreIfUnsaved = (messages) => {
+    const saved = messages.some((m) => m.author === "user" && m.content === content);
+    if (!saved && els.input.value === "") {
+      els.input.value = content;
+      autoGrow();
     }
-  });
+  };
+
+  await withBusyChannel(
+    channelId,
+    async (stillMine) => {
+      try {
+        const data = await api("POST", channelPath("messages", channelId), { content });
+        if (!stillMine()) return; // abandoned; the channel was already reloaded
+        if (state.channelId !== channelId) return; // you've moved on; it'll load when you return
+        state.messages = state.messages.filter((m) => m !== placeholder);
+        state.messages.push(data.userMessage);
+        if (data.partnerMessage) {
+          state.messages.push(data.partnerMessage);
+        } else if (data.error) {
+          // Your message is saved but the reply failed. "Try again" asks the
+          // partner for a turn, which answers the message you already sent.
+          showError(data.error, partnerTurn);
+        }
+        // (If data.cancelled, the reply was stopped: your message stays, and
+        // there's nothing more to show.)
+      } catch (error) {
+        if (!stillMine()) return;
+        // Nothing was saved (e.g. the server is down), so put your text back
+        // in the box; "Try again" simply sends it again.
+        state.messages = state.messages.filter((m) => m !== placeholder);
+        if (state.channelId === channelId) {
+          els.input.value = content;
+          autoGrow();
+          showError(error.message, sendMessage);
+        } else {
+          state.drafts.set(channelId, content);
+        }
+      }
+    },
+    restoreIfUnsaved,
+  );
 }
 
 /** Let your partner write without a new message from you. */
@@ -365,19 +471,20 @@ async function regenerate() {
  * Shared wrapper for partner turns in the open channel.
  *
  * @param action     "turn" or "regenerate" (the end of the API path).
- * @param onSuccess  Updates `state.messages` with the server's answer.
+ * @param onSuccess  Updates `state.messages` with the server's answer. Not
+ *                   called if the turn was stopped.
  * @param retry      What "Try again" should do if it fails.
  */
 async function runTurn(action, onSuccess, retry) {
   const channelId = state.channelId;
   if (!channelId || state.busy.has(channelId)) return;
   hideError();
-  await withBusyChannel(channelId, async () => {
+  await withBusyChannel(channelId, async (stillMine) => {
     try {
       const data = await api("POST", channelPath(action, channelId), {});
-      if (state.channelId === channelId) onSuccess(data);
+      if (stillMine() && state.channelId === channelId && data.partnerMessage) onSuccess(data);
     } catch (error) {
-      if (state.channelId === channelId) showError(error.message, retry);
+      if (stillMine() && state.channelId === channelId) showError(error.message, retry);
     }
   });
 }
@@ -881,6 +988,7 @@ els.input.addEventListener("keydown", (event) => {
 els.input.addEventListener("input", autoGrow);
 
 els.turn.addEventListener("click", partnerTurn);
+$("stop-button").addEventListener("click", stopTurn);
 els.errorRetry.addEventListener("click", () => state.retry && state.retry());
 $("error-dismiss").addEventListener("click", hideError);
 
@@ -927,5 +1035,10 @@ if ("serviceWorker" in navigator) {
 // Start: load the server's state, then open the channel in the address bar
 // (or the first channel).
 loadState()
-  .then(() => openChannel(channelFromAddress() ?? state.channels[0]?.id ?? null))
+  .then(() => {
+    // A turn may already be running (from another tab, or from before a
+    // reload): keep an eye on it.
+    if (state.busy.size > 0) startBusyWatch();
+    return openChannel(channelFromAddress() ?? state.channels[0]?.id ?? null);
+  })
   .catch((error) => showError(`Couldn't load Aettica: ${error.message}`, () => location.reload()));

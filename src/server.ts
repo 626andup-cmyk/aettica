@@ -27,6 +27,7 @@
  *   DELETE /api/channels/:id/messages          Delete every message in a channel
  *   POST   /api/channels/:id/turn              Partner takes a turn without a new message from you
  *   POST   /api/channels/:id/regenerate        Replace the partner's last reply with a new one
+ *   POST   /api/channels/:id/cancel            Stop the partner's turn in progress (the Stop button)
  *   GET    /api/channels/:id/prompt            The exact prompt stack the next turn would send
  *
  *   PATCH  /api/messages/:id                   Edit a message's text
@@ -37,7 +38,7 @@
 
 import { join, normalize, sep } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
-import { ApiError, listModels, type ApiOptions } from "./nanogpt.ts";
+import { ApiError, CancelledError, listModels, type ApiOptions } from "./nanogpt.ts";
 import { BusyError, Partner, promptForChannel } from "./partner.ts";
 import {
   NotFoundError,
@@ -238,6 +239,16 @@ export function createApp(config: Config): App {
       },
     },
     {
+      method: "POST",
+      pattern: "/api/channels/:id/cancel",
+      handler: (_request, { id }) => {
+        store.getChannel(id!); // 404 for an unknown channel
+        // `cancelled` is false if nothing was running, e.g. the reply
+        // arrived just before you pressed Stop.
+        return json({ cancelled: partner.cancel(id!) });
+      },
+    },
+    {
       method: "GET",
       pattern: "/api/channels/:id/prompt",
       handler: (_request, { id }) => json({ messages: promptForChannel(store, id!) }),
@@ -286,6 +297,9 @@ export function createApp(config: Config): App {
       if (error instanceof NotFoundError) return errorResponse(404, error.message);
       if (error instanceof BusyError) return errorResponse(409, error.message);
       if (error instanceof ValidationError) return errorResponse(400, error.message);
+      // A turn you stopped isn't an error: the request that started it just
+      // learns that nothing was written.
+      if (error instanceof CancelledError) return json({ cancelled: true });
       if (error instanceof ApiError) return errorResponse(502, error.message);
       // Anything else is a bug, not something you did. Log the details for
       // debugging, and send a general message.
@@ -302,10 +316,13 @@ export function createApp(config: Config): App {
  * Used after sending a message, where the message itself has already been
  * saved successfully and only the reply failed.
  */
-async function tryTurn(turn: () => Promise<unknown>): Promise<{ partnerMessage?: unknown; error?: string }> {
+async function tryTurn(
+  turn: () => Promise<unknown>,
+): Promise<{ partnerMessage?: unknown; error?: string; cancelled?: true }> {
   try {
     return { partnerMessage: await turn() };
   } catch (error) {
+    if (error instanceof CancelledError) return { cancelled: true };
     if (error instanceof ApiError || error instanceof BusyError) return { error: error.message };
     throw error;
   }

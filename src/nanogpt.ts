@@ -32,6 +32,11 @@ export interface CompletionRequest {
   messages: ChatMessage[];
   temperature: number;
   maxTokens: number;
+  /**
+   * Lets the caller stop the request early (the Stop button). When this
+   * signal fires, the request is abandoned and `CancelledError` is thrown.
+   */
+  signal?: AbortSignal;
 }
 
 /** A successful generation. */
@@ -58,11 +63,20 @@ export class ApiError extends Error {
   }
 }
 
+/** Thrown when a request was stopped on purpose, through its `signal`. */
+export class CancelledError extends Error {
+  constructor() {
+    super("The reply was stopped.");
+    this.name = "CancelledError";
+  }
+}
+
 /**
  * Ask the model for one reply.
  *
- * Throws `ApiError` if the key is missing, the network fails, the request
- * times out, the API returns an error, or the reply is empty.
+ * Throws `CancelledError` if `request.signal` fires, and `ApiError` if the
+ * key is missing, the network fails, the request times out, the API returns
+ * an error, or the reply is empty.
  */
 export async function createChatCompletion(
   options: ApiOptions,
@@ -84,7 +98,7 @@ export async function createChatCompletion(
     stream: false,
   };
 
-  const json = await postJson(options, "/chat/completions", body);
+  const json = await postJson(options, "/chat/completions", body, request.signal);
 
   // Dig the text out of the response. Everything is checked because a model
   // provider having a bad day can return all sorts of shapes.
@@ -140,35 +154,49 @@ export function stripReasoning(text: string): string {
 
 // ------------------------------------------------------------------ helpers
 
-function postJson(options: ApiOptions, path: string, body: unknown): Promise<unknown> {
-  return request(options, path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+function postJson(options: ApiOptions, path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
+  return request(
+    options,
+    path,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    signal,
+  );
 }
 
 /**
  * Send one request and return the parsed JSON response, turning every kind
- * of failure into an `ApiError` with a readable message.
+ * of failure into an `ApiError` (or `CancelledError`) with a readable message.
+ *
+ * @param signal  Optional: stops the request early when it fires.
  */
-async function request(options: ApiOptions, path: string, init: RequestInit): Promise<unknown> {
+async function request(options: ApiOptions, path: string, init: RequestInit, signal?: AbortSignal): Promise<unknown> {
+  // Stop the request when *either* the timeout runs out or the caller's
+  // signal fires, whichever comes first.
+  const timeout = AbortSignal.timeout(options.timeoutMs);
+  const stop = signal ? AbortSignal.any([timeout, signal]) : timeout;
+
   let response: Response;
+  let text: string;
+  // Both steps are inside the try: the model can stall before the reply
+  // starts *or* halfway through sending it, and either must be caught.
   try {
     response = await fetch(`${options.baseUrl}${path}`, {
       ...init,
       headers: { ...init.headers, Authorization: `Bearer ${options.apiKey}` },
-      // Abort the request if it takes longer than the timeout.
-      signal: AbortSignal.timeout(options.timeoutMs),
+      signal: stop,
     });
+    text = await response.text();
   } catch (error) {
-    if ((error as Error).name === "TimeoutError") {
+    if (signal?.aborted) throw new CancelledError();
+    if (timeout.aborted) {
       throw new ApiError(`The model took longer than ${Math.round(options.timeoutMs / 1000)} seconds to reply.`);
     }
     throw new ApiError(`Couldn't reach nanoGPT: ${(error as Error).message}`);
   }
-
-  const text = await response.text();
 
   if (!response.ok) {
     throw new ApiError(describeHttpError(response.status, text), response.status);

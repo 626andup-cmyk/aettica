@@ -18,7 +18,7 @@
  */
 
 import type { ApiOptions } from "./nanogpt.ts";
-import { createChatCompletion } from "./nanogpt.ts";
+import { CancelledError, createChatCompletion } from "./nanogpt.ts";
 import { buildPromptStack } from "./prompt.ts";
 import type { Store } from "./store.ts";
 import type { ChatMessage, Message } from "./types.ts";
@@ -67,14 +67,15 @@ export function promptForChannel(store: Store, channelId: string, excludeId?: st
 
 export class Partner {
   /**
-   * The channels the partner is writing in right now.
+   * The channels the partner is writing in right now, each with the
+   * controller that can stop that turn (see `cancel`).
    *
    * Only one turn may run per channel at a time. Without this, tapping Send
    * twice would start two generations that both read the same channel and
    * both save a reply, and your partner would answer the same post twice.
    * Different channels don't block each other.
    */
-  private readonly writingIn = new Set<string>();
+  private readonly writingIn = new Map<string, AbortController>();
 
   constructor(
     private readonly store: Store,
@@ -88,7 +89,27 @@ export class Partner {
 
   /** Every channel with a turn in progress. */
   busyChannels(): string[] {
-    return [...this.writingIn];
+    return [...this.writingIn.keys()];
+  }
+
+  /**
+   * Stop the turn running in a channel, if there is one (the Stop button).
+   *
+   * The request to the model is abandoned and nothing is saved, so the
+   * channel is left as it was before the turn. The channel is free again as
+   * soon as this returns.
+   *
+   * @returns `true` if a turn was stopped, `false` if none was running.
+   */
+  cancel(channelId: string): boolean {
+    const controller = this.writingIn.get(channelId);
+    if (!controller) return false;
+    controller.abort();
+    // Free the channel right away rather than waiting for the aborted
+    // request to wind down.
+    this.writingIn.delete(channelId);
+    console.log(`[partner] turn stopped in channel ${channelId}`);
+    return true;
   }
 
   /**
@@ -101,14 +122,17 @@ export class Partner {
    * @returns          The partner's new message, as saved.
    * @throws NotFoundError if the channel doesn't exist.
    * @throws BusyError     if a turn is already running in that channel.
-   * @throws ApiError      if the model couldn't produce a reply. Nothing is
-   *                       saved in that case, so the channel is unchanged.
+   * @throws CancelledError if the turn was stopped with `cancel`.
+   * @throws ApiError      if the model couldn't produce a reply.
+   *                       In both of those cases nothing is saved, so the
+   *                       channel is unchanged.
    */
   async takeTurn(channelId: string, trigger: TurnTrigger, options: TurnOptions = {}): Promise<Message> {
     if (this.writingIn.has(channelId)) throw new BusyError();
     const channel = this.store.getChannel(channelId); // throws if missing
 
-    this.writingIn.add(channelId);
+    const controller = new AbortController();
+    this.writingIn.set(channelId, controller);
     try {
       const settings = this.store.getSettings();
       const messages = promptForChannel(this.store, channelId, options.replacing);
@@ -121,7 +145,12 @@ export class Partner {
         messages,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
+        signal: controller.signal,
       });
+
+      // Belt and braces: if the turn was stopped just as the reply arrived,
+      // don't save it.
+      if (controller.signal.aborted) throw new CancelledError();
 
       const seconds = ((Date.now() - started) / 1000).toFixed(1);
       console.log(`[partner] turn finished in ${seconds}s (finish reason: ${result.finishReason ?? "unknown"})`);
@@ -144,8 +173,10 @@ export class Partner {
       });
     } finally {
       // Always release the lock, even if generation failed. Otherwise one
-      // network error would leave the channel "busy" forever.
-      this.writingIn.delete(channelId);
+      // network error would leave the channel "busy" forever. (Only if it's
+      // still *this* turn's lock: after a Stop, a new turn may already have
+      // started in the channel.)
+      if (this.writingIn.get(channelId) === controller) this.writingIn.delete(channelId);
     }
   }
 }

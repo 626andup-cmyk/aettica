@@ -18,7 +18,9 @@ export type FakeReply =
   | { content: string; finishReason?: string }
   | { status: number; error: string }
   /** Wait this many ms before replying, for testing overlapping turns. */
-  | { content: string; delayMs: number };
+  | { content: string; delayMs: number }
+  /** Start the reply, then never finish it: a model that stalls halfway. */
+  | { stallMidReply: true };
 
 export interface FakeNanoGpt {
   baseUrl: string;
@@ -48,6 +50,12 @@ export function startFakeNanoGpt(): FakeNanoGpt {
 
         if ("status" in reply) {
           return Response.json({ error: { message: reply.error } }, { status: reply.status });
+        }
+        if ("stallMidReply" in reply) {
+          const stream = new ReadableStream({
+            start: (controller) => controller.enqueue(new TextEncoder().encode('{"choices": [')),
+          });
+          return new Response(stream, { headers: { "Content-Type": "application/json" } });
         }
         if ("delayMs" in reply) await Bun.sleep(reply.delayMs);
         return Response.json({
