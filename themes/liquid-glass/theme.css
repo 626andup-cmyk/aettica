@@ -1,0 +1,147 @@
+/*
+ * Liquid Glass: very clear glass panels with bright specular edges,
+ * floating over vivid colour. Panels are rounded and float slightly away
+ * from the edges of the screen; buttons are capsules.
+ *
+ * Lite version: theme-lite.css (no blur, tinted panels).
+ */
+
+:root {
+  color-scheme: dark;
+
+  --font-body: -apple-system, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-heading: -apple-system, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
+
+  --text: #f4f4fb;
+  --text-muted: rgb(235 235 255 / 0.68);
+  --text-strong: #ffffff;
+  --em-color: #ffd6f0;
+
+  --accent: #8fb4ff;
+  --accent-hover: #a9c5ff;
+  --accent-text: #0d1330;
+  --error-bg: rgb(255 70 110 / 0.3);
+  --update-bg: rgb(120 150 255 / 0.3);
+
+  --user-color: #9ff5d8;
+  --partner-color: #ffc4e6;
+  --avatar-user-bg: linear-gradient(135deg, #3fe0b0, #1aa0c8);
+  --avatar-partner-bg: linear-gradient(135deg, #ff7ab8, #8b5cff);
+  --avatar-saturation: 75%;
+  --avatar-lightness: 60%;
+  --name-saturation: 90%;
+  --name-lightness: 82%;
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 26px;
+
+  --app-background: url(blobs.svg) center / cover no-repeat, #1a1033;
+
+  /* The glass: almost clear, heavily blurred and saturated, with a bright edge. */
+  --glass: rgb(255 255 255 / 0.1);
+  --glass-edge: 1px solid rgb(255 255 255 / 0.26);
+  --glass-blur: blur(22px) saturate(180%);
+  --glass-shadow: inset 0 1px 0 rgb(255 255 255 / 0.45), inset 0 -1px 0 rgb(255 255 255 / 0.08),
+    0 10px 30px rgb(0 0 0 / 0.28);
+
+  --sidebar-bg: var(--glass);
+  --sidebar-border: var(--glass-edge);
+  --sidebar-shadow: var(--glass-shadow);
+  --sidebar-backdrop: var(--glass-blur);
+  /* On a phone the sidebar slides over the channel: make it more solid there. */
+  --drawer-bg: rgb(35 25 65 / 0.88);
+  --sidebar-footer-bg: rgb(255 255 255 / 0.06);
+  --channel-link-color: rgb(240 240 255 / 0.75);
+  --channel-link-hover-bg: rgb(255 255 255 / 0.1);
+  --channel-link-active-bg: rgb(255 255 255 / 0.2);
+  --channel-link-active-color: #ffffff;
+
+  --channel-background: rgb(10 5 30 / 0.25);
+  --header-bg: var(--glass);
+  --header-border: var(--glass-edge);
+  --header-shadow: var(--glass-shadow);
+  --header-backdrop: var(--glass-blur);
+  --message-hover-bg: rgb(255 255 255 / 0.06);
+  --composer-bg: var(--glass);
+  --composer-border: var(--glass-edge);
+  --composer-backdrop: var(--glass-blur);
+
+  --input-bg: rgb(255 255 255 / 0.1);
+  --input-border: 1px solid rgb(255 255 255 / 0.2);
+  --input-focus-border: 1px solid rgb(255 255 255 / 0.6);
+  --button-bg: rgb(255 255 255 / 0.14);
+  --button-hover-bg: rgb(255 255 255 / 0.24);
+  --button-text: #ffffff;
+  --button-border: 1px solid rgb(255 255 255 / 0.28);
+  --button-shadow: inset 0 1px 0 rgb(255 255 255 / 0.4);
+  --button-primary-bg: rgb(150 185 255 / 0.55);
+  --button-primary-hover-bg: rgb(170 200 255 / 0.7);
+  --button-primary-text: #ffffff;
+  --icon-button-hover-bg: rgb(255 255 255 / 0.14);
+
+  --dialog-bg: rgb(40 30 70 / 0.45);
+  --dialog-border: var(--glass-edge);
+  --dialog-shadow: var(--glass-shadow);
+  --dialog-backdrop: blur(30px) saturate(180%);
+  --scrim: rgb(5 0 20 / 0.35);
+  --code-bg: rgb(0 0 0 / 0.3);
+
+  --scene-break-line: rgb(255 255 255 / 0.25);
+  --scene-break-text: rgb(255 255 255 / 0.75);
+}
+
+/* A light sheen across the top of each glass panel. */
+.surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0) 45%);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Floating panels: the header and composer sit slightly inside the edges. */
+.channel-header {
+  margin: 8px 8px 0;
+  border-radius: 999px;
+}
+
+.composer {
+  margin: 0 8px 8px;
+  border-radius: var(--radius-lg);
+}
+
+/* On larger screens, the sidebar floats too. */
+@media (min-width: 800px) {
+  .app {
+    gap: 8px;
+    padding: 8px 0 8px 8px;
+  }
+
+  .sidebar {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+}
+
+/* Capsule buttons. */
+.button,
+.posting-as {
+  border-radius: 999px;
+}
+
+.button-primary {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.55), 0 4px 14px rgb(120 150 255 / 0.35);
+}
+
+/* Text sits on moving colour, so give it a faint shadow for contrast. */
+.message-content,
+.channel-title {
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+}
+
+.avatar {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 2px 8px rgb(0 0 0 / 0.3);
+}

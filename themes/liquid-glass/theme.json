@@ -1,0 +1,5 @@
+{
+  "name": "Liquid Glass",
+  "description": "Clear, bright-edged glass floating over vivid colour, with rounded capsule controls.",
+  "swatch": ["linear-gradient(135deg, #ff5f9e, #7a5cff, #1ec8c8)", "rgba(255,255,255,0.18)", "rgba(130,180,255,0.6)", "#ffb86b"]
+}

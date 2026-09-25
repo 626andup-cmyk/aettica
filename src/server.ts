@@ -35,6 +35,16 @@
  *   PATCH  /api/messages/:id                   Edit a message's text
  *   DELETE /api/messages/:id                   Delete one message
  *
+ *   GET    /api/themes                         Every theme, for the theme picker
+ *   POST   /api/themes                         Make a new theme, copying another
+ *   GET    /api/themes/:id                     One theme's CSS and files, for the editor
+ *   PATCH  /api/themes/:id                     Change one of your themes
+ *   DELETE /api/themes/:id                     Delete one of your themes
+ *   POST   /api/themes/:id/files               Add an image or font to one of your themes
+ *   DELETE /api/themes/:id/files/:name         Remove one
+ *
+ * Theme files themselves are served at /themes/<id>/<file> (see src/themes.ts).
+ *
  * Run it with `bun start`.
  */
 
@@ -44,6 +54,7 @@ import { loadConfig, type Config } from "./config.ts";
 import { ApiError, CancelledError, listModels, type ApiOptions } from "./nanogpt.ts";
 import { BusyError, Partner, promptForChannel } from "./partner.ts";
 import { parseSceneBreak, postToMessages } from "./posts.ts";
+import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
 import {
   NotFoundError,
   Store,
@@ -75,6 +86,7 @@ export interface App {
   fetch: (request: Request) => Promise<Response>;
   store: Store;
   partner: Partner;
+  themes: ThemeLibrary;
 }
 
 /**
@@ -150,6 +162,16 @@ export function createApp(config: Config): App {
   };
   const partner = new Partner(store, api);
   const version = appVersion(config.publicDir);
+  const themes = new ThemeLibrary(
+    config.themesDir,
+    join(config.dataDir, "themes"),
+    readFileSync(join(config.publicDir, "style.css"), "utf8"),
+  );
+
+  /** Refuse a theme id that doesn't exist (for settings and channels). */
+  function ensureTheme(id: string | null | undefined): void {
+    if (id && !themes.exists(id)) throw new HttpError(400, "That theme doesn't exist.");
+  }
 
   /** Refuse to change a channel's messages while the partner is writing there. */
   function ensureIdle(channelId: string): void {
@@ -175,7 +197,11 @@ export function createApp(config: Config): App {
     {
       method: "PUT",
       pattern: "/api/settings",
-      handler: async (request) => json({ settings: store.updateSettings(validateSettings(await readJson(request))) }),
+      handler: async (request) => {
+        const update = validateSettings(await readJson(request));
+        ensureTheme(update.appTheme);
+        return json({ settings: store.updateSettings(update) });
+      },
     },
     {
       method: "GET",
@@ -203,8 +229,11 @@ export function createApp(config: Config): App {
     {
       method: "PATCH",
       pattern: "/api/channels/:id",
-      handler: async (request, { id }) =>
-        json({ channel: store.updateChannel(id!, validateChannelUpdate(await readJson(request))) }),
+      handler: async (request, { id }) => {
+        const update = validateChannelUpdate(await readJson(request));
+        ensureTheme(update.theme);
+        return json({ channel: store.updateChannel(id!, update) });
+      },
     },
     {
       method: "DELETE",
@@ -339,6 +368,63 @@ export function createApp(config: Config): App {
         return json({ ok: true });
       },
     },
+
+    // ------------------------------------------------------------ themes
+    {
+      method: "GET",
+      pattern: "/api/themes",
+      handler: () => json({ themes: themes.list() }),
+    },
+    {
+      method: "POST",
+      pattern: "/api/themes",
+      handler: async (request) => {
+        const body = (await readJson(request)) as { name?: unknown; from?: unknown } | null;
+        const from = typeof body?.from === "string" ? body.from : DEFAULT_THEME;
+        return json({ theme: themes.create(body?.name as string, from) });
+      },
+    },
+    {
+      method: "GET",
+      pattern: "/api/themes/:id",
+      handler: (_request, { id }) => json({ theme: themes.details(id!) }),
+    },
+    {
+      method: "PATCH",
+      pattern: "/api/themes/:id",
+      handler: async (request, { id }) => {
+        const body = ((await readJson(request)) ?? {}) as Record<string, unknown>;
+        return json({ theme: themes.update(id!, body) });
+      },
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/themes/:id",
+      handler: (_request, { id }) => {
+        themes.remove(id!);
+        // Anything using the theme goes back to the default.
+        store.forgetTheme(id!);
+        return json({ settings: store.getSettings(), channels: store.listChannels() });
+      },
+    },
+    {
+      method: "POST",
+      pattern: "/api/themes/:id/files",
+      handler: async (request, { id }) => {
+        // Files arrive as base64 text inside JSON, so every request that
+        // changes something stays JSON (see checkRequestIsFromTheApp).
+        const body = (await readJson(request)) as { name?: unknown; data?: unknown } | null;
+        if (typeof body?.name !== "string" || typeof body?.data !== "string") {
+          throw new HttpError(400, '"name" and "data" (base64) are required.');
+        }
+        return json({ files: themes.addFile(id!, body.name, Buffer.from(body.data, "base64")) });
+      },
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/themes/:id/files/:name",
+      handler: (_request, { id, name }) => json({ files: themes.removeFile(id!, name!) }),
+    },
   ];
 
   /**
@@ -347,6 +433,12 @@ export function createApp(config: Config): App {
    */
   async function fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+
+    // Theme files: /themes/<id>/<file>.
+    const themeFile = url.pathname.match(/^\/themes\/([^/]+)\/([^/]+)$/);
+    if (themeFile && (request.method === "GET" || request.method === "HEAD")) {
+      return themes.serve(themeFile[1]!, themeFile[2]!) ?? new Response("Not found", { status: 404 });
+    }
 
     if (!url.pathname.startsWith("/api/")) {
       return serveStatic(config.publicDir, url.pathname);
@@ -375,7 +467,7 @@ export function createApp(config: Config): App {
     }
   }
 
-  return { fetch, store, partner };
+  return { fetch, store, partner, themes };
 }
 
 /**

@@ -20,6 +20,8 @@ export interface Config {
   dataDir: string;
   /** Absolute path of the folder holding the web app's files. */
   publicDir: string;
+  /** Absolute path of the folder of built-in themes. (Your own are in `<dataDir>/themes`.) */
+  themesDir: string;
   /** nanoGPT API key. Empty means "not configured yet". */
   apiKey: string;
   /** Base URL of the OpenAI-compatible API, without a trailing slash. */
@@ -43,6 +45,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: parsePositiveInt(env.PORT, 3000, "PORT"),
     dataDir: resolve(root, env.DATA_DIR || "data"),
     publicDir: resolve(root, "public"),
+    themesDir: resolve(root, "themes"),
     apiKey: (env.NANOGPT_API_KEY || "").trim(),
     // Strip any trailing slashes so we can always write `${base}/path`.
     apiBaseUrl: (env.NANOGPT_BASE_URL || "https://nano-gpt.com/api/v1").replace(/\/+$/, ""),

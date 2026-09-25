@@ -1,0 +1,5 @@
+{
+  "name": "Aero Glass",
+  "description": "Windows 7 style: tinted glass with soft reflections over a glowing blue swirl.",
+  "swatch": ["linear-gradient(135deg, #04204a, #0d5aa7)", "rgba(140,190,230,0.45)", "linear-gradient(#6fd0ff, #1b73c9)", "#41e0c0"]
+}

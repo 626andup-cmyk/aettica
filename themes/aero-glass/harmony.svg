@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <!--
+    Aero Glass wallpaper: a deep blue backdrop with glowing ribbons of light
+    sweeping across it, in the spirit of the Windows 7 default wallpaper.
+    The glow comes from an SVG blur filter on the ribbons.
+  -->
+  <defs>
+    <radialGradient id="bg" cx="0.55" cy="0.45" r="0.8">
+      <stop offset="0" stop-color="#1767b8"/>
+      <stop offset="0.5" stop-color="#0a3d7a"/>
+      <stop offset="1" stop-color="#021634"/>
+    </radialGradient>
+    <linearGradient id="ribbonA" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#27d3ff" stop-opacity="0"/>
+      <stop offset="0.45" stop-color="#6fe7ff"/>
+      <stop offset="0.7" stop-color="#b4ff9a"/>
+      <stop offset="1" stop-color="#ffd76a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ribbonB" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4a8dff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#8fc7ff"/>
+      <stop offset="1" stop-color="#3fe0c4" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-50%" width="140%" height="200%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-50%" width="140%" height="200%">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+
+  <!-- Wide glowing ribbons, then thin bright cores on top of them. -->
+  <g filter="url(#glow)" opacity="0.85">
+    <path d="M-100 700 C 300 450, 700 820, 1050 520 S 1500 250, 1750 380" stroke="url(#ribbonA)" stroke-width="90" fill="none"/>
+    <path d="M-100 820 C 350 600, 800 900, 1150 640 S 1550 420, 1750 520" stroke="url(#ribbonB)" stroke-width="70" fill="none"/>
+  </g>
+  <g filter="url(#soft)">
+    <path d="M-100 700 C 300 450, 700 820, 1050 520 S 1500 250, 1750 380" stroke="url(#ribbonA)" stroke-width="10" fill="none"/>
+    <path d="M-100 740 C 320 500, 720 860, 1080 560 S 1520 300, 1750 420" stroke="url(#ribbonA)" stroke-width="4" fill="none" opacity="0.8"/>
+    <path d="M-100 820 C 350 600, 800 900, 1150 640 S 1550 420, 1750 520" stroke="url(#ribbonB)" stroke-width="6" fill="none"/>
+  </g>
+</svg>

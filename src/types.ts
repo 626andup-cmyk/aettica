@@ -4,7 +4,8 @@
  * Everything the server saves or sends to the browser is described here, so
  * this file doubles as a map of the data model. Each stage grows it:
  * stage 2 added channels and message authorship; stage 3 added scene breaks
- * and channel modes; stage 4 will add notebook entries, and so on.
+ * and channel modes; stage 3.5 added themes; stage 4 will add notebook
+ * entries, and so on.
  *
  * How these shapes are stored in the database is in `src/db.ts`.
  */
@@ -78,6 +79,11 @@ export interface Channel {
    * Changing mode in the middle of a scene sets this instead of `mode`.
    */
   pendingMode: ChannelMode | null;
+  /**
+   * The channel's own theme (a theme id), or `null` to use the app theme.
+   * It only restyles the channel itself; see `src/themes.ts`.
+   */
+  theme: string | null;
   /** Where the channel sits in the sidebar: 0 is the top. */
   position: number;
   /**
@@ -163,6 +169,8 @@ export interface Settings {
   maxTokens: number;
   /** Your characters, for posting in casual mode. */
   userCharacters: UserCharacter[];
+  /** The app theme's id (see `src/themes.ts`). "classic" is the default look. */
+  appTheme: string;
   /**
    * How many of the most recent messages in a channel are sent to the model.
    * Older messages are left out until stage 7 adds scene summaries.

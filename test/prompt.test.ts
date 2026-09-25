@@ -28,6 +28,7 @@ const settings: Settings = {
   maxTokens: 500,
   historyLimit: 40,
   userCharacters: [],
+  appTheme: "classic",
 };
 
 function channel(overrides: Partial<Channel>): Channel {
@@ -37,6 +38,7 @@ function channel(overrides: Partial<Channel>): Channel {
     kind: "rp",
     mode: "literary",
     pendingMode: null,
+    theme: null,
     position: 0,
     characterName: "Ilse Marrow",
     characterSheet: "Name: Ilse Marrow\nRole: lighthouse keeper",

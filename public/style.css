@@ -82,6 +82,9 @@
   --sidebar-border: none;
   --sidebar-shadow: none;
   --sidebar-backdrop: none; /* backdrop-filter, e.g. blur(16px) for glass */
+  /* The sidebar when it slides over the channel on a phone. Glass themes
+     usually want this more solid, so the channel doesn't show through. */
+  --drawer-bg: var(--sidebar-bg);
   --sidebar-footer-bg: #232428;
   --channel-link-color: var(--text-muted);
   --channel-link-hover-bg: #35373c;
@@ -218,6 +221,7 @@ textarea {
     padding-top: env(safe-area-inset-top);
     transform: translateX(-100%);
     transition: transform 0.2s ease;
+    background: var(--drawer-bg);
   }
 
   .app.sidebar-open .sidebar {
@@ -1025,4 +1029,137 @@ button:disabled {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: 13px / 1.5 var(--font-mono);
+}
+
+/* ========================================================= appearance */
+
+/* The theme cards: a colour strip, a name, a short description. */
+.theme-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-card[aria-checked="true"] {
+  border: var(--input-focus-border);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.theme-swatch {
+  display: flex;
+  height: 44px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
+.theme-swatch > span {
+  flex: 1;
+}
+
+.theme-name {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.theme-badge {
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--channel-link-active-bg);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.theme-description {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.theme-actions {
+  margin-top: 10px;
+}
+
+.effects-picker {
+  margin-top: 14px;
+}
+
+/* A short notice at the top of the channel, e.g. about glass effects. */
+.notice-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--update-bg);
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.notice-banner > span {
+  flex: 1;
+}
+
+/* ======================================================= theme editor */
+
+.theme-editor {
+  width: min(820px, 100vw - 24px);
+}
+
+/* CSS is easier to edit in a fixed-width font. */
+.code-input {
+  font: 13px / 1.5 var(--font-mono);
+  tab-size: 2;
+}
+
+.lite-css {
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.theme-files {
+  margin: 4px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.theme-files li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 0;
+}
+
+.theme-files button {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* "Add files…" is a label that opens the hidden file picker; undo the
+   form-label styling it would otherwise get. */
+.dialog label.file-button {
+  display: inline-block;
+  margin-top: 0;
+  font-size: var(--font-size);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--button-text);
 }

@@ -1,10 +1,27 @@
 # Theme reference
 
-This is the list of things a theme can change. Themes arrive in stage 3.5 (see **Themes** in [DESIGN.md](../DESIGN.md)); until then, this documents how the app is built so they'll work.
+This is everything a theme can change. How themes are stored, loaded and scoped is explained in [stage-3.5.md](stage-3.5.md).
 
 A theme is CSS. Most themes only need to redefine the **variables** below. Anything variables can't express, a theme can do by targeting the **classes**.
 
-To try a change today, edit the `:root` block at the top of `public/style.css` and reload.
+## Making a theme
+
+1. Open **Appearance** (the palette button at the bottom of the channel list).
+2. Pick the theme closest to what you want and press **Copy to edit**. Copying **Classic** gives you every variable below with its default value.
+3. Change values in the editor and press **Apply** to see the result behind the editor. **Save** keeps it and closes the editor.
+4. To use an image or font, add it under **Images and fonts**, then refer to it by name: `--app-background: url(sky.jpg) center / cover;`. Fonts go in an `@font-face` rule, which works in channel themes too.
+5. For phones, add a **Lite version**: CSS loaded on top of the theme when glass effects are Lite. Usually it turns blur off (`--sidebar-backdrop: none;` and the other `*-backdrop` variables) and makes panels more solid.
+
+Your theme is a folder in `data/themes/`, so you can also edit it there with any text editor.
+
+### As a channel theme
+
+Any theme can be a channel's own theme (channel settings → Theme). Then:
+
+- Write the theme as usual, with `:root` and all. Aettica rewrites it so it only applies inside the channel: `:root`, `html` and `body` become the channel view, and rules for things outside it (like `.sidebar`) simply match nothing.
+- Every variable starts from its default, not from the app theme, so the channel looks the same whatever the app theme is.
+- The channel shows the theme's `--app-background`, with its `--channel-background` tint behind the messages.
+- The app theme doesn't reach into a channel with its own theme, so layout changes it makes (floating panels, shapes) stay outside.
 
 ## Variables
 
@@ -53,6 +70,7 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `--app-background` | Behind everything: the wallpaper |
 | `--sidebar-width` | Sidebar width on large screens |
 | `--sidebar-bg`, `--sidebar-border`, `--sidebar-shadow`, `--sidebar-backdrop` | The channel sidebar |
+| `--drawer-bg` | The sidebar when it slides over the channel on a phone (defaults to `--sidebar-bg`). Glass themes usually make this more solid. |
 | `--sidebar-footer-bg` | The partner card at the bottom of the sidebar |
 | `--channel-link-color`, `--channel-link-hover-bg`, `--channel-link-active-bg`, `--channel-link-active-color` | Channel links |
 | `--channel-background` | Behind the open channel, on top of the wallpaper |
@@ -93,6 +111,9 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.update-banner` | "Aettica has been updated", at the top of the channel |
 | `.button`, `.button-primary`, `.button-danger`, `.icon-button`, `.link-button` | Buttons |
 | `.dialog`, `.dialog-title`, `.dialog-buttons`, `.hint`, `.form-error` | Dialogs and their parts |
+| `.theme-list`, `.theme-card`, `.theme-swatch`, `.theme-name`, `.theme-badge`, `.theme-description` | The theme picker in Appearance. The chosen card has `aria-checked="true"`. |
+| `.theme-editor`, `.code-input`, `.theme-files` | The theme editor |
+| `.notice-banner` | Short notices at the top of the channel, e.g. about glass effects |
 
 ## Free layers for glass effects
 
@@ -113,6 +134,7 @@ Every surface is already positioned, so these layers can use `position: absolute
 }
 ```
 
-## Per-channel themes
+## Hooks for theme authors
 
-The channel view has `data-channel-id` and `data-channel-kind`. Stage 3.5 will scope a channel's theme to `.channel-view[data-channel-id="..."]`, so a channel theme sets variables that only apply inside that channel. Because the sidebar is outside the channel view, it keeps the app theme.
+- `.channel-view` has `data-channel-id`, `data-channel-kind` (`rp` or `ooc`) and `data-channel-theme` (the channel's own theme, or empty). An app theme can use these, e.g. `.channel-view[data-channel-kind="ooc"] { ... }` to style OOC channels differently.
+- Every `.surface` is positioned and isolated (see above), so `::before` and `::after` layers can use `position: absolute` and `z-index: -1` safely.
