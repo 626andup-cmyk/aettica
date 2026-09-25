@@ -13,7 +13,7 @@
  *
  * API overview (all request and response bodies are JSON):
  *
- *   GET    /api/state                          Settings, channels, and where the partner is writing
+ *   GET    /api/state                          Settings, channels, where the partner is writing, and the app version
  *   PUT    /api/settings                       Change settings (any subset of fields)
  *   GET    /api/models                         List models available on nanoGPT
  *
@@ -36,6 +36,7 @@
  * Run it with `bun start`.
  */
 
+import { readFileSync } from "node:fs";
 import { join, normalize, sep } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
 import { ApiError, CancelledError, listModels, type ApiOptions } from "./nanogpt.ts";
@@ -113,6 +114,27 @@ export function matchRoute(route: Pick<Route, "method" | "pattern">, method: str
 }
 
 /**
+ * A fingerprint of the web app's files: it changes whenever any file in
+ * `public/` changes.
+ *
+ * An installed app can stay open in the background for days. After you
+ * update Aettica and restart the server, that open page is still running the
+ * old code. The page compares this fingerprint with the one it started with,
+ * and reloads when they differ (see `checkForUpdate` in public/app.js).
+ */
+export function appVersion(publicDir: string): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  // Sorted, so the same files always give the same fingerprint.
+  const files = [...new Bun.Glob("**/*").scanSync({ cwd: publicDir })].sort();
+  for (const file of files) {
+    hasher.update(file);
+    hasher.update(readFileSync(join(publicDir, file)));
+  }
+  // The first 12 characters are plenty to tell versions apart.
+  return hasher.digest("hex").slice(0, 12);
+}
+
+/**
  * Wire everything together: open the store, create the partner, and build the
  * request handler. Nothing is listening yet; `main()` does that.
  */
@@ -124,6 +146,7 @@ export function createApp(config: Config): App {
     timeoutMs: config.requestTimeoutMs,
   };
   const partner = new Partner(store, api);
+  const version = appVersion(config.publicDir);
 
   /** Refuse to change a channel's messages while the partner is writing there. */
   function ensureIdle(channelId: string): void {
@@ -139,7 +162,12 @@ export function createApp(config: Config): App {
       method: "GET",
       pattern: "/api/state",
       handler: () =>
-        json({ settings: store.getSettings(), channels: store.listChannels(), busyChannels: partner.busyChannels() }),
+        json({
+          settings: store.getSettings(),
+          channels: store.listChannels(),
+          busyChannels: partner.busyChannels(),
+          appVersion: version,
+        }),
     },
     {
       method: "PUT",

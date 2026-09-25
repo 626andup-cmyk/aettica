@@ -47,6 +47,7 @@
   --danger: #da373c;
   --danger-text: #ffffff;
   --error-bg: #4a2426;
+  --update-bg: #3b3561; /* the "Aettica has been updated" banner */
   --error-text: #f38b8f;
 
   /* Who's who */
@@ -598,6 +599,21 @@ textarea {
   30% {
     transform: translateY(-4px);
   }
+}
+
+/* "Aettica has been updated. [Reload]" at the top of the channel. */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--update-bg);
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.update-banner > span {
+  flex: 1;
 }
 
 /* "Stop" next to "Arlo is writing…". Brighter than other link buttons, so it's easy to find. */

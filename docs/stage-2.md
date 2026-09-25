@@ -139,6 +139,13 @@ So while any channel shows "writing…", the page asks the server every 3 second
 
 The same check picks up turns started somewhere else, such as another tab or before a reload.
 
+### Updates while the app is open
+
+An installed app can stay open in the background for days. After you update Aettica and restart the server, a page that's still open would keep running the old code. So `/api/state` includes `appVersion`, a fingerprint of the files in `public/` (`appVersion` in `src/server.ts`). The page remembers the fingerprint it started with, and compares it whenever it hears from the server and whenever you switch back to the app:
+
+- If they differ and you have nothing unsaved, the page reloads itself.
+- If you have unsent text, an open dialog, or a reply being written, a banner offers a **Reload** button instead, so nothing is lost.
+
 ## The API
 
 Routes are now a table in `src/server.ts`, each with a method, a path pattern like `/api/channels/:id/turn`, and a handler. `matchRoute` compares a request against a pattern and pulls out the `:id`. The full list is at the top of that file. Most stage 1 routes moved under `/api/channels/:id/...`.

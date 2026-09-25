@@ -34,6 +34,8 @@ const state = {
   retry: null,
   /** Unsent text for each channel, so switching channels doesn't lose it. */
   drafts: new Map(),
+  /** Fingerprint of the app's files when this page loaded (see `checkForUpdate`). */
+  appVersion: null,
 };
 
 // Shortcut for looking up elements by id.
@@ -108,6 +110,46 @@ async function loadState() {
   state.settings = data.settings;
   state.channels = data.channels;
   state.busy = new Set(data.busyChannels);
+  state.appVersion ??= data.appVersion;
+  checkForUpdate(data.appVersion);
+}
+
+// ------------------------------------------------------------- updates
+
+/*
+ * An installed app can stay open in the background for days. After you
+ * update Aettica and restart the server, a page that's still open would keep
+ * running the old code (and miss things like new buttons). So the server
+ * sends a fingerprint of the app's files (`appVersion`), and the page checks
+ * it whenever it hears from the server, and whenever you come back to it.
+ */
+
+/**
+ * Compare the server's app version with the one this page started with. If
+ * they differ, reload, unless that would throw something away (unsent
+ * text, an open dialog, a reply being written), in which case offer a
+ * Reload button instead.
+ */
+function checkForUpdate(serverVersion) {
+  if (!serverVersion || !state.appVersion || serverVersion === state.appVersion) return;
+
+  const unsentText = els.input.value.trim() !== "" || [...state.drafts.values()].some((d) => d.trim() !== "");
+  const busy = state.busy.size > 0 || state.editingId !== null || document.querySelector("dialog[open]");
+  if (!unsentText && !busy) {
+    location.reload();
+  } else {
+    $("update-banner").hidden = false;
+  }
+}
+
+/** Ask the server for its app version (used when you come back to the app). */
+async function checkServerVersion() {
+  try {
+    const data = await api("GET", "/api/state");
+    checkForUpdate(data.appVersion);
+  } catch {
+    // Server not running right now; nothing to compare.
+  }
 }
 
 // ------------------------------------------------------------- channels
@@ -362,7 +404,9 @@ async function checkBusy() {
 
   let serverBusy;
   try {
-    serverBusy = new Set((await api("GET", "/api/state")).busyChannels);
+    const data = await api("GET", "/api/state");
+    serverBusy = new Set(data.busyChannels);
+    checkForUpdate(data.appVersion);
   } catch {
     return; // server unreachable for a moment; try again next time
   }
@@ -989,6 +1033,13 @@ els.input.addEventListener("input", autoGrow);
 
 els.turn.addEventListener("click", partnerTurn);
 $("stop-button").addEventListener("click", stopTurn);
+$("update-reload").addEventListener("click", () => location.reload());
+
+// Coming back to the app (switching to it, unlocking the phone) is when an
+// update is most likely to have happened while it sat in the background.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") checkServerVersion();
+});
 els.errorRetry.addEventListener("click", () => state.retry && state.retry());
 $("error-dismiss").addEventListener("click", hideError);
 
