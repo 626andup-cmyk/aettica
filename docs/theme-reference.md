@@ -28,6 +28,7 @@ All are defined in the `:root` block of `public/style.css`.
 | `--accent`, `--accent-hover`, `--accent-text` | Main highlight colour, its hover shade, text drawn on it |
 | `--danger`, `--danger-text` | Delete buttons |
 | `--error-bg`, `--error-text` | Error banner and form errors |
+| `--update-bg` | The "Aettica has been updated" banner |
 | `--user-color`, `--partner-color` | Author name colours |
 | `--avatar-user-bg`, `--avatar-partner-bg`, `--avatar-text` | Avatar circles |
 
@@ -81,7 +82,8 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.messages` | The scrolling message list |
 | `.message` | One message. Has `data-author="user"` or `"partner"`, and `.pending` while being sent. |
 | `.avatar`, `.message-meta`, `.message-author`, `.message-badge`, `.message-time`, `.message-model`, `.message-content`, `.message-actions` | Parts of a message |
-| `.composer`, `.composer-input`, `.composer-buttons`, `.status`, `.typing-dots`, `.error-banner` | The composer area |
+| `.composer`, `.composer-input`, `.composer-buttons`, `.status`, `.typing-dots`, `.stop-button`, `.error-banner` | The composer area |
+| `.update-banner` | "Aettica has been updated", at the top of the channel |
 | `.button`, `.button-primary`, `.button-danger`, `.icon-button`, `.link-button` | Buttons |
 | `.dialog`, `.dialog-title`, `.dialog-buttons`, `.hint`, `.form-error` | Dialogs and their parts |
 

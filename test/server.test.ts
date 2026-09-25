@@ -8,7 +8,9 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { NUDGES, OOC_FRAMING } from "../src/prompt.ts";
-import { createApp, matchRoute, type App } from "../src/server.ts";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { appVersion, createApp, matchRoute, type App } from "../src/server.ts";
 import type { Channel } from "../src/types.ts";
 import { startFakeNanoGpt, tempDir, testConfig, type FakeNanoGpt } from "./helpers.ts";
 
@@ -364,6 +366,20 @@ describe("messages and settings", () => {
     expect(bad.status).toBe(400);
     expect(bad.data.error).toContain("temperature");
     expect(app.store.getSettings().temperature).toBe(1.2);
+  });
+
+  test("reports a fingerprint of the app's files, which changes when they change", async () => {
+    const { data } = await call("GET", "/api/state");
+    expect(data.appVersion).toMatch(/^[0-9a-f]{12}$/);
+    expect(appVersion(join(import.meta.dir, "..", "public"))).toBe(data.appVersion);
+
+    // A different set of files gives a different fingerprint.
+    const other = tempDir();
+    writeFileSync(join(other.path, "index.html"), "<p>hi</p>");
+    const before = appVersion(other.path);
+    writeFileSync(join(other.path, "index.html"), "<p>hello</p>");
+    expect(appVersion(other.path)).not.toBe(before);
+    other.cleanup();
   });
 
   test("returns the server state", async () => {
