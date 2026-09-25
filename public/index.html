@@ -2,12 +2,22 @@
 <!--
   Aettica's single page. The layout is:
 
-    header    channel name, and the settings button
-    main      the message list
-    footer    the composer: your text box, Send, and "Partner's turn"
-    dialog    the settings panel, opened from the header
+    .app
+      .sidebar          server name, channel list, your partner + settings
+      .sidebar-scrim    dark overlay behind the sidebar on phones
+      .channel-view     the open channel:
+        .channel-header   channel name, character, channel settings
+        .messages         the message list
+        .composer         your text box, Send, and "Partner's turn"
+    dialogs             settings, channel settings, new channel, prompt preview
 
   All behaviour lives in app.js; all styling in style.css.
+
+  Theme-ready: every styled element has a descriptive class a theme can
+  target, and elements with the `surface` class (panels you look *through*
+  in a glass theme) never use ::before or ::after in the base styles, so
+  themes are free to use them for highlights and glows. See
+  docs/theme-reference.md.
 -->
 <html lang="en">
   <head>
@@ -28,70 +38,140 @@
     <script src="/app.js" defer></script>
   </head>
   <body>
-    <header class="topbar">
-      <h1 class="channel-name"><span class="hash" aria-hidden="true">#</span>story</h1>
-      <button id="settings-button" class="icon-button" type="button" aria-label="Settings" title="Settings">
-        <!-- A simple gear icon. -->
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-          <path
-            fill="currentColor"
-            d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"
-          />
-        </svg>
-      </button>
-    </header>
+    <!-- Reusable icons, drawn once and referenced with <use href="#icon-...">. -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="icon-gear" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3.3h-4l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5ZM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Z"
+        />
+      </symbol>
+      <symbol id="icon-hash" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M10 3 9.3 8H5v2h4l-.6 4H4v2h4.1l-.7 5h2l.7-5h4l-.7 5h2l.7-5H20v-2h-3.9l.6-4H21V8h-4l.7-5h-2L15 8h-4l.7-5h-2Zm.9 7h4l-.6 4h-4l.6-4Z"
+        />
+      </symbol>
+      <symbol id="icon-ooc" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm3 6.5a1.5 1.5 0 1 0 0 .01Zm5 0a1.5 1.5 0 1 0 0 .01Zm5 0a1.5 1.5 0 1 0 0 .01Z"
+        />
+      </symbol>
+      <symbol id="icon-plus" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z" />
+      </symbol>
+      <symbol id="icon-menu" viewBox="0 0 24 24">
+        <path fill="currentColor" d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z" />
+      </symbol>
+    </svg>
 
-    <main id="messages" class="messages" aria-live="polite">
-      <!-- Filled in by app.js. -->
-    </main>
-
-    <footer class="composer">
-      <!-- Shown while your partner is writing. -->
-      <div id="status" class="status" hidden>
-        <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span>Your partner is writing…</span>
-      </div>
-
-      <!-- Shown when something went wrong, e.g. the model didn't answer. -->
-      <div id="error" class="error-banner" role="alert" hidden>
-        <span id="error-text"></span>
-        <button id="error-retry" type="button" class="link-button">Try again</button>
-        <button id="error-dismiss" type="button" class="link-button" aria-label="Dismiss">✕</button>
-      </div>
-
-      <form id="composer-form" class="composer-row">
-        <textarea
-          id="composer-input"
-          rows="1"
-          placeholder="Write your post…  (Ctrl+Enter to send)"
-          aria-label="Your message"
-        ></textarea>
-        <div class="composer-buttons">
-          <button id="turn-button" type="button" class="secondary" title="Let your partner write without a new post from you">
-            Partner's turn
+    <div class="app" id="app">
+      <!-- ============================================================ sidebar -->
+      <nav class="sidebar surface" id="sidebar" aria-label="Channels">
+        <header class="sidebar-header">
+          <h1 class="server-name">Aettica</h1>
+          <button id="new-channel-button" class="icon-button" type="button" aria-label="New channel" title="New channel">
+            <svg width="20" height="20" aria-hidden="true"><use href="#icon-plus" /></svg>
           </button>
-          <button id="send-button" type="submit" class="primary">Send</button>
-        </div>
-      </form>
-    </footer>
+        </header>
 
-    <!-- Settings panel. A <dialog> gives us a modal with Escape-to-close for free. -->
-    <dialog id="settings-dialog" class="settings">
+        <!-- Filled in by app.js: one <li> per channel. -->
+        <ul class="channel-list" id="channel-list"></ul>
+
+        <footer class="sidebar-footer">
+          <div class="partner-card">
+            <div class="avatar partner-avatar" id="partner-avatar" aria-hidden="true"></div>
+            <div class="partner-card-text">
+              <div class="partner-card-name" id="partner-name"></div>
+              <div class="partner-card-role">your partner</div>
+            </div>
+          </div>
+          <button id="settings-button" class="icon-button" type="button" aria-label="Settings" title="Settings">
+            <svg width="20" height="20" aria-hidden="true"><use href="#icon-gear" /></svg>
+          </button>
+        </footer>
+      </nav>
+
+      <!-- Tapping outside the open sidebar on a phone closes it. -->
+      <div class="sidebar-scrim" id="sidebar-scrim"></div>
+
+      <!-- ======================================================= channel view -->
+      <!--
+        data-channel-id and data-channel-kind are set by app.js. They are what
+        per-channel themes (stage 3.5) will hook onto.
+      -->
+      <section class="channel-view" id="channel-view">
+        <header class="channel-header surface">
+          <button id="menu-button" class="icon-button menu-button" type="button" aria-label="Show channels">
+            <svg width="22" height="22" aria-hidden="true"><use href="#icon-menu" /></svg>
+          </button>
+          <h2 class="channel-title">
+            <svg class="channel-icon" width="20" height="20" aria-hidden="true"><use id="channel-title-icon" href="#icon-hash" /></svg>
+            <span id="channel-name"></span>
+          </h2>
+          <span class="channel-topic" id="channel-topic"></span>
+          <button
+            id="channel-settings-button"
+            class="icon-button"
+            type="button"
+            aria-label="Channel settings"
+            title="Channel settings"
+          >
+            <svg width="20" height="20" aria-hidden="true"><use href="#icon-gear" /></svg>
+          </button>
+        </header>
+
+        <main id="messages" class="messages" aria-live="polite">
+          <!-- Filled in by app.js. -->
+        </main>
+
+        <footer class="composer surface" id="composer">
+          <!-- Shown while your partner is writing in this channel. -->
+          <div id="status" class="status" hidden>
+            <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span id="status-text">Your partner is writing…</span>
+          </div>
+
+          <!-- Shown when something went wrong, e.g. the model didn't answer. -->
+          <div id="error" class="error-banner" role="alert" hidden>
+            <span id="error-text"></span>
+            <button id="error-retry" type="button" class="link-button">Try again</button>
+            <button id="error-dismiss" type="button" class="link-button" aria-label="Dismiss">✕</button>
+          </div>
+
+          <form id="composer-form" class="composer-row">
+            <textarea id="composer-input" class="composer-input" rows="1" aria-label="Your message"></textarea>
+            <div class="composer-buttons">
+              <button id="turn-button" type="button" class="button" title="Let your partner write without a new message from you">
+                Partner's turn
+              </button>
+              <button id="send-button" type="submit" class="button button-primary">Send</button>
+            </div>
+          </form>
+        </footer>
+      </section>
+    </div>
+
+    <!-- ============================================================ dialogs -->
+    <!-- A <dialog> gives us a modal with Escape-to-close for free. -->
+
+    <!-- Server-wide settings. -->
+    <dialog id="settings-dialog" class="dialog surface">
       <form id="settings-form" method="dialog">
-        <h2>Settings</h2>
+        <h2 class="dialog-title">Settings</h2>
+
+        <label for="setting-partner-name">Partner name</label>
+        <input id="setting-partner-name" name="partnerName" autocomplete="off" />
 
         <label for="setting-partner">Partner prompt</label>
-        <p class="hint">Who your partner is as a writer: their name, voice and style. Not the character they play.</p>
+        <p class="hint">Who your partner is as a writer: their name, voice and style. Used in every channel.</p>
         <textarea id="setting-partner" name="partnerPrompt" rows="8"></textarea>
-
-        <label for="setting-character">Character sheet</label>
-        <p class="hint">The character your partner plays in this story.</p>
-        <textarea id="setting-character" name="characterSheet" rows="8"></textarea>
 
         <label for="setting-model">Model</label>
         <div class="inline">
           <input id="setting-model" name="model" list="model-list" autocomplete="off" spellcheck="false" />
-          <button id="load-models" type="button" class="secondary">Load list</button>
+          <button id="load-models" type="button" class="button">Load list</button>
         </div>
         <datalist id="model-list"></datalist>
 
@@ -109,32 +189,108 @@
             <input id="setting-history" name="historyLimit" type="number" min="1" max="1000" step="1" />
           </div>
         </div>
-        <p class="hint">History is how many recent messages your partner can see.</p>
+        <p class="hint">History is how many recent messages in a channel your partner can see.</p>
 
-        <p id="settings-error" class="form-error" role="alert" hidden></p>
+        <p class="form-error" role="alert" hidden></p>
 
         <div class="dialog-buttons">
-          <button id="preview-prompt" type="button" class="secondary">Preview prompt</button>
           <span class="spacer"></span>
-          <button type="button" id="settings-cancel" class="secondary">Cancel</button>
-          <button type="submit" id="settings-save" class="primary">Save</button>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- The open channel's settings. -->
+    <dialog id="channel-dialog" class="dialog surface">
+      <form id="channel-form" method="dialog">
+        <h2 class="dialog-title">Channel settings</h2>
+        <p class="hint" id="channel-kind-note"></p>
+
+        <label for="channel-setting-name">Channel name</label>
+        <input id="channel-setting-name" name="name" autocomplete="off" />
+
+        <!-- Only shown for RP channels. -->
+        <div class="rp-only">
+          <label for="channel-setting-character-name">Character name</label>
+          <p class="hint">The character your partner plays here. Shown as the author of their posts.</p>
+          <input id="channel-setting-character-name" name="characterName" autocomplete="off" />
+
+          <label for="channel-setting-sheet">Character sheet</label>
+          <textarea id="channel-setting-sheet" name="characterSheet" rows="8"></textarea>
+        </div>
+
+        <p class="form-error" role="alert" hidden></p>
+
+        <div class="dialog-buttons">
+          <button type="button" class="button" id="channel-move-up" title="Move up in the sidebar">↑</button>
+          <button type="button" class="button" id="channel-move-down" title="Move down in the sidebar">↓</button>
+          <button type="button" class="button" id="preview-prompt">Preview prompt</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Save</button>
         </div>
 
         <details class="danger-zone">
           <summary>Danger zone</summary>
-          <button id="clear-chat" type="button" class="danger">Delete every message</button>
+          <div class="danger-buttons">
+            <button id="clear-channel" type="button" class="button button-danger">Delete every message</button>
+            <button id="delete-channel" type="button" class="button button-danger">Delete channel</button>
+          </div>
         </details>
       </form>
     </dialog>
 
+    <!-- Creating a channel. -->
+    <dialog id="new-channel-dialog" class="dialog surface">
+      <form id="new-channel-form" method="dialog">
+        <h2 class="dialog-title">New channel</h2>
+
+        <fieldset class="kind-picker">
+          <legend>Type</legend>
+          <label class="kind-option">
+            <input type="radio" name="kind" value="rp" checked />
+            <span><strong>Roleplay</strong><br /><span class="hint">A storyline. Your partner plays a character.</span></span>
+          </label>
+          <label class="kind-option">
+            <input type="radio" name="kind" value="ooc" />
+            <span
+              ><strong>Out of character</strong><br /><span class="hint"
+                >Talk with your partner as themselves.</span
+              ></span
+            >
+          </label>
+        </fieldset>
+
+        <label for="new-channel-name">Channel name</label>
+        <input id="new-channel-name" name="name" autocomplete="off" placeholder="e.g. lighthouse" />
+
+        <div class="rp-only">
+          <label for="new-channel-character-name">Character name</label>
+          <input id="new-channel-character-name" name="characterName" autocomplete="off" />
+          <label for="new-channel-sheet">Character sheet</label>
+          <p class="hint">You can fill these in later from the channel settings.</p>
+          <textarea id="new-channel-sheet" name="characterSheet" rows="6"></textarea>
+        </div>
+
+        <p class="form-error" role="alert" hidden></p>
+
+        <div class="dialog-buttons">
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Create</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- Shows the exact prompt stack the next partner turn would send. -->
-    <dialog id="prompt-dialog" class="settings">
-      <h2>Prompt preview</h2>
-      <p class="hint">This is exactly what the model receives on your partner's next turn.</p>
+    <dialog id="prompt-dialog" class="dialog surface">
+      <h2 class="dialog-title">Prompt preview</h2>
+      <p class="hint">This is exactly what the model receives on your partner's next turn in this channel.</p>
       <div id="prompt-preview"></div>
       <div class="dialog-buttons">
         <span class="spacer"></span>
-        <button id="prompt-close" type="button" class="primary">Close</button>
+        <button type="button" class="button button-primary" data-close>Close</button>
       </div>
     </dialog>
   </body>

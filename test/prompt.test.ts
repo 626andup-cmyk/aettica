@@ -1,62 +1,87 @@
 /**
  * Tests for prompt assembly (src/prompt.ts): the prompt stack's order, what
- * gets left out, and the nudge that lets the partner write without a message.
+ * gets left out, how RP and OOC channels differ, and the nudge that lets the
+ * partner write without a message.
  */
 
 import { describe, expect, test } from "bun:test";
 import {
   buildPromptStack,
-  CONTINUE_NUDGE,
-  OPENING_NUDGE,
-  PARTNER_FRAMING,
+  describeChannels,
+  NUDGES,
+  OOC_FRAMING,
+  RP_FRAMING,
   recentMessages,
   toChatHistory,
+  type PromptInput,
 } from "../src/prompt.ts";
-import type { Author, Message, Settings } from "../src/types.ts";
+import type { Author, Channel, Message, Settings } from "../src/types.ts";
 
 const settings: Settings = {
+  partnerName: "Arlo",
   partnerPrompt: "You are Arlo, a writer of grounded prose.",
-  characterSheet: "Name: Ilse Marrow",
   model: "test/model",
   temperature: 0.9,
   maxTokens: 500,
   historyLimit: 40,
 };
 
-let nextId = 0;
-function msg(author: Author, content: string): Message {
-  return { id: String(nextId++), author, content, createdAt: new Date(0).toISOString() };
+function channel(overrides: Partial<Channel>): Channel {
+  return {
+    id: "story",
+    name: "story",
+    kind: "rp",
+    position: 0,
+    characterName: "Ilse Marrow",
+    characterSheet: "Name: Ilse Marrow\nRole: lighthouse keeper",
+    createdAt: new Date(0).toISOString(),
+    ...overrides,
+  };
 }
 
-describe("buildPromptStack", () => {
+const story = channel({});
+const ooc = channel({ id: "ooc", name: "ooc", kind: "ooc", position: 1, characterName: "", characterSheet: "" });
+
+let nextId = 0;
+function msg(author: Author, content: string): Message {
+  return { id: String(nextId++), channelId: "story", author, content, characters: [], createdAt: new Date(0).toISOString() };
+}
+
+/** Build a stack for `#story` unless told otherwise. */
+function build(overrides: Partial<PromptInput> = {}) {
+  return buildPromptStack({ settings, channel: story, channels: [story, ooc], messages: [msg("user", "Hi")], ...overrides });
+}
+
+describe("buildPromptStack in an RP channel", () => {
   test("puts every instruction layer in one system message, in stack order", () => {
-    const [system] = buildPromptStack(settings, [msg("user", "Hello")]);
+    const [system] = build();
     expect(system!.role).toBe("system");
 
     const text = system!.content;
-    const framing = text.indexOf(PARTNER_FRAMING);
+    const framing = text.indexOf(RP_FRAMING);
     const partner = text.indexOf(settings.partnerPrompt);
-    const character = text.indexOf(settings.characterSheet);
+    const character = text.indexOf(story.characterSheet);
 
     // Layer 1 (framing, then partner prompt) comes before layer 3 (character).
     expect(framing).toBeGreaterThanOrEqual(0);
     expect(partner).toBeGreaterThan(framing);
     expect(character).toBeGreaterThan(partner);
+    expect(text).toContain("## The character you play: Ilse Marrow");
   });
 
-  test("leaves out the layers stage 1 doesn't fill yet", () => {
-    const [system] = buildPromptStack(settings, [msg("user", "Hello")]);
+  test("leaves out the layers that aren't built yet", () => {
+    const [system] = build();
     expect(system!.content).not.toContain("Channel mode");
     expect(system!.content).not.toContain("Model notes");
   });
 
   test("leaves out an empty character sheet instead of sending an empty heading", () => {
-    const [system] = buildPromptStack({ ...settings, characterSheet: "   " }, [msg("user", "Hi")]);
+    const [system] = build({ channel: channel({ characterSheet: "   " }) });
     expect(system!.content).not.toContain("The character you play");
   });
 
   test("follows the system message with the conversation", () => {
-    const stack = buildPromptStack(settings, [msg("user", "Knock knock"), msg("partner", "Who's there?"), msg("user", "Lettuce")]);
+    const stack = build({ messages: [msg("user", "Knock knock"), msg("partner", "Who's there?"), msg("user", "Lettuce")] });
     expect(stack.slice(1)).toEqual([
       { role: "user", content: "Knock knock" },
       { role: "assistant", content: "Who's there?" },
@@ -64,21 +89,58 @@ describe("buildPromptStack", () => {
     ]);
   });
 
-  test("adds a continue nudge when the chat ends on the partner (a turn without a user message)", () => {
-    const stack = buildPromptStack(settings, [msg("user", "Hi"), msg("partner", "Hello there.")]);
-    expect(stack.at(-1)).toEqual({ role: "user", content: CONTINUE_NUDGE });
+  test("adds a continue nudge when the channel ends on the partner (a turn without a user message)", () => {
+    const stack = build({ messages: [msg("user", "Hi"), msg("partner", "Hello there.")] });
+    expect(stack.at(-1)).toEqual({ role: "user", content: NUDGES.rp.continue });
   });
 
-  test("adds an opening nudge when the chat is empty", () => {
-    const stack = buildPromptStack(settings, []);
+  test("adds an opening nudge when the channel is empty", () => {
+    const stack = build({ messages: [] });
     expect(stack).toHaveLength(2);
-    expect(stack[1]).toEqual({ role: "user", content: OPENING_NUDGE });
+    expect(stack[1]).toEqual({ role: "user", content: NUDGES.rp.opening });
   });
 
   test("only sends the most recent historyLimit messages", () => {
     const messages = [msg("user", "one"), msg("partner", "two"), msg("user", "three")];
-    const stack = buildPromptStack({ ...settings, historyLimit: 1 }, messages);
+    const stack = build({ settings: { ...settings, historyLimit: 1 }, messages });
     expect(stack.slice(1)).toEqual([{ role: "user", content: "three" }]);
+  });
+});
+
+describe("buildPromptStack in an OOC channel", () => {
+  test("frames the partner as themselves, with no character sheet", () => {
+    const [system] = build({ channel: ooc });
+    expect(system!.content).toContain(OOC_FRAMING);
+    expect(system!.content).not.toContain(RP_FRAMING);
+    expect(system!.content).not.toContain(story.characterSheet);
+    // Your partner prompt still applies: it's who they are.
+    expect(system!.content).toContain(settings.partnerPrompt);
+  });
+
+  test("lists the channels on the server", () => {
+    const [system] = build({ channel: ooc });
+    expect(system!.content).toContain("## Channels on your server");
+    expect(system!.content).toContain("#story: roleplay, you play Ilse Marrow");
+    expect(system!.content).toContain("#ooc: this conversation");
+  });
+
+  test("uses the OOC nudges", () => {
+    expect(build({ channel: ooc, messages: [] }).at(-1)!.content).toBe(NUDGES.ooc.opening);
+  });
+});
+
+describe("describeChannels", () => {
+  test("describes each kind of channel", () => {
+    const other = channel({ id: "x", name: "side-chat", kind: "ooc", characterName: "" });
+    const noCharacter = channel({ id: "y", name: "draft", characterName: "" });
+    expect(describeChannels([story, other, noCharacter, ooc], ooc)).toBe(
+      [
+        "- #story: roleplay, you play Ilse Marrow",
+        "- #side-chat: another out-of-character chat",
+        "- #draft: roleplay",
+        "- #ooc: this conversation",
+      ].join("\n"),
+    );
   });
 });
 

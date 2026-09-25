@@ -1,5 +1,7 @@
 # Stage 1: how it works
 
+> This describes Aettica as it was at the end of stage 1. Stage 2 replaced `data/chat.json` with a database and moved the API routes under `/api/channels/:id/`; see [stage-2.md](stage-2.md) for what changed.
+
 Stage 1 is the smallest complete Aettica: one chat, one partner, one character sheet, one model. According to [DESIGN.md](../DESIGN.md), its three new concepts are **a server**, **API calls** and **prompt assembly**. This document walks through each, pointing to the code where it happens.
 
 ## The big picture

@@ -1,34 +1,59 @@
 /**
- * The store: where the chat and its settings live, and how they are saved.
+ * The store: reading and writing Aettica's data.
  *
- * Stage 1 keeps everything in one JSON file (`data/chat.json`). The whole file
- * is loaded into memory when the server starts, and rewritten after every
- * change. For one chat of a few thousand messages that is perfectly fast, and
- * it means you can open the file and read exactly what is stored.
+ * Everything lives in an SQLite database (`data/aettica.db`); the table
+ * layout is described in `src/db.ts`. The rest of the server only talks to
+ * the store through the methods of the `Store` class below, and never writes
+ * SQL itself. That keeps every query in one place.
  *
- * Stage 2 (multiple channels) is where a real database arrives. To make that
- * swap painless, the rest of the server only talks to the store through the
- * methods of the `Store` class below and never touches the file itself.
+ * All methods are synchronous. Bun's SQLite driver answers immediately
+ * (there is no network in between), so there is nothing to wait for.
  */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "node:fs";
+import type { Database } from "bun:sqlite";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Author, Message, SaveData, Settings } from "./types.ts";
+import { openDatabase } from "./db.ts";
+import { importLegacyChat } from "./legacy.ts";
+import type { Author, Channel, ChannelKind, Message, Settings } from "./types.ts";
 
 /** Where the starting partner prompt and character sheet are kept. */
 const DEFAULTS_DIR = resolve(import.meta.dir, "..", "defaults");
 
+/** Thrown when something is looked up by an id that doesn't exist. */
+export class NotFoundError extends Error {
+  constructor(what: string) {
+    super(`That ${what} doesn't exist.`);
+    this.name = "NotFoundError";
+  }
+}
+
 /**
- * Settings used the first time the server runs, before you change anything.
- * The partner prompt and character sheet come from `defaults/*.md` so they are
- * easy to read and edit as plain text.
+ * Thrown when a request contains invalid data: a missing name, a temperature
+ * out of range, and so on. The message says what's wrong and is shown to you.
+ */
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
+// ------------------------------------------------------------- defaults
+
+/**
+ * Settings used until you change them. The partner prompt comes from
+ * `defaults/partner.md` so it's easy to read and edit as plain text.
+ *
+ * Settings are merged over these every time they're read, so a setting added
+ * in a newer version of Aettica quietly gets its default.
  */
 export function defaultSettings(): Settings {
   return {
+    partnerName: "Arlo",
     partnerPrompt: readDefault("partner.md"),
-    characterSheet: readDefault("character.md"),
-    // Check https://nano-gpt.com/api/v1/models (or the model list in the
-    // settings panel) for the exact ids available to your account.
+    // Check the model list in the settings panel for the exact ids available
+    // to your account.
     model: "deepseek-ai/DeepSeek-V3.1-Terminus",
     temperature: 0.9,
     maxTokens: 1024,
@@ -36,21 +61,30 @@ export function defaultSettings(): Settings {
   };
 }
 
+/** The character sheet a brand-new server's first RP channel starts with. */
+export function defaultCharacter(): { name: string; sheet: string } {
+  return { name: "Ilse Marrow", sheet: readDefault("character.md") };
+}
+
 function readDefault(fileName: string): string {
   const path = join(DEFAULTS_DIR, fileName);
   return existsSync(path) ? readFileSync(path, "utf8").trim() : "";
 }
 
+// ------------------------------------------------------------ validation
+
 /**
- * Limits for each setting. `validateSettings` uses these to reject nonsense
- * (a negative temperature, a history limit of a million) before it is saved.
+ * Limits for each field. The validators below use these to reject nonsense
+ * (a negative temperature, a 10 MB channel name) before it is saved.
  */
 const LIMITS = {
   temperature: { min: 0, max: 2 },
   maxTokens: { min: 16, max: 32000 },
   historyLimit: { min: 1, max: 1000 },
-  /** Longest allowed text for the prompt and sheet, in characters. */
-  textLength: 100_000,
+  /** Longest prompt or character sheet, in characters. */
+  longText: 100_000,
+  /** Longest name (channel, character, partner), in characters. */
+  name: 100,
 } as const;
 
 /**
@@ -62,23 +96,15 @@ const LIMITS = {
  * problem found.
  */
 export function validateSettings(input: unknown): Partial<Settings> {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw new Error("Settings must be a JSON object");
-  }
-  const raw = input as Record<string, unknown>;
+  const raw = requireObject(input, "Settings");
   const clean: Partial<Settings> = {};
 
-  for (const key of ["partnerPrompt", "characterSheet"] as const) {
-    if (raw[key] === undefined) continue;
-    const value = raw[key];
-    if (typeof value !== "string") throw new Error(`${key} must be text`);
-    if (value.length > LIMITS.textLength) throw new Error(`${key} is too long`);
-    clean[key] = value;
-  }
+  if (raw.partnerName !== undefined) clean.partnerName = name(raw.partnerName, "partnerName");
+  if (raw.partnerPrompt !== undefined) clean.partnerPrompt = longText(raw.partnerPrompt, "partnerPrompt");
 
   if (raw.model !== undefined) {
     if (typeof raw.model !== "string" || raw.model.trim() === "") {
-      throw new Error("model must be a non-empty model id");
+      throw new ValidationError("model must be a non-empty model id");
     }
     clean.model = raw.model.trim();
   }
@@ -96,158 +122,387 @@ export function validateSettings(input: unknown): Partial<Settings> {
   return clean;
 }
 
+/** The fields you give when creating a channel. */
+export interface NewChannel {
+  name: string;
+  kind: ChannelKind;
+  characterName?: string;
+  characterSheet?: string;
+}
+
+/** Check the body of a "create channel" request. */
+export function validateNewChannel(input: unknown): NewChannel {
+  const raw = requireObject(input, "Channel");
+  if (raw.kind !== "rp" && raw.kind !== "ooc") {
+    throw new ValidationError('kind must be "rp" or "ooc"');
+  }
+  return {
+    name: name(raw.name, "name"),
+    kind: raw.kind,
+    ...validateChannelUpdate({ characterName: raw.characterName, characterSheet: raw.characterSheet }),
+  };
+}
+
+/** The channel fields that can be changed after creation. */
+export type ChannelUpdate = Partial<Pick<Channel, "name" | "characterName" | "characterSheet">>;
+
+/** Check a partial channel update. The kind can't be changed, so it's ignored. */
+export function validateChannelUpdate(input: unknown): ChannelUpdate {
+  const raw = requireObject(input, "Channel");
+  const clean: ChannelUpdate = {};
+  if (raw.name !== undefined) clean.name = name(raw.name, "name");
+  if (raw.characterName !== undefined) {
+    // Unlike other names, a character name may be empty (narration only).
+    if (typeof raw.characterName !== "string") throw new ValidationError("characterName must be text");
+    if (raw.characterName.length > LIMITS.name) throw new ValidationError("characterName is too long");
+    clean.characterName = raw.characterName.trim();
+  }
+  if (raw.characterSheet !== undefined) clean.characterSheet = longText(raw.characterSheet, "characterSheet");
+  return clean;
+}
+
+function requireObject(input: unknown, what: string): Record<string, unknown> {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new ValidationError(`${what} must be a JSON object`);
+  }
+  return input as Record<string, unknown>;
+}
+
+/** A required, non-empty, reasonably short piece of text, trimmed. */
+function name(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim() === "") throw new ValidationError(`${field} must be non-empty text`);
+  if (value.trim().length > LIMITS.name) throw new ValidationError(`${field} is too long`);
+  return value.trim();
+}
+
+function longText(value: unknown, field: string): string {
+  if (typeof value !== "string") throw new ValidationError(`${field} must be text`);
+  if (value.length > LIMITS.longText) throw new ValidationError(`${field} is too long`);
+  return value;
+}
+
 function numberInRange(
   value: unknown,
-  name: string,
+  field: string,
   range: { min: number; max: number },
   wholeNumber: boolean,
 ): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`${name} must be a number`);
+    throw new ValidationError(`${field} must be a number`);
   }
   if (wholeNumber && !Number.isInteger(value)) {
-    throw new Error(`${name} must be a whole number`);
+    throw new ValidationError(`${field} must be a whole number`);
   }
   if (value < range.min || value > range.max) {
-    throw new Error(`${name} must be between ${range.min} and ${range.max}`);
+    throw new ValidationError(`${field} must be between ${range.min} and ${range.max}`);
   }
   return value;
 }
 
-/**
- * Holds the chat in memory and writes it to disk after every change.
- *
- * All methods are synchronous: the file is small and written in one go, so
- * there is no moment where two changes can interleave and corrupt it.
+// ----------------------------------------------------------- row mapping
+
+/*
+ * The database uses snake_case column names (`channel_id`), while the rest
+ * of the code uses camelCase (`channelId`). These types describe rows exactly
+ * as SQLite returns them, and the functions below convert them.
  */
+
+interface ChannelRow {
+  id: string;
+  name: string;
+  kind: ChannelKind;
+  position: number;
+  character_name: string;
+  character_sheet: string;
+  created_at: string;
+}
+
+interface MessageRow {
+  id: string;
+  channel_id: string;
+  author: Author;
+  content: string;
+  created_at: string;
+  edited_at: string | null;
+  model: string | null;
+  /** A JSON array of character names, built by the query itself. */
+  characters: string;
+}
+
+function toChannel(row: ChannelRow): Channel {
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    position: row.position,
+    characterName: row.character_name,
+    characterSheet: row.character_sheet,
+    createdAt: row.created_at,
+  };
+}
+
+function toMessage(row: MessageRow): Message {
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    author: row.author,
+    content: row.content,
+    characters: JSON.parse(row.characters) as string[],
+    createdAt: row.created_at,
+    // Only include optional fields when they have a value.
+    ...(row.edited_at ? { editedAt: row.edited_at } : {}),
+    ...(row.model ? { model: row.model } : {}),
+  };
+}
+
+/**
+ * The start of every query that reads messages. For each message, the inner
+ * `SELECT` gathers the characters it voices from `message_characters`, in
+ * order, into one JSON array (`json_group_array`), so one query returns
+ * everything about a message.
+ */
+const SELECT_MESSAGES = `
+  SELECT m.id, m.channel_id, m.author, m.content, m.created_at, m.edited_at, m.model,
+    (SELECT json_group_array(character_name)
+       FROM (SELECT character_name FROM message_characters
+              WHERE message_id = m.id ORDER BY position)) AS characters
+  FROM messages m`;
+
+// ----------------------------------------------------------------- store
+
+/** The fields you give when adding a message. */
+export interface NewMessage {
+  channelId: string;
+  author: Author;
+  content: string;
+  characters?: string[];
+  model?: string;
+}
+
 export class Store {
-  private data: SaveData;
-  private readonly filePath: string;
+  readonly db: Database;
 
   /**
-   * Open (or create) the save file inside `dataDir`.
-   * The folder is created if it does not exist yet.
+   * Open (or create) the database inside `dataDir`.
+   *
+   * The very first time, the database is filled with starting content: your
+   * stage 1 chat if there is one (see `src/legacy.ts`), otherwise a `#story`
+   * channel with the example character and an `#ooc` channel.
+   *
+   * @param dataDir  Folder for the database. Created if it doesn't exist.
+   *                 Pass `":memory:"` for a throwaway database (for tests).
    */
   constructor(dataDir: string) {
-    mkdirSync(dataDir, { recursive: true });
-    this.filePath = join(dataDir, "chat.json");
-    this.data = this.load();
+    const inMemory = dataDir === ":memory:";
+    if (!inMemory) mkdirSync(dataDir, { recursive: true });
+    const path = inMemory ? ":memory:" : join(dataDir, "aettica.db");
+
+    const isNew = inMemory || !existsSync(path);
+    this.db = openDatabase(path);
+
+    if (isNew) {
+      const imported = !inMemory && importLegacyChat(this, dataDir);
+      if (!imported) this.seed();
+    }
   }
 
-  // ---------------------------------------------------------------- reading
+  /** Starting content for a brand-new server. */
+  private seed(): void {
+    const character = defaultCharacter();
+    this.createChannel({ name: "story", kind: "rp", characterName: character.name, characterSheet: character.sheet });
+    this.createChannel({ name: "ooc", kind: "ooc" });
+  }
 
-  /** A copy of the current settings. */
+  /** Close the database. Only needed in tests, which open many. */
+  close(): void {
+    this.db.close();
+  }
+
+  // -------------------------------------------------------------- settings
+
+  /** The current settings, with defaults for anything never changed. */
   getSettings(): Settings {
-    return { ...this.data.settings };
+    const rows = this.db.query("SELECT key, value FROM settings").all() as { key: string; value: string }[];
+    const saved = Object.fromEntries(rows.map((row) => [row.key, JSON.parse(row.value)]));
+    return { ...defaultSettings(), ...saved };
   }
 
-  /** A copy of every message, oldest first. */
-  getMessages(): Message[] {
-    return this.data.messages.map((m) => ({ ...m }));
-  }
-
-  /** The newest message, or `undefined` if the chat is empty. */
-  lastMessage(): Message | undefined {
-    const last = this.data.messages.at(-1);
-    return last ? { ...last } : undefined;
-  }
-
-  // ---------------------------------------------------------------- writing
-
-  /** Apply an already-validated settings update and save. */
+  /** Save an already-validated settings update. Returns the new settings. */
   updateSettings(update: Partial<Settings>): Settings {
-    this.data.settings = { ...this.data.settings, ...update };
-    this.save();
+    // "Upsert": insert the key, or if it already exists, update its value.
+    const upsert = this.db.query(
+      "INSERT INTO settings (key, value) VALUES ($key, $value) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+    );
+    this.db.transaction(() => {
+      for (const [key, value] of Object.entries(update)) {
+        if (value !== undefined) upsert.run({ key, value: JSON.stringify(value) });
+      }
+    })();
     return this.getSettings();
   }
 
-  /** Append a new message to the end of the chat and save. */
-  addMessage(author: Author, content: string, model?: string): Message {
-    const message: Message = {
-      id: crypto.randomUUID(),
-      author,
-      content,
-      createdAt: new Date().toISOString(),
-      // Only include `model` when there is one, to keep the file tidy.
-      ...(model ? { model } : {}),
+  // -------------------------------------------------------------- channels
+
+  /** Every channel, in sidebar order. */
+  listChannels(): Channel[] {
+    const rows = this.db.query("SELECT * FROM channels ORDER BY position").all() as ChannelRow[];
+    return rows.map(toChannel);
+  }
+
+  /** One channel. Throws `NotFoundError` if there's no such channel. */
+  getChannel(id: string): Channel {
+    const row = this.db.query("SELECT * FROM channels WHERE id = $id").get({ id }) as ChannelRow | null;
+    if (!row) throw new NotFoundError("channel");
+    return toChannel(row);
+  }
+
+  /** Create a channel at the bottom of the sidebar. */
+  createChannel(input: NewChannel): Channel {
+    const { next } = this.db.query("SELECT COALESCE(MAX(position) + 1, 0) AS next FROM channels").get() as {
+      next: number;
     };
-    this.data.messages.push(message);
-    this.save();
-    return { ...message };
+    const id = crypto.randomUUID();
+    this.db
+      .query(
+        `INSERT INTO channels (id, name, kind, position, character_name, character_sheet, created_at)
+         VALUES ($id, $name, $kind, $position, $characterName, $characterSheet, $createdAt)`,
+      )
+      .run({
+        id,
+        name: input.name,
+        kind: input.kind,
+        position: next,
+        // OOC channels have no character.
+        characterName: input.kind === "rp" ? (input.characterName ?? "") : "",
+        characterSheet: input.kind === "rp" ? (input.characterSheet ?? "") : "",
+        createdAt: new Date().toISOString(),
+      });
+    return this.getChannel(id);
   }
 
-  /** Replace a message's text. Returns the updated message, or `undefined` if no message has that id. */
-  editMessage(id: string, content: string): Message | undefined {
-    const message = this.data.messages.find((m) => m.id === id);
-    if (!message) return undefined;
-    message.content = content;
-    message.editedAt = new Date().toISOString();
-    this.save();
-    return { ...message };
-  }
-
-  /** Remove one message. Returns `false` if no message has that id. */
-  deleteMessage(id: string): boolean {
-    const before = this.data.messages.length;
-    this.data.messages = this.data.messages.filter((m) => m.id !== id);
-    if (this.data.messages.length === before) return false;
-    this.save();
-    return true;
-  }
-
-  /** Remove every message (settings are kept). */
-  clearMessages(): void {
-    this.data.messages = [];
-    this.save();
-  }
-
-  // ------------------------------------------------------------ file access
-
-  /**
-   * Read the save file, or start fresh if there isn't one.
-   *
-   * A file that exists but can't be parsed is *not* silently replaced: that
-   * would throw away your chat. The server refuses to start instead, so you
-   * can look at the file and fix or move it.
-   */
-  private load(): SaveData {
-    if (!existsSync(this.filePath)) {
-      const fresh: SaveData = { version: 1, settings: defaultSettings(), messages: [] };
-      this.data = fresh;
-      this.save();
-      return fresh;
+  /** Change a channel's name or character. Returns the updated channel. */
+  updateChannel(id: string, update: ChannelUpdate): Channel {
+    const channel = this.getChannel(id); // throws if missing
+    // Character fields only mean something for RP channels.
+    const merged = { ...channel, ...update };
+    if (channel.kind === "ooc") {
+      merged.characterName = "";
+      merged.characterSheet = "";
     }
-
-    let parsed: SaveData;
-    try {
-      parsed = JSON.parse(readFileSync(this.filePath, "utf8"));
-    } catch (error) {
-      throw new Error(
-        `Could not read ${this.filePath}: ${(error as Error).message}. ` +
-          "Fix or move the file, then restart the server.",
-      );
-    }
-
-    // Fill in any settings added in newer versions of Aettica, so an older
-    // save file keeps working after an update.
-    return {
-      version: 1,
-      settings: { ...defaultSettings(), ...parsed.settings },
-      messages: Array.isArray(parsed.messages) ? parsed.messages : [],
-    };
+    this.db
+      .query(
+        `UPDATE channels SET name = $name, character_name = $characterName, character_sheet = $characterSheet
+         WHERE id = $id`,
+      )
+      .run({ id, name: merged.name, characterName: merged.characterName, characterSheet: merged.characterSheet });
+    return this.getChannel(id);
   }
 
   /**
-   * Write the save file safely.
+   * Put the channels in a new order.
    *
-   * Writing straight over `chat.json` has a risk: if the phone dies halfway
-   * through, the file is left half-written and the chat is lost. Instead we
-   * write a temporary file and then rename it over the old one. A rename is
-   * atomic: afterwards the file is either entirely old or entirely new.
+   * @param ids  Every channel id, in the new order. Leaving one out or adding
+   *             an unknown one is an error, so the order can never end up
+   *             with gaps or duplicates.
    */
-  private save(): void {
-    const tempPath = `${this.filePath}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(this.data, null, 2));
-    renameSync(tempPath, this.filePath);
+  reorderChannels(ids: string[]): Channel[] {
+    const existing = new Set(this.listChannels().map((c) => c.id));
+    const given = new Set(ids);
+    if (given.size !== ids.length || given.size !== existing.size || ids.some((id) => !existing.has(id))) {
+      throw new ValidationError("The new order must list every channel exactly once.");
+    }
+    const setPosition = this.db.query("UPDATE channels SET position = $position WHERE id = $id");
+    this.db.transaction(() => {
+      ids.forEach((id, position) => setPosition.run({ id, position }));
+    })();
+    return this.listChannels();
+  }
+
+  /**
+   * Delete a channel and, through `ON DELETE CASCADE`, all its messages.
+   * Throws `NotFoundError` if there's no such channel.
+   */
+  deleteChannel(id: string): void {
+    const result = this.db.query("DELETE FROM channels WHERE id = $id").run({ id });
+    if (result.changes === 0) throw new NotFoundError("channel");
+  }
+
+  // -------------------------------------------------------------- messages
+
+  /** Every message in a channel, oldest first. */
+  getMessages(channelId: string): Message[] {
+    this.getChannel(channelId); // throws NotFoundError for an unknown channel
+    const rows = this.db.query(`${SELECT_MESSAGES} WHERE m.channel_id = $channelId ORDER BY m.seq`).all({
+      channelId,
+    }) as MessageRow[];
+    return rows.map(toMessage);
+  }
+
+  /** One message. Throws `NotFoundError` if there's no such message. */
+  getMessage(id: string): Message {
+    const row = this.db.query(`${SELECT_MESSAGES} WHERE m.id = $id`).get({ id }) as MessageRow | null;
+    if (!row) throw new NotFoundError("message");
+    return toMessage(row);
+  }
+
+  /** The newest message in a channel, or `undefined` if it's empty. */
+  lastMessage(channelId: string): Message | undefined {
+    const row = this.db
+      .query(`${SELECT_MESSAGES} WHERE m.channel_id = $channelId ORDER BY m.seq DESC LIMIT 1`)
+      .get({ channelId }) as MessageRow | null;
+    return row ? toMessage(row) : undefined;
+  }
+
+  /**
+   * Add a message to the end of a channel.
+   *
+   * @param createdAt  Only for importing old messages; new ones get "now".
+   */
+  addMessage(input: NewMessage & { id?: string; createdAt?: string; editedAt?: string }): Message {
+    const id = input.id ?? crypto.randomUUID();
+    const insertMessage = this.db.query(
+      `INSERT INTO messages (id, channel_id, author, content, created_at, edited_at, model)
+       VALUES ($id, $channelId, $author, $content, $createdAt, $editedAt, $model)`,
+    );
+    const insertCharacter = this.db.query(
+      "INSERT OR IGNORE INTO message_characters (message_id, character_name, position) VALUES ($id, $name, $position)",
+    );
+
+    // The message and its characters are saved together or not at all.
+    this.db.transaction(() => {
+      insertMessage.run({
+        id,
+        channelId: input.channelId,
+        author: input.author,
+        content: input.content,
+        createdAt: input.createdAt ?? new Date().toISOString(),
+        editedAt: input.editedAt ?? null,
+        model: input.model ?? null,
+      });
+      (input.characters ?? []).forEach((name, position) => insertCharacter.run({ id, name, position }));
+    })();
+
+    return this.getMessage(id);
+  }
+
+  /** Replace a message's text. Throws `NotFoundError` if it doesn't exist. */
+  editMessage(id: string, content: string): Message {
+    const result = this.db
+      .query("UPDATE messages SET content = $content, edited_at = $editedAt WHERE id = $id")
+      .run({ id, content, editedAt: new Date().toISOString() });
+    if (result.changes === 0) throw new NotFoundError("message");
+    return this.getMessage(id);
+  }
+
+  /** Delete one message. Throws `NotFoundError` if it doesn't exist. */
+  deleteMessage(id: string): void {
+    const result = this.db.query("DELETE FROM messages WHERE id = $id").run({ id });
+    if (result.changes === 0) throw new NotFoundError("message");
+  }
+
+  /** Delete every message in a channel, keeping the channel itself. */
+  clearMessages(channelId: string): void {
+    this.getChannel(channelId); // throws NotFoundError for an unknown channel
+    this.db.query("DELETE FROM messages WHERE channel_id = $channelId").run({ channelId });
   }
 }

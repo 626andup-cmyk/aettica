@@ -11,17 +11,17 @@
  *   - an event like opening the app (stage 8)
  *   - a timer, the "heartbeat"      (endgame)
  *
- * The turn itself only ever looks at what's already saved: it reads the chat,
- * builds the prompt stack, asks the model, and saves the reply. It never
- * receives your message as an argument. That's what keeps proactive turns an
- * add-on instead of a rewrite later.
+ * The turn itself only ever looks at what's already saved: it reads the
+ * channel, builds the prompt stack, asks the model, and saves the reply. It
+ * never receives your message as an argument. That's what keeps proactive
+ * turns an add-on instead of a rewrite later.
  */
 
 import type { ApiOptions } from "./nanogpt.ts";
 import { createChatCompletion } from "./nanogpt.ts";
 import { buildPromptStack } from "./prompt.ts";
 import type { Store } from "./store.ts";
-import type { Message } from "./types.ts";
+import type { ChatMessage, Message } from "./types.ts";
 
 /**
  * What caused a turn. Stage 1 only uses this for the server log, but it's
@@ -40,55 +40,81 @@ export interface TurnOptions {
   replacing?: string;
 }
 
-/** Thrown when a turn is requested while another one is still being written. */
+/** Thrown when a turn is requested in a channel where one is still being written. */
 export class BusyError extends Error {
   constructor() {
-    super("Your partner is already writing. Wait for that reply first.");
+    super("Your partner is already writing in this channel. Wait for that reply first.");
     this.name = "BusyError";
   }
 }
 
+/**
+ * Build the prompt stack for a channel from what's saved.
+ *
+ * Used by the turn itself and by the "Preview prompt" button, so the preview
+ * is always exactly what a turn would send.
+ *
+ * @param excludeId  A message to leave out (the one being regenerated).
+ */
+export function promptForChannel(store: Store, channelId: string, excludeId?: string): ChatMessage[] {
+  return buildPromptStack({
+    settings: store.getSettings(),
+    channel: store.getChannel(channelId),
+    channels: store.listChannels(),
+    messages: store.getMessages(channelId).filter((m) => m.id !== excludeId),
+  });
+}
+
 export class Partner {
   /**
-   * True while a reply is being generated.
+   * The channels the partner is writing in right now.
    *
-   * Only one turn may run at a time. Without this, tapping Send twice would
-   * start two generations that both read the same chat and both save a reply,
-   * and your partner would answer the same post twice.
+   * Only one turn may run per channel at a time. Without this, tapping Send
+   * twice would start two generations that both read the same channel and
+   * both save a reply, and your partner would answer the same post twice.
+   * Different channels don't block each other.
    */
-  private writing = false;
+  private readonly writingIn = new Set<string>();
 
   constructor(
     private readonly store: Store,
     private readonly api: ApiOptions,
   ) {}
 
-  /** Whether a turn is in progress right now. */
-  get busy(): boolean {
-    return this.writing;
+  /** Whether a turn is in progress in a channel. */
+  isBusy(channelId: string): boolean {
+    return this.writingIn.has(channelId);
+  }
+
+  /** Every channel with a turn in progress. */
+  busyChannels(): string[] {
+    return [...this.writingIn];
   }
 
   /**
-   * Your partner takes one turn: reads the chat, writes a reply, saves it.
+   * Your partner takes one turn in a channel: reads it, writes a reply,
+   * saves it.
    *
-   * @param trigger  Why the turn is happening (for logging).
-   * @param options  See `TurnOptions`.
-   * @returns        The partner's new message, as saved.
-   * @throws BusyError if a turn is already running.
-   * @throws ApiError  if the model couldn't produce a reply. Nothing is saved
-   *                   in that case, so the chat is left exactly as it was.
+   * @param channelId  Where to write.
+   * @param trigger    Why the turn is happening (for logging).
+   * @param options    See `TurnOptions`.
+   * @returns          The partner's new message, as saved.
+   * @throws NotFoundError if the channel doesn't exist.
+   * @throws BusyError     if a turn is already running in that channel.
+   * @throws ApiError      if the model couldn't produce a reply. Nothing is
+   *                       saved in that case, so the channel is unchanged.
    */
-  async takeTurn(trigger: TurnTrigger, options: TurnOptions = {}): Promise<Message> {
-    if (this.writing) throw new BusyError();
-    this.writing = true;
+  async takeTurn(channelId: string, trigger: TurnTrigger, options: TurnOptions = {}): Promise<Message> {
+    if (this.writingIn.has(channelId)) throw new BusyError();
+    const channel = this.store.getChannel(channelId); // throws if missing
 
+    this.writingIn.add(channelId);
     try {
       const settings = this.store.getSettings();
-      const history = this.store.getMessages().filter((m) => m.id !== options.replacing);
-      const messages = buildPromptStack(settings, history);
+      const messages = promptForChannel(this.store, channelId, options.replacing);
 
       const started = Date.now();
-      console.log(`[partner] turn started (${trigger}) using ${settings.model}`);
+      console.log(`[partner] turn started in #${channel.name} (${trigger}) using ${settings.model}`);
 
       const result = await createChatCompletion(this.api, {
         model: settings.model,
@@ -102,13 +128,24 @@ export class Partner {
 
       if (options.replacing) this.store.deleteMessage(options.replacing);
 
-      // Record the model we *asked* for rather than the one the API reports,
-      // because that's the id you'd put back in settings to get it again.
-      return this.store.addMessage("partner", result.content, settings.model);
+      // Re-read the channel: its character may have been renamed while the
+      // model was writing, and the message should carry the current name.
+      const current = this.store.getChannel(channelId);
+      return this.store.addMessage({
+        channelId,
+        author: "partner",
+        content: result.content,
+        // In an RP channel the partner voices the channel's character. In
+        // OOC they speak as themselves, so no character.
+        characters: current.kind === "rp" && current.characterName ? [current.characterName] : [],
+        // Record the model we *asked* for rather than the one the API reports,
+        // because that's the id you'd put back in settings to get it again.
+        model: settings.model,
+      });
     } finally {
       // Always release the lock, even if generation failed. Otherwise one
-      // network error would leave the partner "busy" forever.
-      this.writing = false;
+      // network error would leave the channel "busy" forever.
+      this.writingIn.delete(channelId);
     }
   }
 }
