@@ -488,6 +488,57 @@ describe("messages and settings", () => {
   });
 });
 
+describe("themes", () => {
+  test("are listed, and the app theme can be chosen", async () => {
+    const { data } = await call("GET", "/api/themes");
+    expect(data.themes.map((t: any) => t.id)).toContain("liquid-glass");
+
+    expect((await call("PUT", "/api/settings", { appTheme: "liquid-glass" })).data.settings.appTheme).toBe("liquid-glass");
+    expect((await call("PUT", "/api/settings", { appTheme: "no-such-theme" })).status).toBe(400);
+  });
+
+  test("a channel can have its own theme, or none", async () => {
+    const set = await call("PATCH", `/api/channels/${story.id}`, { theme: "aero-glass" });
+    expect(set.data.channel.theme).toBe("aero-glass");
+    expect((await call("PATCH", `/api/channels/${story.id}`, { theme: null })).data.channel.theme).toBeNull();
+    expect((await call("PATCH", `/api/channels/${story.id}`, { theme: "no-such-theme" })).status).toBe(400);
+  });
+
+  test("can be copied, edited, given files, and served", async () => {
+    const { data: created } = await call("POST", "/api/themes", { name: "Ember", from: "classic" });
+    const id = created.theme.id;
+
+    await call("PATCH", `/api/themes/${id}`, { css: ":root { --app-background: url(wall.png); }" });
+    const upload = await call("POST", `/api/themes/${id}/files`, {
+      name: "wall.png",
+      data: Buffer.from([137, 80, 78, 71]).toString("base64"),
+    });
+    expect(upload.data.files).toEqual(["wall.png"]);
+
+    const css = await app.fetch(new Request(`http://localhost/themes/${id}/theme.css`));
+    expect(await css.text()).toContain(`url("/themes/${id}/wall.png")`);
+    const image = await app.fetch(new Request(`http://localhost/themes/${id}/wall.png`));
+    expect(image.headers.get("Content-Type")).toBe("image/png");
+    expect((await app.fetch(new Request("http://localhost/themes/nope/theme.css"))).status).toBe(404);
+  });
+
+  test("deleting a theme puts everything that used it back to the default", async () => {
+    const { data } = await call("POST", "/api/themes", { name: "Short-lived" });
+    const id = data.theme.id;
+    await call("PUT", "/api/settings", { appTheme: id });
+    await call("PATCH", `/api/channels/${story.id}`, { theme: id });
+
+    const deleted = await call("DELETE", `/api/themes/${id}`, {});
+    expect(deleted.data.settings.appTheme).toBe("classic");
+    expect(deleted.data.channels.find((c: Channel) => c.id === story.id).theme).toBeNull();
+  });
+
+  test("built-in themes are protected", async () => {
+    expect((await call("PATCH", "/api/themes/classic", { css: "" })).status).toBe(400);
+    expect((await call("DELETE", "/api/themes/frutiger-aero", {})).status).toBe(400);
+  });
+});
+
 describe("routing", () => {
   test("matchRoute fills in :params and rejects mismatches", () => {
     const route = { method: "POST", pattern: "/api/channels/:id/turn" };

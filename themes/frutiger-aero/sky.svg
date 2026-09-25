@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <!--
+    Frutiger Aero wallpaper: a bright sky fading to the horizon, a glowing
+    sun, green hills, soap bubbles and a couple of light swooshes.
+    Everything is drawn with shapes and gradients, so it stays sharp at any
+    size and is only a few kilobytes.
+  -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c86dc"/>
+      <stop offset="0.45" stop-color="#5dbdf5"/>
+      <stop offset="0.75" stop-color="#b5e6ff"/>
+      <stop offset="1" stop-color="#e9fbff"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.8" cy="0.12" r="0.45">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.25" stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hillBack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9be86b"/>
+      <stop offset="1" stop-color="#4cae3e"/>
+    </linearGradient>
+    <linearGradient id="hillFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b8f27a"/>
+      <stop offset="0.35" stop-color="#6fcf45"/>
+      <stop offset="1" stop-color="#2f8f2c"/>
+    </linearGradient>
+    <radialGradient id="bubble" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.7" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="0.93" stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.8"/>
+    </radialGradient>
+    <radialGradient id="shine" cx="0.35" cy="0.3" r="0.3">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="swoosh" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- One bubble: a clear sphere with a bright rim and a highlight. -->
+    <g id="b">
+      <circle r="1" fill="url(#bubble)"/>
+      <circle r="1" fill="url(#shine)"/>
+    </g>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#sky)"/>
+  <rect width="1600" height="1000" fill="url(#sun)"/>
+
+  <!-- Light swooshes across the sky. -->
+  <path d="M-100 420 C 300 260, 700 520, 1100 330 S 1600 250, 1750 300" stroke="url(#swoosh)" stroke-width="26" fill="none" opacity="0.8"/>
+  <path d="M-100 480 C 350 330, 750 580, 1150 390 S 1600 320, 1750 360" stroke="url(#swoosh)" stroke-width="8" fill="none" opacity="0.9"/>
+
+  <!-- Hills. -->
+  <path d="M0 760 C 250 690, 520 700, 800 760 S 1350 700, 1600 740 V1000 H0 Z" fill="url(#hillBack)"/>
+  <path d="M0 850 C 300 760, 640 790, 900 850 S 1400 800, 1600 830 V1000 H0 Z" fill="url(#hillFront)"/>
+  <path d="M0 850 C 300 760, 640 790, 900 850 S 1400 800, 1600 830" stroke="#e8ffc8" stroke-width="4" fill="none" opacity="0.7"/>
+
+  <!-- Bubbles. -->
+  <use href="#b" transform="translate(220 260) scale(70)"/>
+  <use href="#b" transform="translate(340 180) scale(28)"/>
+  <use href="#b" transform="translate(1320 520) scale(90)"/>
+  <use href="#b" transform="translate(1180 640) scale(34)"/>
+  <use href="#b" transform="translate(600 560) scale(46)"/>
+  <use href="#b" transform="translate(900 180) scale(22)"/>
+  <use href="#b" transform="translate(1480 300) scale(40)"/>
+  <use href="#b" transform="translate(120 600) scale(30)"/>
+</svg>

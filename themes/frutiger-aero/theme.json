@@ -1,0 +1,5 @@
+{
+  "name": "Frutiger Aero",
+  "description": "Blue skies, green hills, bubbles and glossy glass, straight out of 2008.",
+  "swatch": ["linear-gradient(#2e9ae6, #bfe9ff)", "rgba(255,255,255,0.8)", "linear-gradient(#7fdcff, #1592d8)", "#57c24a"]
+}

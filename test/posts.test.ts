@@ -77,6 +77,7 @@ function channel(overrides: Partial<Channel>): Channel {
     kind: "rp",
     mode: "literary",
     pendingMode: null,
+    theme: null,
     position: 0,
     characterName: "Ilse Marrow",
     characterSheet: "",

@@ -34,6 +34,15 @@
     <link rel="apple-touch-icon" href="/icon.svg" />
 
     <link rel="stylesheet" href="/style.css" />
+    <!--
+      Theme stylesheets, filled in by app.js (see applyThemes). They come
+      after style.css so they win, in this order: the app theme, its Lite
+      version, the open channel's theme, and that one's Lite version.
+    -->
+    <link rel="stylesheet" id="theme-app" />
+    <link rel="stylesheet" id="theme-app-lite" />
+    <link rel="stylesheet" id="theme-channel" />
+    <link rel="stylesheet" id="theme-channel-lite" />
     <!-- `defer` runs the script after the page is parsed, so every element below exists. -->
     <script src="/app.js" defer></script>
   </head>
@@ -68,6 +77,12 @@
           d="M12 3.5l1.2 2.5 2.7.3-2 1.9.5 2.7L12 9.6l-2.4 1.3.5-2.7-2-1.9 2.7-.3L12 3.5Zm-5 9l1.2 2.5 2.7.3-2 1.9.5 2.7L7 18.6l-2.4 1.3.5-2.7-2-1.9 2.7-.3L7 12.5Zm10 0l1.2 2.5 2.7.3-2 1.9.5 2.7-2.4-1.3-2.4 1.3.5-2.7-2-1.9 2.7-.3 1.2-2.5Z"
         />
       </symbol>
+      <symbol id="icon-palette" viewBox="0 0 24 24">
+        <path
+          fill="currentColor"
+          d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8Zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"
+        />
+      </symbol>
       <symbol id="icon-menu" viewBox="0 0 24 24">
         <path fill="currentColor" d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z" />
       </symbol>
@@ -94,6 +109,9 @@
               <div class="partner-card-role">your partner</div>
             </div>
           </div>
+          <button id="appearance-button" class="icon-button" type="button" aria-label="Appearance" title="Appearance">
+            <svg width="20" height="20" aria-hidden="true"><use href="#icon-palette" /></svg>
+          </button>
           <button id="settings-button" class="icon-button" type="button" aria-label="Settings" title="Settings">
             <svg width="20" height="20" aria-hidden="true"><use href="#icon-gear" /></svg>
           </button>
@@ -128,6 +146,12 @@
             <svg width="20" height="20" aria-hidden="true"><use href="#icon-gear" /></svg>
           </button>
         </header>
+
+        <!-- A short notice, e.g. "Switched to Lite glass effects". -->
+        <div id="notice" class="notice-banner" role="status" hidden>
+          <span id="notice-text"></span>
+          <button id="notice-dismiss" type="button" class="link-button" aria-label="Dismiss">✕</button>
+        </div>
 
         <!-- Shown when the server has a newer version of the app than this page. -->
         <div id="update-banner" class="update-banner" role="status" hidden>
@@ -242,6 +266,10 @@
         <label for="channel-setting-name">Channel name</label>
         <input id="channel-setting-name" name="name" autocomplete="off" />
 
+        <label for="channel-setting-theme">Theme</label>
+        <p class="hint">A channel's own theme only changes the channel itself, not the channel list.</p>
+        <select id="channel-setting-theme" name="theme"></select>
+
         <!-- Only shown for RP channels. -->
         <div class="rp-only">
           <fieldset class="kind-picker mode-picker">
@@ -334,6 +362,98 @@
           <span class="spacer"></span>
           <button type="button" class="button" data-close>Cancel</button>
           <button type="submit" class="button button-primary">Create</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Appearance: pick the app theme, glass effects, and manage your themes. -->
+    <dialog id="appearance-dialog" class="dialog surface">
+      <h2 class="dialog-title">Appearance</h2>
+
+      <label>App theme</label>
+      <p class="hint">Used everywhere, unless a channel has its own theme (channel settings).</p>
+      <div id="theme-list" class="theme-list" role="radiogroup" aria-label="App theme"></div>
+
+      <div class="dialog-buttons theme-actions">
+        <button type="button" class="button" id="theme-copy">Copy to edit</button>
+        <button type="button" class="button" id="theme-edit">Edit</button>
+        <button type="button" class="button button-danger" id="theme-delete">Delete</button>
+      </div>
+
+      <fieldset class="kind-picker effects-picker">
+        <legend>Glass effects on this device</legend>
+        <label class="kind-option">
+          <input type="radio" name="effects" value="auto" />
+          <span
+            ><strong>Automatic</strong><br /><span class="hint"
+              >Full effects, switching to Lite if scrolling stutters.</span
+            ></span
+          >
+        </label>
+        <label class="kind-option">
+          <input type="radio" name="effects" value="full" />
+          <span><strong>Full</strong><br /><span class="hint">Real blurred glass.</span></span>
+        </label>
+        <label class="kind-option">
+          <input type="radio" name="effects" value="lite" />
+          <span
+            ><strong>Lite</strong><br /><span class="hint">No blur: more solid panels that are easier on the phone.</span></span
+          >
+        </label>
+      </fieldset>
+
+      <p class="form-error" role="alert" hidden></p>
+
+      <div class="dialog-buttons">
+        <span class="spacer"></span>
+        <button type="button" class="button button-primary" data-close>Done</button>
+      </div>
+    </dialog>
+
+    <!-- Editing one of your themes. -->
+    <dialog id="theme-editor" class="dialog surface theme-editor">
+      <form id="theme-editor-form" method="dialog">
+        <h2 class="dialog-title">Edit theme</h2>
+
+        <label for="theme-name">Name</label>
+        <input id="theme-name" name="name" autocomplete="off" />
+
+        <label for="theme-description">Description</label>
+        <input id="theme-description" name="description" autocomplete="off" />
+
+        <label for="theme-css">CSS</label>
+        <p class="hint">
+          Change the values of the tokens, or style anything else. The full list is in
+          <code>docs/theme-reference.md</code>. Press Apply to see your changes.
+        </p>
+        <textarea id="theme-css" name="css" rows="14" spellcheck="false" class="code-input"></textarea>
+
+        <details class="lite-css">
+          <summary>Lite version (optional)</summary>
+          <p class="hint">
+            Loaded on top of the CSS above when glass effects are Lite. Usually: turn off blur and make panels more
+            solid, e.g. <code>--sidebar-backdrop: none;</code>
+          </p>
+          <textarea id="theme-lite-css" name="liteCss" rows="8" spellcheck="false" class="code-input"></textarea>
+        </details>
+
+        <label>Images and fonts</label>
+        <p class="hint">
+          Use a file in the CSS by its name, e.g. <code>--app-background: url(sky.jpg) center / cover;</code>
+        </p>
+        <ul id="theme-files" class="theme-files"></ul>
+        <label class="button file-button">
+          Add files…
+          <input id="theme-upload" type="file" multiple accept="image/*,.woff,.woff2,.ttf,.otf" hidden />
+        </label>
+
+        <p class="form-error" role="alert" hidden></p>
+
+        <div class="dialog-buttons">
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Close</button>
+          <button type="button" class="button" id="theme-apply">Apply</button>
+          <button type="submit" class="button button-primary">Save</button>
         </div>
       </form>
     </dialog>

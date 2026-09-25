@@ -68,6 +68,7 @@ export function defaultSettings(): Settings {
     maxTokens: 1024,
     historyLimit: 40,
     userCharacters: [],
+    appTheme: "classic",
   };
 }
 
@@ -129,8 +130,18 @@ export function validateSettings(input: unknown): Partial<Settings> {
     clean.historyLimit = numberInRange(raw.historyLimit, "historyLimit", LIMITS.historyLimit, true);
   }
   if (raw.userCharacters !== undefined) clean.userCharacters = userCharacters(raw.userCharacters);
+  // Only the id's form is checked here; the server checks the theme exists.
+  if (raw.appTheme !== undefined) clean.appTheme = themeId(raw.appTheme, "appTheme");
 
   return clean;
+}
+
+/** A theme id: lowercase letters, digits and dashes. */
+function themeId(value: unknown, field: string): string {
+  if (typeof value !== "string" || !/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(value)) {
+    throw new ValidationError(`${field} must be a theme id`);
+  }
+  return value;
 }
 
 /**
@@ -189,7 +200,7 @@ export function validateNewChannel(input: unknown): NewChannel {
  * The channel fields that can be changed after creation. `mode` is the mode
  * you *ask* for; see `Store.updateChannel` for when it takes effect.
  */
-export type ChannelUpdate = Partial<Pick<Channel, "name" | "characterName" | "characterSheet" | "mode">>;
+export type ChannelUpdate = Partial<Pick<Channel, "name" | "characterName" | "characterSheet" | "mode" | "theme">>;
 
 /** Check a partial channel update. The kind can't be changed, so it's ignored. */
 export function validateChannelUpdate(input: unknown): ChannelUpdate {
@@ -204,6 +215,8 @@ export function validateChannelUpdate(input: unknown): ChannelUpdate {
   }
   if (raw.characterSheet !== undefined) clean.characterSheet = longText(raw.characterSheet, "characterSheet");
   if (raw.mode !== undefined) clean.mode = mode(raw.mode);
+  // `null` (or "") means "use the app theme".
+  if (raw.theme !== undefined) clean.theme = raw.theme === null || raw.theme === "" ? null : themeId(raw.theme, "theme");
   return clean;
 }
 
@@ -259,6 +272,7 @@ interface ChannelRow {
   kind: ChannelKind;
   mode: ChannelMode;
   pending_mode: ChannelMode | null;
+  theme: string | null;
   position: number;
   character_name: string;
   character_sheet: string;
@@ -287,6 +301,7 @@ function toChannel(row: ChannelRow): Channel {
     kind: row.kind,
     mode: row.mode,
     pendingMode: row.pending_mode,
+    theme: row.theme,
     position: row.position,
     characterName: row.character_name,
     characterSheet: row.character_sheet,
@@ -475,7 +490,7 @@ export class Store {
     this.db
       .query(
         `UPDATE channels SET name = $name, character_name = $characterName, character_sheet = $characterSheet,
-                mode = $mode, pending_mode = $pendingMode
+                mode = $mode, pending_mode = $pendingMode, theme = $theme
          WHERE id = $id`,
       )
       .run({
@@ -485,8 +500,20 @@ export class Store {
         characterSheet: merged.characterSheet,
         mode: merged.mode,
         pendingMode: merged.pendingMode,
+        theme: merged.theme,
       });
     return this.getChannel(id);
+  }
+
+  /**
+   * Stop using a theme that's been deleted: the app theme goes back to
+   * Classic, and channels using it go back to the app theme.
+   */
+  forgetTheme(themeId: string): void {
+    this.db.transaction(() => {
+      if (this.getSettings().appTheme === themeId) this.updateSettings({ appTheme: "classic" });
+      this.db.query("UPDATE channels SET theme = NULL WHERE theme = $themeId").run({ themeId });
+    })();
   }
 
   /**

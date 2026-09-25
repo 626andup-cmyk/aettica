@@ -118,6 +118,13 @@ export const MIGRATIONS: string[] = [
   UPDATE messages SET mode = 'literary'
    WHERE channel_id IN (SELECT id FROM channels WHERE kind = 'rp');
   `,
+
+  // ---------------------------------------------------------------- 3
+  // Stage 3.5: each channel can have its own theme (NULL: the app theme).
+  // Themes themselves are folders, not rows; see src/themes.ts.
+  `
+  ALTER TABLE channels ADD COLUMN theme TEXT;
+  `,
 ];
 
 /**

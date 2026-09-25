@@ -2,7 +2,7 @@
 
 Aettica gives you an AI **RP partner**, not a character: a writer with their own style who plays characters alongside you. The full vision is in [DESIGN.md](DESIGN.md).
 
-**Status: stage 3 of 8.** A Discord-style server of channels with your partner, with scenes and literary or casual styles, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels) and [stage 3](docs/stage-3.md) (scenes, modes).
+**Status: stage 3.5 of 8.** A Discord-style server of channels with your partner, with scenes, literary or casual styles, and themes, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels), [stage 3](docs/stage-3.md) (scenes, modes) and [stage 3.5](docs/stage-3.5.md) (themes).
 
 ## What it can do
 
@@ -19,6 +19,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - **Stop** a reply that's taking too long. Nothing is saved, and the channel is free again.
 - **Regenerate** the partner's last reply, **edit** or **delete** any message.
 - **Preview prompt**: see exactly what the model receives on the next turn in a channel.
+- **Themes**: pick one in Appearance (the palette button). Classic, Frutiger Aero, Aero Glass and Liquid Glass are built in. Any channel can have its own theme, and you can copy a theme and edit its CSS and images right in the app. Glass effects can be Full, Lite (easier on the phone) or Automatic. See the [theme reference](docs/theme-reference.md).
 - Install it to your home screen as an app (PWA).
 
 If you used stage 1, your chat is moved into the `#story` channel automatically the first time stage 2 starts.
@@ -68,7 +69,7 @@ Everything else (prompt, characters, model and so on) is changed in the app.
 
 ## Your data
 
-Everything is saved in an SQLite database, `data/aettica.db`. To back it up, stop the server and copy that file, or copy it together with `aettica.db-wal` and `aettica.db-shm` if the server is running. The `data/` folder and `.env` are never committed to git.
+Everything is saved in the `data/` folder: your chat and settings in an SQLite database, `data/aettica.db`, and your own themes in `data/themes/`. To back up, stop the server and copy the whole `data/` folder. (While the server is running, the database's recent changes are also in `aettica.db-wal` and `aettica.db-shm`, so copy those too.) The `data/` folder and `.env` are never committed to git.
 
 Aettica has no login. Keep `HOST` at `127.0.0.1` so that nobody else on your Wi-Fi can open your chat.
 
@@ -89,6 +90,7 @@ src/
   prompt.ts    Builds the prompt stack sent to the model
   posts.ts     Turns text into messages: posts, replies, scene breaks
   bubbles.ts   Splits casual text into one-character bubbles
+  themes.ts    Themes: storing, editing, serving and scoping them
   nanogpt.ts   Talks to nanoGPT's API
   db.ts        The database's tables, and upgrading them (migrations)
   store.ts     Reading and writing channels, messages and settings
@@ -96,6 +98,7 @@ src/
   config.ts    Reads settings from .env
   types.ts     The shapes of channels, messages and settings
 public/        The web app (plain HTML, CSS and JavaScript, no build step)
+themes/        Built-in themes (Classic, Frutiger Aero, Aero Glass, Liquid Glass)
 defaults/      Starting partner prompt and character sheet
 test/          Tests
 docs/          How things work, stage by stage, and the theme reference

@@ -1,0 +1,122 @@
+/*
+ * Aero Glass: Windows 7 style. Dark tinted glass that lets the glowing
+ * wallpaper through, thin bright edges, a soft reflection across each panel,
+ * and glassy buttons with a blue glow on hover.
+ *
+ * Lite version: theme-lite.css (no blur, darker panels).
+ */
+
+:root {
+  color-scheme: dark;
+
+  --font-body: "Segoe UI", "Helvetica Neue", Roboto, system-ui, sans-serif;
+
+  --text: #e6f1ff;
+  --text-muted: #a9c3dc;
+  --text-strong: #ffffff;
+  --em-color: #9fe0ff;
+
+  --accent: #3fb3ff;
+  --accent-hover: #1d95e6;
+  --accent-text: #ffffff;
+  --error-bg: rgb(120 20 30 / 0.6);
+  --update-bg: rgb(30 110 190 / 0.6);
+
+  --user-color: #7ff0c8;
+  --partner-color: #8cd4ff;
+  --avatar-user-bg: linear-gradient(#5fe0b4, #13886a);
+  --avatar-partner-bg: linear-gradient(#6fc6ff, #1b5fb0);
+  --avatar-saturation: 60%;
+  --avatar-lightness: 45%;
+  --name-saturation: 85%;
+  --name-lightness: 78%;
+
+  --radius-sm: 4px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+
+  --app-background: url(harmony.svg) center / cover no-repeat, #06295a;
+
+  /* The glass: a blue-grey tint, blurred, with a bright hairline edge. */
+  --sidebar-bg: linear-gradient(rgb(150 195 235 / 0.34), rgb(80 130 180 / 0.26));
+  --sidebar-border: 1px solid rgb(255 255 255 / 0.35);
+  --sidebar-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25), 0 0 20px rgb(0 0 0 / 0.4);
+  --sidebar-backdrop: blur(10px) saturate(130%);
+  /* On a phone the sidebar slides over the channel: make it more solid there. */
+  --drawer-bg: linear-gradient(rgb(40 80 125 / 0.9), rgb(20 50 90 / 0.92));
+  --sidebar-footer-bg: rgb(0 20 50 / 0.25);
+  --channel-link-color: #cfe3f7;
+  --channel-link-hover-bg: rgb(255 255 255 / 0.12);
+  --channel-link-active-bg: linear-gradient(rgb(255 255 255 / 0.3), rgb(255 255 255 / 0.12));
+  --channel-link-active-color: #ffffff;
+
+  --channel-background: rgb(3 20 45 / 0.45);
+  --header-bg: linear-gradient(rgb(160 205 240 / 0.36), rgb(90 140 190 / 0.28));
+  --header-border: 1px solid rgb(255 255 255 / 0.3);
+  --header-shadow: 0 1px 0 rgb(0 0 0 / 0.4);
+  --header-backdrop: blur(10px) saturate(130%);
+  --message-hover-bg: rgb(255 255 255 / 0.07);
+  --composer-bg: linear-gradient(rgb(90 140 190 / 0.28), rgb(160 205 240 / 0.36));
+  --composer-border: 1px solid rgb(255 255 255 / 0.3);
+  --composer-backdrop: blur(10px) saturate(130%);
+
+  --input-bg: rgb(0 15 40 / 0.55);
+  --input-border: 1px solid rgb(255 255 255 / 0.25);
+  --input-focus-border: 1px solid #6fd0ff;
+  /* Glass buttons: two-tone, with the bright top half of Aero. */
+  --button-bg: linear-gradient(rgb(255 255 255 / 0.32) 0%, rgb(255 255 255 / 0.14) 49%, rgb(255 255 255 / 0.04) 50%, rgb(255 255 255 / 0.16) 100%);
+  --button-hover-bg: linear-gradient(rgb(170 225 255 / 0.5) 0%, rgb(90 180 240 / 0.3) 49%, rgb(40 130 210 / 0.25) 50%, rgb(90 190 255 / 0.4) 100%);
+  --button-text: #ffffff;
+  --button-border: 1px solid rgb(255 255 255 / 0.4);
+  --button-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25);
+  --button-primary-bg: linear-gradient(#8fdcff 0%, #3aa7f0 49%, #1673c9 50%, #2f9cf0 100%);
+  --button-primary-hover-bg: linear-gradient(#b0e8ff 0%, #52b8f7 49%, #1f86dc 50%, #45b0ff 100%);
+  --icon-button-hover-bg: rgb(255 255 255 / 0.15);
+
+  --dialog-bg: linear-gradient(rgb(40 80 130 / 0.78), rgb(15 40 80 / 0.84));
+  --dialog-border: 1px solid rgb(255 255 255 / 0.4);
+  --dialog-shadow: 0 0 0 1px rgb(0 0 0 / 0.5), 0 12px 40px rgb(0 0 0 / 0.6);
+  --dialog-backdrop: blur(14px) saturate(130%);
+  --scrim: rgb(0 10 30 / 0.45);
+  --code-bg: rgb(0 15 40 / 0.6);
+
+  --scene-break-line: rgb(140 200 255 / 0.35);
+  --scene-break-text: #a9d4ff;
+}
+
+/*
+ * The Aero reflection: a soft, slanted band of light across each glass
+ * panel, and a glossy top edge.
+ */
+.surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgb(255 255 255 / 0.18), rgb(255 255 255 / 0) 40%),
+    linear-gradient(115deg, rgb(255 255 255 / 0) 30%, rgb(255 255 255 / 0.08) 38%, rgb(255 255 255 / 0) 46%);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Glowing text, like Windows 7 title bars. */
+.server-name,
+.channel-title,
+.dialog-title {
+  text-shadow: 0 0 10px rgb(120 200 255 / 0.6), 0 1px 1px rgb(0 0 0 / 0.6);
+}
+
+.button-primary {
+  border: 1px solid rgb(0 40 100 / 0.8);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.35), 0 0 10px rgb(60 170 255 / 0.45);
+  text-shadow: 0 1px 1px rgb(0 30 80 / 0.7);
+}
+
+.button:hover {
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.3), 0 0 12px rgb(80 190 255 / 0.55);
+}
+
+.avatar {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 0 0 1px rgb(0 0 0 / 0.35);
+}

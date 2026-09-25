@@ -91,6 +91,7 @@ export function testConfig(dataDir: string, apiBaseUrl: string, overrides: Parti
     port: 0,
     dataDir,
     publicDir: join(import.meta.dir, "..", "public"),
+    themesDir: join(import.meta.dir, "..", "themes"),
     apiKey: "test-key",
     apiBaseUrl,
     requestTimeoutMs: 5000,

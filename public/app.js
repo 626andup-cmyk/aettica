@@ -36,6 +36,15 @@ const state = {
   drafts: new Map(),
   /** In casual channels: which of your characters you're posting as, by channel id. */
   postingAs: new Map(),
+  /** Every theme: {id, name, description, builtIn, hasLite, swatch}. */
+  themes: [],
+  /**
+   * Added to theme URLs (`?v=`). Bumped after you edit a theme, so the
+   * browser fetches the new version.
+   */
+  themeVersion: 0,
+  /** The theme open in the theme editor (with its css, liteCss and files). */
+  editingTheme: null,
   /** Fingerprint of the app's files when this page loaded (see `checkForUpdate`). */
   appVersion: null,
 };
@@ -224,7 +233,7 @@ async function saveChannel(event) {
   event.preventDefault();
   const channel = currentChannel();
   const form = els.channelForm.elements;
-  const body = { name: form.name.value };
+  const body = { name: form.name.value, theme: form.theme.value || null };
   if (channel.kind === "rp") {
     body.mode = form.mode.value;
     body.characterName = form.characterName.value;
@@ -628,6 +637,7 @@ async function deleteMessage(id) {
 
 /** Redraw everything from `state`. */
 function renderAll() {
+  applyThemes();
   renderSidebar();
   renderChannelHeader();
   renderMessages();
@@ -1085,6 +1095,388 @@ function hideFormError(form) {
   form.querySelector(".form-error").hidden = true;
 }
 
+// ----------------------------------------------------------------- themes
+
+/*
+ * Themes are CSS files served by the server (see src/themes.ts). Applying
+ * one just means pointing a <link> at it; index.html has four, in order:
+ *
+ *   theme-app           the app theme                  /themes/<id>/theme.css
+ *   theme-app-lite      its Lite version, if in use    /themes/<id>/theme-lite.css
+ *   theme-channel       the open channel's own theme   /themes/<id>/channel.css
+ *   theme-channel-lite  its Lite version, if in use    /themes/<id>/channel-lite.css
+ *
+ * The channel versions are rewritten by the server to only affect the
+ * channel view. And while a channel theme is showing, the app theme is
+ * loaded as `outside.css` instead: rewritten to affect everything *but* the
+ * channel view, so the channel theme fully replaces it there.
+ */
+
+/** Keys for things remembered on this device only (in the browser's localStorage). */
+const EFFECTS_KEY = "aettica.effects"; // "auto" | "full" | "lite"
+const AUTO_LITE_KEY = "aettica.autoLite"; // "1" once Automatic has switched to Lite
+const LAST_THEME_KEY = "aettica.lastAppTheme"; // to apply the theme before the server answers
+
+/*
+ * localStorage can be unavailable (private browsing, storage turned off),
+ * so every use is wrapped: if it fails, Aettica just forgets.
+ */
+function readLocal(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocal(key, value) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // Nothing to do: the setting just won't be remembered.
+  }
+}
+
+/** This device's glass effects choice: "auto", "full" or "lite". */
+function effectsMode() {
+  return readLocal(EFFECTS_KEY) ?? "auto";
+}
+
+/** Whether Lite versions of themes should be loaded right now. */
+function liteEffects() {
+  const mode = effectsMode();
+  return mode === "lite" || (mode === "auto" && readLocal(AUTO_LITE_KEY) === "1");
+}
+
+function themeInfo(id) {
+  return state.themes.find((t) => t.id === id);
+}
+
+/**
+ * Point a theme <link> at a stylesheet, or unload it (`href` null).
+ *
+ * Swapping one stylesheet for another would briefly show the page without
+ * either while the new one downloads. So the new one is loaded in a second
+ * <link> next to the old, and the old is removed once the new has arrived.
+ * A theme can also change the layout (spacing, fonts), so after it loads,
+ * the view scrolls back to the newest message.
+ */
+function setStylesheet(linkId, href) {
+  const link = $(linkId);
+  const current = link.getAttribute("href");
+  if (!href) {
+    link.removeAttribute("href");
+    return;
+  }
+  if (current === href) return;
+  if (!current) {
+    link.addEventListener("load", scrollToBottom, { once: true });
+    link.setAttribute("href", href);
+    return;
+  }
+  const next = link.cloneNode();
+  next.setAttribute("href", href);
+  link.removeAttribute("id"); // the new link takes over the id straight away
+  const done = () => {
+    link.remove();
+    scrollToBottom();
+  };
+  next.addEventListener("load", done, { once: true });
+  next.addEventListener("error", done, { once: true });
+  link.after(next);
+}
+
+/** The app theme and the open channel's theme, if it has a different one. */
+function activeThemes() {
+  const app = state.settings?.appTheme ?? "classic";
+  const channel = currentChannel();
+  return { app, channel: channel?.theme && channel.theme !== app ? channel.theme : null };
+}
+
+/** Load the stylesheets for the current app theme, channel theme and effects. */
+function applyThemes() {
+  const { app, channel } = activeThemes();
+  const lite = liteEffects();
+  const v = state.themeVersion;
+  // Classic is the base stylesheet itself, so there's nothing to load for it.
+  const appTheme = app === "classic" ? null : app;
+
+  const appFile = channel ? "outside" : "theme";
+  setStylesheet("theme-app", appTheme && `/themes/${appTheme}/${appFile}.css?v=${v}`);
+  setStylesheet("theme-app-lite", appTheme && lite && themeInfo(appTheme)?.hasLite && `/themes/${appTheme}/${appFile}-lite.css?v=${v}`);
+  setStylesheet("theme-channel", channel && `/themes/${channel}/channel.css?v=${v}`);
+  setStylesheet("theme-channel-lite", channel && lite && themeInfo(channel)?.hasLite && `/themes/${channel}/channel-lite.css?v=${v}`);
+
+  // For theme authors: the channel view says which channel theme it has.
+  els.channelView.dataset.channelTheme = channel ?? "";
+  writeLocal(LAST_THEME_KEY, appTheme ?? "");
+}
+
+async function loadThemes() {
+  state.themes = (await api("GET", "/api/themes")).themes;
+}
+
+/*
+ * Automatic glass effects: real blur can make scrolling stutter on some
+ * phones. In Automatic mode, the first few times you scroll the message
+ * list, the page times its frames. Once it has watched STUTTER_SAMPLES
+ * frames or STUTTER_WATCH_MS of scrolling (a stuttering phone draws few
+ * frames, so time matters too), it judges: if a typical frame took longer
+ * than STUTTER_FRAME_MS (fewer than about 35 frames a second), it switches
+ * this device to the Lite versions of themes, and says so.
+ */
+const STUTTER_FRAME_MS = 28;
+const STUTTER_SAMPLES = 90;
+const STUTTER_WATCH_MS = 2500;
+const stutter = { samples: [], watchedMs: 0, sampling: false, done: false };
+
+function watchForStutter() {
+  if (stutter.done || stutter.sampling || effectsMode() !== "auto" || liteEffects()) return;
+  // Only worth measuring if a theme with a Lite version is in use.
+  const { app, channel } = activeThemes();
+  if (!themeInfo(app)?.hasLite && !themeInfo(channel)?.hasLite) return;
+
+  stutter.sampling = true;
+  let last = performance.now();
+  const stopAt = last + 1000; // sample for a second after scrolling starts
+  const frame = (now) => {
+    stutter.samples.push(now - last);
+    stutter.watchedMs += now - last;
+    last = now;
+    if (now < stopAt) {
+      requestAnimationFrame(frame);
+    } else {
+      stutter.sampling = false;
+      judgeStutter();
+    }
+  };
+  requestAnimationFrame(frame);
+}
+
+function judgeStutter() {
+  // Keep collecting on later scrolls until there's enough to go on.
+  if (stutter.samples.length < STUTTER_SAMPLES && stutter.watchedMs < STUTTER_WATCH_MS) return;
+  stutter.done = true;
+  const sorted = [...stutter.samples].sort((a, b) => a - b);
+  const typicalFrame = sorted[Math.floor(sorted.length / 2)];
+  if (typicalFrame > STUTTER_FRAME_MS) {
+    writeLocal(AUTO_LITE_KEY, "1");
+    applyThemes();
+    showNotice("Scrolling was stuttering, so glass effects switched to Lite on this device. You can change this in Appearance.");
+  }
+}
+
+function showNotice(text) {
+  $("notice-text").textContent = text;
+  $("notice").hidden = false;
+}
+
+// ------------------------------------------------------------- appearance
+
+function openAppearance() {
+  renderThemeList();
+  for (const radio of document.querySelectorAll('input[name="effects"]')) radio.checked = radio.value === effectsMode();
+  hideFormError($("appearance-dialog"));
+  $("appearance-dialog").showModal();
+}
+
+/** The theme cards in Appearance. The app theme is the selected one. */
+function renderThemeList() {
+  const selected = state.settings.appTheme;
+  $("theme-list").replaceChildren(
+    ...state.themes.map((theme) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "theme-card";
+      card.setAttribute("role", "radio");
+      card.setAttribute("aria-checked", String(theme.id === selected));
+
+      // The preview: a strip of the theme's colours.
+      const swatch = document.createElement("span");
+      swatch.className = "theme-swatch";
+      for (const colour of theme.swatch.length ? theme.swatch : ["var(--input-bg)"]) {
+        const part = document.createElement("span");
+        part.style.background = colour;
+        swatch.append(part);
+      }
+
+      const name = document.createElement("span");
+      name.className = "theme-name";
+      name.textContent = theme.name;
+      const badge = document.createElement("span");
+      badge.className = "theme-badge";
+      badge.textContent = theme.builtIn ? "Built-in" : "Yours";
+      name.append(" ", badge);
+
+      const description = document.createElement("span");
+      description.className = "theme-description";
+      description.textContent = theme.description;
+
+      card.append(swatch, name, description);
+      card.addEventListener("click", () => chooseAppTheme(theme.id));
+      return card;
+    }),
+  );
+
+  // Edit and Delete are only for your own themes.
+  const current = themeInfo(selected);
+  $("theme-edit").hidden = !current || current.builtIn;
+  $("theme-delete").hidden = !current || current.builtIn;
+}
+
+async function chooseAppTheme(id) {
+  try {
+    const { settings } = await api("PUT", "/api/settings", { appTheme: id });
+    state.settings = settings;
+    renderThemeList();
+    renderAll();
+  } catch (error) {
+    showFormError($("appearance-dialog"), error.message);
+  }
+}
+
+/** Copy the selected theme into a new theme of your own, and open it in the editor. */
+async function copyTheme() {
+  const source = themeInfo(state.settings.appTheme);
+  const name = prompt("Name for your theme:", source ? `My ${source.name}` : "My theme");
+  if (!name) return;
+  try {
+    const { theme } = await api("POST", "/api/themes", { name, from: source?.id });
+    await loadThemes();
+    await chooseAppTheme(theme.id);
+    openThemeEditor(theme.id);
+  } catch (error) {
+    showFormError($("appearance-dialog"), error.message);
+  }
+}
+
+async function deleteTheme() {
+  const theme = themeInfo(state.settings.appTheme);
+  if (!theme || !confirm(`Delete the theme "${theme.name}" and its images? This can't be undone.`)) return;
+  try {
+    const data = await api("DELETE", `/api/themes/${encodeURIComponent(theme.id)}`, {});
+    // Anything that used it has gone back to the default.
+    state.settings = data.settings;
+    state.channels = data.channels;
+    await loadThemes();
+    renderThemeList();
+    renderAll();
+  } catch (error) {
+    showFormError($("appearance-dialog"), error.message);
+  }
+}
+
+function chooseEffects(mode) {
+  writeLocal(EFFECTS_KEY, mode);
+  if (mode === "auto") {
+    // Choosing Automatic again starts the stutter check afresh.
+    writeLocal(AUTO_LITE_KEY, null);
+    Object.assign(stutter, { samples: [], watchedMs: 0, sampling: false, done: false });
+  }
+  applyThemes();
+}
+
+// ----------------------------------------------------------- theme editor
+
+async function openThemeEditor(id) {
+  try {
+    const { theme } = await api("GET", `/api/themes/${encodeURIComponent(id)}`);
+    state.editingTheme = theme;
+    const form = $("theme-editor-form").elements;
+    form.name.value = theme.name;
+    form.description.value = theme.description;
+    form.css.value = theme.css;
+    form.liteCss.value = theme.liteCss;
+    renderThemeFiles(theme.files);
+    hideFormError($("theme-editor-form"));
+    $("theme-editor").showModal();
+  } catch (error) {
+    showFormError($("appearance-dialog"), error.message);
+  }
+}
+
+/** Save the editor's changes and reload the theme's stylesheets. */
+async function saveTheme(close) {
+  const form = $("theme-editor-form").elements;
+  try {
+    await api("PATCH", `/api/themes/${encodeURIComponent(state.editingTheme.id)}`, {
+      name: form.name.value,
+      description: form.description.value,
+      css: form.css.value,
+      liteCss: form.liteCss.value,
+    });
+    state.themeVersion++;
+    await loadThemes();
+    renderThemeList();
+    renderAll();
+    if (close) $("theme-editor").close();
+  } catch (error) {
+    showFormError($("theme-editor-form"), error.message);
+  }
+}
+
+/** The list of images and fonts in the theme being edited. */
+function renderThemeFiles(files) {
+  const list = $("theme-files");
+  if (files.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "hint";
+    empty.textContent = "No files yet.";
+    list.replaceChildren(empty);
+    return;
+  }
+  list.replaceChildren(
+    ...files.map((name) => {
+      const item = document.createElement("li");
+      const label = document.createElement("code");
+      label.textContent = name;
+      item.append(label, actionButton("Remove", () => removeThemeFile(name)));
+      return item;
+    }),
+  );
+}
+
+/** Upload the chosen files into the theme being edited. */
+async function uploadThemeFiles(fileList) {
+  const id = state.editingTheme.id;
+  for (const file of fileList) {
+    try {
+      const data = await readAsBase64(file);
+      const { files } = await api("POST", `/api/themes/${encodeURIComponent(id)}/files`, { name: file.name, data });
+      renderThemeFiles(files);
+    } catch (error) {
+      showFormError($("theme-editor-form"), `${file.name}: ${error.message}`);
+    }
+  }
+  state.themeVersion++;
+  applyThemes();
+}
+
+async function removeThemeFile(name) {
+  if (!confirm(`Remove ${name} from this theme?`)) return;
+  try {
+    const { files } = await api(
+      "DELETE",
+      `/api/themes/${encodeURIComponent(state.editingTheme.id)}/files/${encodeURIComponent(name)}`,
+      {},
+    );
+    renderThemeFiles(files);
+  } catch (error) {
+    showFormError($("theme-editor-form"), error.message);
+  }
+}
+
+/** A file's contents as base64 text (the "data:...;base64," prefix removed). */
+function readAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.onerror = () => reject(new Error("Couldn't read the file."));
+    reader.readAsDataURL(file);
+  });
+}
+
 // ---------------------------------------------------------------- dialogs
 
 /** Server-wide settings: fill the form from `state.settings` and open it. */
@@ -1175,6 +1567,11 @@ function openChannelSettings() {
   form.name.value = channel.name;
   form.characterName.value = channel.characterName;
   form.characterSheet.value = channel.characterSheet;
+  form.theme.replaceChildren(
+    new Option("Same as the app theme", ""),
+    ...state.themes.map((t) => new Option(t.name, t.id)),
+  );
+  form.theme.value = channel.theme ?? "";
   // Show the mode you'll get: a waiting change if there is one.
   form.mode.value = channel.pendingMode ?? channel.mode;
   updateModeNote();
@@ -1279,6 +1676,24 @@ els.input.addEventListener("input", autoGrow);
 
 els.turn.addEventListener("click", partnerTurn);
 $("stop-button").addEventListener("click", stopTurn);
+$("appearance-button").addEventListener("click", openAppearance);
+$("theme-copy").addEventListener("click", copyTheme);
+$("theme-edit").addEventListener("click", () => openThemeEditor(state.settings.appTheme));
+$("theme-delete").addEventListener("click", deleteTheme);
+$("appearance-dialog").addEventListener("change", (event) => {
+  if (event.target.name === "effects") chooseEffects(event.target.value);
+});
+$("theme-editor-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveTheme(true);
+});
+$("theme-apply").addEventListener("click", () => saveTheme(false));
+$("theme-upload").addEventListener("change", (event) => {
+  uploadThemeFiles([...event.target.files]);
+  event.target.value = ""; // so choosing the same file again still counts
+});
+$("notice-dismiss").addEventListener("click", () => ($("notice").hidden = true));
+els.messages.addEventListener("scroll", watchForStutter, { passive: true });
 $("scene-button").addEventListener("click", newScene);
 $("posting-as").addEventListener("change", (event) => state.postingAs.set(state.channelId, event.target.value));
 els.channelForm.addEventListener("change", (event) => {
@@ -1336,7 +1751,11 @@ if ("serviceWorker" in navigator) {
 
 // Start: load the server's state, then open the channel in the address bar
 // (or the first channel).
-loadState()
+// Apply the last app theme straight away, so the page doesn't flash the
+// default look while the server answers. (applyThemes corrects it after.)
+if (readLocal(LAST_THEME_KEY)) setStylesheet("theme-app", `/themes/${readLocal(LAST_THEME_KEY)}/theme.css?v=0`);
+
+Promise.all([loadState(), loadThemes()])
   .then(() => {
     // A turn may already be running (from another tab, or from before a
     // reload): keep an eye on it.

@@ -152,11 +152,13 @@ flowchart LR
 
 The whole look of Aettica is themeable, including glassy, skeuomorphic styles like Frutiger Aero, Aero Glass and liquid glass. You can make your own themes, and each channel can have its own.
 
-- **A theme is a folder** in `data/themes/`: a CSS file plus optional images (wallpapers, textures, glossy button art). A simple theme changes a few variables; an elaborate one can restyle anything.
+- **A theme is a folder** in `data/themes/`: a CSS file plus optional images (wallpapers, textures, glossy button art). A simple theme changes a few variables; an elaborate one can restyle anything. Built-in themes live in the project's `themes/` folder and can be copied but not changed.
+- **Themes are made in the app**: copy a theme, edit its CSS, add images and fonts, and press Apply to see the result. No file editing on the phone needed.
 - **Themes layer.** The app theme applies everywhere. A channel theme overrides it inside that channel only: its messages, header, composer and background. The sidebar and settings keep the app theme, so switching channels never changes the whole app.
 - **Channel themes are scoped.** Aettica wraps a channel theme's CSS so it only reaches that channel's view and can't break the rest of the app.
-- **Built-in themes** ship with the app, at least one Frutiger Aero and one liquid glass, as starting points to copy and edit.
-- **Glass has a cheap fallback.** Real backdrop blur is demanding on phones. A theme can provide a "fake glass" version (for example a pre-blurred wallpaper), used when you choose it or when the real one stutters.
+- **A channel theme fully replaces the app theme inside its channel.** Its tokens start from the defaults rather than the app theme's, and the app theme is scoped to stop at the channel, so a channel looks the same whatever the app theme is.
+- **Built-in themes** ship with the app as starting points to copy and edit: Classic (the default dark look), Frutiger Aero, Aero Glass and Liquid Glass.
+- **Glass has a cheap fallback.** Real backdrop blur is demanding on phones. A theme can provide a Lite version (no blur, more solid panels), used when you choose it or when the real one stutters. Glass effects are set per device: Automatic (Full, switching to Lite if scrolling stutters), Full, or Lite.
 
 **Theme-ready from stage 2.** Until the theme stage, the app is built so themes will be easy to add:
 
@@ -168,7 +170,7 @@ The whole look of Aettica is themeable, including glassy, skeuomorphic styles li
 
 Each stage adds one new concept, so there's only ever one new thing to learn. Stage 1 is essentially Tiny RP.
 
-**Progress:** stages 1 to 3 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md) and [docs/stage-3.md](docs/stage-3.md) for how they work.
+**Progress:** stages 1 to 3.5 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md), [docs/stage-3.md](docs/stage-3.md) and [docs/stage-3.5.md](docs/stage-3.5.md) for how they work.
 
 | Stage | Adds | New concept learned |
 | --- | --- | --- |

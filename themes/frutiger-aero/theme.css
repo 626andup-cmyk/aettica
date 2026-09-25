@@ -1,0 +1,127 @@
+/*
+ * Frutiger Aero: a light, glossy theme. Sky and hills behind everything,
+ * frosted white glass panels, aqua gel buttons, and a shiny highlight across
+ * the top of every panel and avatar.
+ *
+ * Lite version: theme-lite.css (no blur, more solid panels).
+ */
+
+:root {
+  color-scheme: light;
+
+  --font-body: "Segoe UI", "Frutiger", "Myriad Pro", "Helvetica Neue", Roboto, system-ui, sans-serif;
+
+  --text: #16324a;
+  --text-muted: #4d6f8a;
+  --text-strong: #0b2238;
+  --em-color: #1f6fa8;
+
+  --accent: #1aa0e8;
+  --accent-hover: #0d86c9;
+  --accent-text: #ffffff;
+  --danger: #d9443b;
+  --error-bg: #ffe3e0;
+  --error-text: #b3261e;
+  --update-bg: #d6f1ff;
+
+  --user-color: #1d8f4e;
+  --partner-color: #1a7fc4;
+  --avatar-user-bg: linear-gradient(#7ee39a, #22a655);
+  --avatar-partner-bg: linear-gradient(#8fdcff, #1a8fdc);
+  --avatar-saturation: 70%;
+  --avatar-lightness: 48%;
+  --name-saturation: 75%;
+  --name-lightness: 32%;
+
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+
+  --app-background: url(sky.svg) center / cover no-repeat, #6cc0f0;
+
+  --sidebar-bg: linear-gradient(rgb(255 255 255 / 0.66), rgb(222 244 255 / 0.5));
+  --sidebar-border: 1px solid rgb(255 255 255 / 0.85);
+  --sidebar-shadow: 0 0 24px rgb(0 60 120 / 0.18);
+  --sidebar-backdrop: blur(14px) saturate(160%);
+  /* On a phone the sidebar slides over the channel: make it more solid there. */
+  --drawer-bg: linear-gradient(rgb(250 253 255 / 0.94), rgb(226 245 255 / 0.9));
+  --sidebar-footer-bg: rgb(255 255 255 / 0.4);
+  --channel-link-color: #2f5875;
+  --channel-link-hover-bg: rgb(255 255 255 / 0.6);
+  --channel-link-active-bg: linear-gradient(#f2fbff, #bfe8ff);
+  --channel-link-active-color: #0b2238;
+
+  --channel-background: rgb(255 255 255 / 0.42);
+  --header-bg: linear-gradient(rgb(255 255 255 / 0.88), rgb(212 240 255 / 0.72));
+  --header-border: 1px solid rgb(255 255 255 / 0.95);
+  --header-shadow: 0 2px 10px rgb(0 70 140 / 0.15);
+  --header-backdrop: blur(12px) saturate(160%);
+  --message-hover-bg: rgb(255 255 255 / 0.5);
+  --composer-bg: linear-gradient(rgb(222 244 255 / 0.75), rgb(255 255 255 / 0.9));
+  --composer-border: 1px solid rgb(255 255 255 / 0.95);
+  --composer-backdrop: blur(12px) saturate(160%);
+
+  --input-bg: rgb(255 255 255 / 0.92);
+  --input-border: 1px solid #a9d6f0;
+  --input-focus-border: 1px solid #1aa0e8;
+  --button-bg: linear-gradient(#ffffff, #dcf0fb);
+  --button-hover-bg: linear-gradient(#ffffff, #c9e9fa);
+  --button-text: #16324a;
+  --button-border: 1px solid #9fcbe6;
+  --button-shadow: inset 0 1px 0 #ffffff, 0 1px 3px rgb(0 60 120 / 0.2);
+  /* The classic "gel" button: a hard highlight edge halfway down. */
+  --button-primary-bg: linear-gradient(#8ee2ff 0%, #36b6f2 49%, #1592d8 50%, #45c6f8 100%);
+  --button-primary-hover-bg: linear-gradient(#a6e9ff 0%, #4cc1f5 49%, #1d9fe4 50%, #5cd0fb 100%);
+  --button-primary-text: #ffffff;
+  --icon-button-hover-bg: rgb(255 255 255 / 0.65);
+
+  --dialog-bg: linear-gradient(rgb(255 255 255 / 0.93), rgb(226 245 255 / 0.9));
+  --dialog-border: 1px solid #ffffff;
+  --dialog-shadow: 0 10px 40px rgb(0 50 110 / 0.35);
+  --dialog-backdrop: blur(16px) saturate(160%);
+  --scrim: rgb(20 70 120 / 0.35);
+  --code-bg: #e3f3fc;
+
+  --scene-break-line: rgb(26 127 196 / 0.35);
+  --scene-break-text: #2f6c94;
+}
+
+/* A glossy highlight across the top of every glass panel. */
+.surface::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 55% 0;
+  background: linear-gradient(rgb(255 255 255 / 0.6), rgb(255 255 255 / 0));
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Gel buttons: a darker rim and a little glow. */
+.button-primary {
+  border: 1px solid #0f7fc0;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8), 0 2px 6px rgb(0 100 180 / 0.35);
+  text-shadow: 0 1px 1px rgb(0 60 120 / 0.5);
+}
+
+/* Avatars become glossy orbs. */
+.avatar {
+  position: relative;
+  box-shadow: inset 0 -2px 4px rgb(0 0 0 / 0.15), 0 1px 3px rgb(0 40 80 / 0.3);
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.3);
+}
+
+.avatar::after {
+  content: "";
+  position: absolute;
+  inset: 3% 12% 50% 12%;
+  border-radius: 50% 50% 45% 45% / 60% 60% 40% 40%;
+  background: linear-gradient(rgb(255 255 255 / 0.75), rgb(255 255 255 / 0.05));
+  pointer-events: none;
+}
+
+/* Names get a soft white glow, so they read well over the sky. */
+.server-name,
+.channel-title {
+  text-shadow: 0 1px 0 rgb(255 255 255 / 0.9);
+}

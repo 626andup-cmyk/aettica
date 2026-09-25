@@ -1,0 +1,13 @@
+/*
+ * Liquid Glass, Lite: for phones where the blur stutters. No real blur;
+ * panels get a deep tint instead, so text stays readable over the colour.
+ * The shapes, edges and sheen stay.
+ */
+
+:root {
+  --glass: rgb(35 25 65 / 0.82);
+  --glass-blur: none;
+  --dialog-backdrop: none;
+  --dialog-bg: rgb(40 30 75 / 0.95);
+  --channel-background: rgb(10 5 30 / 0.55);
+}

@@ -1,0 +1,19 @@
+/*
+ * Frutiger Aero, Lite: for phones where the frosted glass stutters.
+ * Real blur is turned off and panels are more solid, so the wallpaper
+ * doesn't show through too sharply. The glossy highlights stay: they're
+ * cheap to draw.
+ */
+
+:root {
+  --sidebar-backdrop: none;
+  --header-backdrop: none;
+  --composer-backdrop: none;
+  --dialog-backdrop: none;
+
+  --sidebar-bg: linear-gradient(rgb(250 253 255 / 0.94), rgb(226 245 255 / 0.9));
+  --header-bg: linear-gradient(rgb(255 255 255 / 0.97), rgb(218 242 255 / 0.94));
+  --composer-bg: linear-gradient(rgb(226 245 255 / 0.95), rgb(255 255 255 / 0.97));
+  --channel-background: rgb(255 255 255 / 0.72);
+  --dialog-bg: linear-gradient(#ffffff, #e4f5ff);
+}
