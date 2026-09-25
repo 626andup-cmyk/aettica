@@ -26,21 +26,25 @@ A small Bun server runs in Termux on the phone and holds all data; you use Aetti
 
 **The core rule:** a partner turn never requires a user message. The code has one "partner takes a turn" function that anything can call: your message, an event, or (later) a timer. This keeps proactivity an add-on instead of a rewrite.
 
+**Every turn can be stopped.** A Stop button ends a turn in progress, and nothing from it is saved. Only one turn runs per channel at a time, but different channels can run at once.
+
 Hidden-item privacy is a matter of trust, not security: the data lives on your phone and could be inspected.
 
 ## Channels and scenes
 
 A channel is a storyline; scene breaks divide it into scenes without needing a new channel.
 
-- **Scene breaks** are real objects in the data, shown as a divider with an optional scene title. Typing `=====` alone as a message creates one; the partner can create them with a tool.
+- **Scene breaks** are real objects in the data, stored in order with the messages and shown as a divider with an optional scene title. Typing `=====` alone as a message creates one (`===== The Storm` gives it a title), as does the new-scene button; the partner can create them with a tool.
+- **A channel ending on a scene break** asks the partner to open the new scene on their next turn.
 - **Each break triggers a scene summary.** Later scenes get earlier summaries plus fresh messages, not the full raw history.
 - **The cast is whoever's notebook entry is pinned.** Pinning adds a character to the channel; unpinning removes them. Pins carry across scene breaks.
-- **Every message records** its author (you or partner), the character(s) it voices (or none, for narration/OOC asides), and which connection profile generated it.
+- **Every message records** its author (you or partner), the character(s) it voices (or none, for narration/OOC asides), which connection profile generated it, and the mode it was written in.
+- **Messages written together form a turn:** all the bubbles of one casual reply, or several lines you send at once. Regenerating replaces the partner's whole last turn.
 - **OOC channels** are for talking to the partner as themselves.
 
 ### Channel modes
 
-Each RP channel has a mode. A mode change takes effect at the next scene break, so scenes never mix styles.
+Each RP channel has a mode. A mode change takes effect at the next scene break, so scenes never mix styles. If the current scene has no posts yet, the change applies right away. Every message keeps the mode it was written in, so older scenes still look the way they were written.
 
 |  | Literary | Casual |
 | --- | --- | --- |
@@ -48,6 +52,10 @@ Each RP channel has a mode. A mode change takes effect at the next scene break, 
 | Display | Wide prose blocks | Tupperbox-style bubbles with character name and avatar |
 | Turn length | Room to breathe, ends where you can respond | Snappy |
 | You post as | Just your post | A character, via proxy prefix (`k: *waves*`) or picker |
+
+- **Casual replies are split into bubbles** from `Name: text` lines, which the partner is asked to write. Only known names start a bubble, so text like `Note: ...` stays as text, and a reply with no names becomes one bubble.
+- **Your characters** (name and proxy prefix) are listed once in settings and usable in every casual channel. Several tagged lines in one message become several bubbles.
+- **In a casual scene, the prompt names your characters** so the partner doesn't write their lines.
 
 Delete is never direct for the partner; channel deletion needs your approval.
 
@@ -160,7 +168,7 @@ The whole look of Aettica is themeable, including glassy, skeuomorphic styles li
 
 Each stage adds one new concept, so there's only ever one new thing to learn. Stage 1 is essentially Tiny RP.
 
-**Progress:** stages 1 and 2 are built. See [docs/stage-1.md](docs/stage-1.md) and [docs/stage-2.md](docs/stage-2.md) for how they work.
+**Progress:** stages 1 to 3 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md) and [docs/stage-3.md](docs/stage-3.md) for how they work.
 
 | Stage | Adds | New concept learned |
 | --- | --- | --- |
@@ -196,3 +204,5 @@ These are parked until the core works.
 - [ ] Is there ever more than one partner per server?
 - [ ] Should a channel theme also restyle the sidebar while you're in that channel?
 - [ ] Can the partner pick or suggest a channel's theme (for example when creating a channel)?
+- [ ] Should your casual characters stay server-wide, or become notebook entries pinned to each channel's cast in stage 4?
+- [ ] Do your models reliably write the casual `Name: text` format?

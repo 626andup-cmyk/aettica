@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { join } from "node:path";
-import { openDatabase, SCHEMA_VERSION } from "../src/db.ts";
+import { MIGRATIONS, openDatabase, SCHEMA_VERSION } from "../src/db.ts";
 import { NotFoundError, Store, ValidationError, validateNewChannel, validateSettings } from "../src/store.ts";
 import { tempDir } from "./helpers.ts";
 
@@ -50,6 +50,32 @@ describe("the database layout", () => {
   test("records its version", () => {
     const db = new Database(join(dir.path, "aettica.db"));
     expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: SCHEMA_VERSION });
+    db.close();
+  });
+
+  test("upgrades a stage 2 database, keeping its data", () => {
+    // Build a database the way stage 2 left it: only the first migration.
+    const path = join(dir.path, "stage2.db");
+    const old = new Database(path);
+    old.exec(MIGRATIONS[0]!);
+    old.exec("PRAGMA user_version = 1");
+    old.exec(`INSERT INTO channels (id, name, kind, position, created_at) VALUES ('rp', 'story', 'rp', 0, 'then')`);
+    old.exec(`INSERT INTO channels (id, name, kind, position, created_at) VALUES ('ooc', 'ooc', 'ooc', 1, 'then')`);
+    old.exec(`INSERT INTO messages (id, channel_id, author, content, created_at) VALUES ('m1', 'rp', 'user', 'Hi', 'then')`);
+    old.exec(`INSERT INTO messages (id, channel_id, author, content, created_at) VALUES ('m2', 'ooc', 'user', 'Yo', 'then')`);
+    old.close();
+
+    const db = openDatabase(path);
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: SCHEMA_VERSION });
+    expect(db.query("SELECT id, mode, pending_mode FROM channels ORDER BY position").all()).toEqual([
+      { id: "rp", mode: "literary", pending_mode: null },
+      { id: "ooc", mode: "literary", pending_mode: null },
+    ]);
+    // RP messages were literary; OOC messages have no mode.
+    expect(db.query("SELECT id, kind, mode, turn_id FROM messages ORDER BY seq").all()).toEqual([
+      { id: "m1", kind: "post", mode: "literary", turn_id: null },
+      { id: "m2", kind: "post", mode: null, turn_id: null },
+    ]);
     db.close();
   });
 
@@ -115,6 +141,78 @@ describe("channels", () => {
   });
 });
 
+describe("channel modes", () => {
+  test("new channels are literary unless told otherwise", () => {
+    expect(store.listChannels()[0]!.mode).toBe("literary");
+    expect(store.createChannel({ name: "chat", kind: "rp", mode: "casual" }).mode).toBe("casual");
+  });
+
+  test("a change applies at once while the current scene is empty", () => {
+    const story = store.listChannels()[0]!;
+    expect(store.updateChannel(story.id, { mode: "casual" })).toMatchObject({ mode: "casual", pendingMode: null });
+  });
+
+  test("a change mid-scene waits for the next scene break", () => {
+    const story = store.listChannels()[0]!;
+    store.addMessage({ channelId: story.id, author: "user", content: "Hi", mode: "literary" });
+
+    expect(store.updateChannel(story.id, { mode: "casual" })).toMatchObject({ mode: "literary", pendingMode: "casual" });
+
+    const { sceneBreak, channel } = store.addSceneBreak(story.id, "user", "  The Storm ");
+    expect(sceneBreak).toMatchObject({ kind: "scene_break", content: "The Storm", author: "user", mode: null });
+    expect(channel).toMatchObject({ mode: "casual", pendingMode: null });
+
+    // The new scene is empty, so another change applies at once.
+    expect(store.updateChannel(story.id, { mode: "literary" })).toMatchObject({ mode: "literary", pendingMode: null });
+  });
+
+  test("asking for the current mode cancels a waiting change", () => {
+    const story = store.listChannels()[0]!;
+    store.addMessage({ channelId: story.id, author: "user", content: "Hi" });
+    store.updateChannel(story.id, { mode: "casual" });
+    expect(store.updateChannel(story.id, { mode: "literary" }).pendingMode).toBeNull();
+  });
+
+  test("scene breaks are only for roleplay channels", () => {
+    const ooc = store.listChannels()[1]!;
+    expect(() => store.addSceneBreak(ooc.id, "user", "")).toThrow(ValidationError);
+  });
+});
+
+describe("turns", () => {
+  test("messages added together share a turn id", () => {
+    const story = store.listChannels()[0]!;
+    const turn = store.addTurn([
+      { channelId: story.id, author: "partner", content: "one" },
+      { channelId: story.id, author: "partner", content: "two" },
+    ]);
+    expect(turn[0]!.turnId).toBeString();
+    expect(turn[1]!.turnId).toBe(turn[0]!.turnId);
+  });
+
+  test("lastPartnerTurn returns the whole last reply, or nothing", () => {
+    const story = store.listChannels()[0]!;
+    expect(store.lastPartnerTurn(story.id)).toEqual([]);
+
+    store.addTurn([{ channelId: story.id, author: "partner", content: "earlier" }]);
+    store.addTurn([{ channelId: story.id, author: "user", content: "hi" }]);
+    store.addTurn([
+      { channelId: story.id, author: "partner", content: "a" },
+      { channelId: story.id, author: "partner", content: "b" },
+    ]);
+    expect(store.lastPartnerTurn(story.id).map((m) => m.content)).toEqual(["a", "b"]);
+
+    store.addSceneBreak(story.id, "user", "");
+    expect(store.lastPartnerTurn(story.id)).toEqual([]);
+  });
+
+  test("an old message without a turn id is a turn of its own", () => {
+    const story = store.listChannels()[0]!;
+    store.addMessage({ channelId: story.id, author: "partner", content: "old" });
+    expect(store.lastPartnerTurn(story.id).map((m) => m.content)).toEqual(["old"]);
+  });
+});
+
 describe("messages", () => {
   test("stay in their own channel, in order, with the characters they voice", () => {
     const [story, ooc] = store.listChannels();
@@ -164,6 +262,19 @@ describe("validation", () => {
     [{ model: "" }, /model must be/],
     [{ partnerName: "  " }, /partnerName must be non-empty/],
     [{ partnerPrompt: 42 }, /partnerPrompt must be text/],
+    [{ userCharacters: "Kestrel" }, /must be a list/],
+    [{ userCharacters: [{ name: "Kestrel", prefix: "k k" }] }, /no spaces or colons/],
+    [{ userCharacters: [{ name: "Kestrel", prefix: "k:" }] }, /no spaces or colons/],
+    [{ userCharacters: [{ name: "", prefix: "k" }] }, /Character name must be non-empty/],
+    [
+      {
+        userCharacters: [
+          { name: "Kestrel", prefix: "k" },
+          { name: "Kit", prefix: "K" },
+        ],
+      },
+      /Two characters use the prefix/,
+    ],
     [[], /must be a JSON object/],
   ])("rejects settings %j", (input, error) => {
     expect(() => validateSettings(input)).toThrow(error);
@@ -174,6 +285,7 @@ describe("validation", () => {
     [{ name: "", kind: "rp" }, /name must be non-empty/],
     [{ name: "x".repeat(101), kind: "rp" }, /name is too long/],
     [{ name: "x", kind: "rp", characterName: 7 }, /characterName must be text/],
+    [{ name: "x", kind: "rp", mode: "noir" }, /mode must be/],
   ])("rejects new channel %j", (input, error) => {
     expect(() => validateNewChannel(input)).toThrow(error);
   });

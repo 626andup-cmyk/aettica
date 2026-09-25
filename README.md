@@ -2,13 +2,17 @@
 
 Aettica gives you an AI **RP partner**, not a character: a writer with their own style who plays characters alongside you. The full vision is in [DESIGN.md](DESIGN.md).
 
-**Status: stage 2 of 8.** A Discord-style server of channels with your partner, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts) and [stage 2](docs/stage-2.md) (database, channels).
+**Status: stage 3 of 8.** A Discord-style server of channels with your partner, with scenes and literary or casual styles, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels) and [stage 3](docs/stage-3.md) (scenes, modes).
 
 ## What it can do
 
 - **Channels**: create, rename, reorder and delete them from the sidebar.
   - **Roleplay** channels are storylines. Each has its own character, with a name and a sheet, that your partner plays.
   - **Out-of-character** channels are for talking with your partner as themselves. They know which storylines exist.
+- **Scenes**: type `=====` (or `===== Title`) or press ⁂ to start a new scene. Scenes are divided by a titled line.
+- **Two styles** per roleplay channel. A change of style waits for the next scene, so a scene never mixes them.
+  - **Literary**: your partner writes prose posts, shown as wide blocks of text.
+  - **Casual**: short in-character bubbles, one character each, like a group chat. You post as your own characters with proxy tags (`k: *waves*`) or the "Posting as" menu, like Tupperbox.
 - Every message records who wrote it, which character it voices, and which model generated it.
 - Edit the **partner prompt** (who your partner is as a writer), the model, temperature, reply length, and how many recent messages the partner sees.
 - **Partner's turn**: let your partner write without a new message from you, including opening an empty channel.
@@ -83,6 +87,8 @@ src/
   server.ts    HTTP server: API routes and serving the web app
   partner.ts   The one "partner takes a turn" function
   prompt.ts    Builds the prompt stack sent to the model
+  posts.ts     Turns text into messages: posts, replies, scene breaks
+  bubbles.ts   Splits casual text into one-character bubbles
   nanogpt.ts   Talks to nanoGPT's API
   db.ts        The database's tables, and upgrading them (migrations)
   store.ts     Reading and writing channels, messages and settings

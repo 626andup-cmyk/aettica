@@ -72,6 +72,8 @@ export function importLegacyChat(store: Store, dataDir: string): boolean {
         channelId: story.id,
         author,
         content: message.content,
+        // Stage 1 was always prose.
+        mode: "literary",
         // Stage 1 partner messages all voiced the one character.
         characters: author === "partner" && characterName ? [characterName] : [],
         createdAt: typeof message.createdAt === "string" ? message.createdAt : undefined,

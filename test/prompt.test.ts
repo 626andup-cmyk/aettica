@@ -8,10 +8,13 @@ import { describe, expect, test } from "bun:test";
 import {
   buildPromptStack,
   describeChannels,
+  modeInstructions,
+  NEW_SCENE_NUDGE,
   NUDGES,
   OOC_FRAMING,
   RP_FRAMING,
   recentMessages,
+  sceneBreakMarker,
   toChatHistory,
   type PromptInput,
 } from "../src/prompt.ts";
@@ -24,6 +27,7 @@ const settings: Settings = {
   temperature: 0.9,
   maxTokens: 500,
   historyLimit: 40,
+  userCharacters: [],
 };
 
 function channel(overrides: Partial<Channel>): Channel {
@@ -31,6 +35,8 @@ function channel(overrides: Partial<Channel>): Channel {
     id: "story",
     name: "story",
     kind: "rp",
+    mode: "literary",
+    pendingMode: null,
     position: 0,
     characterName: "Ilse Marrow",
     characterSheet: "Name: Ilse Marrow\nRole: lighthouse keeper",
@@ -43,8 +49,24 @@ const story = channel({});
 const ooc = channel({ id: "ooc", name: "ooc", kind: "ooc", position: 1, characterName: "", characterSheet: "" });
 
 let nextId = 0;
-function msg(author: Author, content: string): Message {
-  return { id: String(nextId++), channelId: "story", author, content, characters: [], createdAt: new Date(0).toISOString() };
+function msg(author: Author, content: string, extra: Partial<Message> = {}): Message {
+  return {
+    id: String(nextId++),
+    channelId: "story",
+    kind: "post",
+    mode: "literary",
+    turnId: null,
+    author,
+    content,
+    characters: [],
+    createdAt: new Date(0).toISOString(),
+    ...extra,
+  };
+}
+
+/** A scene break, as stored. */
+function sceneBreak(title: string): Message {
+  return msg("user", title, { kind: "scene_break", mode: null });
 }
 
 /** Build a stack for `#story` unless told otherwise. */
@@ -71,8 +93,27 @@ describe("buildPromptStack in an RP channel", () => {
 
   test("leaves out the layers that aren't built yet", () => {
     const [system] = build();
-    expect(system!.content).not.toContain("Channel mode");
     expect(system!.content).not.toContain("Model notes");
+  });
+
+  test("layer 2 describes the current scene's mode, between who's writing and the character", () => {
+    const [literary] = build();
+    const style = literary!.content.indexOf("## Style");
+    expect(literary!.content).toContain(modeInstructions("literary", "Ilse Marrow"));
+    expect(style).toBeGreaterThan(literary!.content.indexOf(RP_FRAMING));
+    expect(style).toBeLessThan(literary!.content.indexOf("## The character you play"));
+
+    const [casual] = build({ channel: channel({ mode: "casual" }) });
+    expect(casual!.content).toContain(modeInstructions("casual", "Ilse Marrow"));
+    expect(casual!.content).toContain("Ilse Marrow: *leans on the doorframe*");
+  });
+
+  test("names your characters in casual scenes only", () => {
+    const withCharacters = { ...settings, userCharacters: [{ name: "Kestrel", prefix: "k" }] };
+    expect(build({ settings: withCharacters, channel: channel({ mode: "casual" }) })[0]!.content).toContain(
+      "The user plays Kestrel. Never write their messages.",
+    );
+    expect(build({ settings: withCharacters })[0]!.content).not.toContain("Kestrel");
   });
 
   test("leaves out an empty character sheet instead of sending an empty heading", () => {
@@ -104,6 +145,40 @@ describe("buildPromptStack in an RP channel", () => {
     const messages = [msg("user", "one"), msg("partner", "two"), msg("user", "three")];
     const stack = build({ settings: { ...settings, historyLimit: 1 }, messages });
     expect(stack.slice(1)).toEqual([{ role: "user", content: "three" }]);
+  });
+});
+
+describe("scene breaks and casual bubbles in the history", () => {
+  test("a scene break becomes an OOC line from the user", () => {
+    const stack = build({ messages: [msg("user", "Hi"), msg("partner", "Hello."), sceneBreak("The Storm"), msg("user", "*Thunder.*")] });
+    expect(stack.slice(1)).toEqual([
+      { role: "user", content: "Hi" },
+      { role: "assistant", content: "Hello." },
+      { role: "user", content: `${sceneBreakMarker("The Storm")}\n\n*Thunder.*` },
+    ]);
+    expect(sceneBreakMarker("")).toBe("(OOC: Scene break.)");
+  });
+
+  test("ending on a scene break asks for the new scene's opening", () => {
+    const stack = build({ messages: [msg("user", "Hi"), msg("partner", "Hello."), sceneBreak("")] });
+    expect(stack.at(-1)).toEqual({ role: "user", content: `(OOC: Scene break.)\n\n${NEW_SCENE_NUDGE}` });
+  });
+
+  test("casual bubbles are named and joined line by line", () => {
+    const casual = { mode: "casual" as const };
+    const stack = build({
+      channel: channel({ mode: "casual" }),
+      messages: [
+        msg("user", "*waves*", { ...casual, characters: ["Kestrel"] }),
+        msg("user", "hi", { ...casual, characters: ["Kestrel"] }),
+        msg("partner", "Door's open.", { ...casual, characters: ["Ilse Marrow"] }),
+        msg("partner", "*nods*", { ...casual, characters: ["Ilse Marrow"] }),
+      ],
+    });
+    expect(stack.slice(1, 3)).toEqual([
+      { role: "user", content: "Kestrel: *waves*\nKestrel: hi" },
+      { role: "assistant", content: "Ilse Marrow: Door's open.\nIlse Marrow: *nods*" },
+    ]);
   });
 });
 
