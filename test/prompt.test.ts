@@ -95,6 +95,7 @@ function msg(author: Author, content: string, extra: Partial<Message> = {}): Mes
     author,
     content,
     characters: [],
+    attachments: [],
     createdAt: new Date(0).toISOString(),
     ...extra,
   };

@@ -263,6 +263,11 @@ export interface Message {
    * as it was called at the time (profiles can be renamed or deleted later).
    */
   profile?: string;
+  /**
+   * Ids of notebook entries you attached to this message: they're sent to
+   * your partner in full while the message is in the conversation.
+   */
+  attachments: string[];
 }
 
 /**
@@ -366,4 +371,65 @@ export interface Roulette {
   entries: { profileId: string; weight: number }[];
   position: number;
   createdAt: string;
+}
+
+// ------------------------------------------------------------ stage 6
+
+/**
+ * One tool call your partner made during a turn, as kept in the tool log
+ * (see `src/activity.ts`).
+ */
+export interface ToolCallRecord {
+  id: string;
+  channelId: string;
+  /** The turn it belongs to: the same id as the messages that turn wrote. */
+  turnId: string;
+  /** Which round of the turn (a model can call tools, see results, and call more). */
+  round: number;
+  name: string;
+  /** The arguments exactly as the model wrote them. */
+  arguments: string;
+  /** What was sent back to the model, as JSON text. */
+  result: string;
+  status: "ok" | "error";
+  /** For people: "pinned Tamsin to #story". For errors, what went wrong. */
+  summary: string;
+  /** `native` if the API returned it as a tool call; `text` if it was written out in the reply. */
+  source: "native" | "text";
+  profile: string | null;
+  createdAt: string;
+}
+
+/** One comment on a message. The first comment of a thread holds its quote. */
+export interface Comment {
+  id: string;
+  messageId: string;
+  /** The id of the thread's first comment (its own id, for the first). */
+  threadId: string;
+  author: Author;
+  /** The highlighted text (first comment only; "" for the whole message). */
+  quote: string;
+  note: string;
+  createdAt: string;
+}
+
+/** A thread of comments on one part of a message. */
+export interface CommentThread {
+  id: string;
+  messageId: string;
+  quote: string;
+  resolved: boolean;
+  comments: Comment[];
+}
+
+/** Something your partner asked you to approve (other than notebook suggestions). */
+export interface Proposal {
+  id: string;
+  kind: "delete_channel";
+  targetId: string;
+  targetName: string;
+  reason: string;
+  status: "pending" | "approved" | "denied";
+  createdAt: string;
+  resolvedAt: string | null;
 }

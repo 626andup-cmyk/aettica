@@ -17,6 +17,7 @@ import { openDatabase } from "./db.ts";
 import { NotFoundError, ValidationError } from "./errors.ts";
 import { Notebook } from "./notebook.ts";
 import { Profiles } from "./profiles.ts";
+import { Comments, Proposals, ToolLog } from "./activity.ts";
 import { parseSheet } from "./sheets.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
@@ -255,6 +256,8 @@ interface MessageRow {
   profile: string | null;
   /** A JSON array of character names, built by the query itself. */
   characters: string;
+  /** A JSON array of attached notebook entry ids, built by the query itself. */
+  attachments: string;
 }
 
 function toChannel(row: ChannelRow): Channel {
@@ -281,6 +284,7 @@ function toMessage(row: MessageRow): Message {
     mode: row.mode,
     turnId: row.turn_id,
     characters: JSON.parse(row.characters) as string[],
+    attachments: JSON.parse(row.attachments) as string[],
     createdAt: row.created_at,
     // Only include optional fields when they have a value.
     ...(row.edited_at ? { editedAt: row.edited_at } : {}),
@@ -299,7 +303,8 @@ const SELECT_MESSAGES = `
   SELECT m.id, m.channel_id, m.kind, m.mode, m.turn_id, m.author, m.content, m.created_at, m.edited_at, m.model, m.profile,
     (SELECT json_group_array(character_name)
        FROM (SELECT character_name FROM message_characters
-              WHERE message_id = m.id ORDER BY position)) AS characters
+              WHERE message_id = m.id ORDER BY position)) AS characters,
+    (SELECT json_group_array(entry_id) FROM message_attachments WHERE message_id = m.id) AS attachments
   FROM messages m`;
 
 // ----------------------------------------------------------------- store
@@ -327,6 +332,12 @@ export class Store {
   readonly notebook: Notebook;
   /** Connection profiles and roulettes (see `src/profiles.ts`). */
   readonly profiles: Profiles;
+  /** Every tool call your partner makes (see `src/activity.ts`). */
+  readonly toolLog: ToolLog;
+  /** Comment threads on messages. */
+  readonly comments: Comments;
+  /** Things your partner asked you to approve. */
+  readonly proposals: Proposals;
 
   /**
    * Open (or create) the database inside `dataDir`.
@@ -347,6 +358,9 @@ export class Store {
     this.db = openDatabase(path);
     this.notebook = new Notebook(this.db);
     this.profiles = new Profiles(this.db);
+    this.toolLog = new ToolLog(this.db);
+    this.comments = new Comments(this.db);
+    this.proposals = new Proposals(this.db);
 
     if (isNew) {
       const imported = !inMemory && importLegacyChat(this, dataDir);
@@ -607,8 +621,7 @@ export class Store {
    * Add several messages at once, all or nothing, sharing a new turn id.
    * Used for a casual reply's bubbles, or several lines you sent together.
    */
-  addTurn(messages: Omit<NewMessage, "turnId">[]): Message[] {
-    const turnId = crypto.randomUUID();
+  addTurn(messages: Omit<NewMessage, "turnId">[], turnId: string = crypto.randomUUID()): Message[] {
     return this.db.transaction(() => messages.map((m) => this.addMessage({ ...m, turnId })))();
   }
 
@@ -664,6 +677,33 @@ export class Store {
   deleteMessage(id: string): void {
     const result = this.db.query("DELETE FROM messages WHERE id = $id").run({ id });
     if (result.changes === 0) throw new NotFoundError("message");
+  }
+
+  /**
+   * Attach notebook entries to a message, so they're sent to your partner
+   * with it. Entries already attached are skipped.
+   */
+  attach(messageId: string, entryIds: string[]): Message {
+    const insert = this.db.query(
+      "INSERT OR IGNORE INTO message_attachments (message_id, entry_id) VALUES ($messageId, $entryId)",
+    );
+    this.db.transaction(() => {
+      for (const entryId of entryIds) insert.run({ messageId, entryId });
+    })();
+    return this.getMessage(messageId);
+  }
+
+  /**
+   * Approve or deny one of your partner's proposals. Approving carries it
+   * out: for a channel deletion, the channel is deleted (if it still exists).
+   */
+  resolveProposal(id: string, approve: boolean): void {
+    this.db.transaction(() => {
+      const proposal = this.proposals.resolve(id, approve ? "approved" : "denied");
+      if (approve && proposal.kind === "delete_channel") {
+        this.db.query("DELETE FROM channels WHERE id = $id").run({ id: proposal.targetId });
+      }
+    })();
   }
 
   /** Delete every message in a channel, keeping the channel itself. */

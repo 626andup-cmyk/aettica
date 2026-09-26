@@ -81,15 +81,12 @@ export function canChangeSettings(actor: Author, owner: NotebookEntry["owner"]):
 }
 
 /**
- * Whether someone can delete an entry outright.
- *
- *   - Your partner never deletes anything directly: the design has no
- *     delete tool, only proposals you approve.
- *   - You can delete your own entries. Shared lore is deleted by
- *     suggestion, like any other change to it.
+ * Whether someone can delete an entry outright: only their own. Deleting
+ * anything else (the other person's entries, or shared lore) is a
+ * suggestion for the other person to approve.
  */
 export function canDelete(actor: Author, settings: EffectiveSettings): boolean {
-  return actor === "user" && settings.owner === "user";
+  return settings.owner === actor;
 }
 
 /**

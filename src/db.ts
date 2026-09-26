@@ -311,6 +311,74 @@ export const MIGRATIONS: Migration[] = [
     assign.run("rpAssignment", JSON.stringify(`profile:${id}`));
     assign.run("oocAssignment", JSON.stringify(`profile:${id}`));
   },
+
+  // ---------------------------------------------------------------- 6
+  // Stage 6: tools, the approval queue, message comments, and notes attached
+  // to messages.
+  `
+  -- Every tool call your partner makes, kept for the activity shown under
+  -- their messages and for troubleshooting (see src/partner.ts).
+  CREATE TABLE tool_calls (
+    id         TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+    -- The turn the call belongs to: the same id as the messages it wrote.
+    turn_id    TEXT NOT NULL,
+    -- Which round of the turn: a model can call tools, see the results,
+    -- and call more.
+    round      INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    -- The arguments exactly as the model wrote them, even if broken.
+    arguments  TEXT NOT NULL,
+    -- What was sent back to the model, as JSON.
+    result     TEXT NOT NULL,
+    status     TEXT NOT NULL CHECK (status IN ('ok', 'error')),
+    -- A short description for people, e.g. "pinned Tamsin to #story".
+    summary    TEXT NOT NULL DEFAULT '',
+    -- 'native' if the API returned it as a tool call, 'text' if it was
+    -- found written out in the reply (some models do that).
+    source     TEXT NOT NULL CHECK (source IN ('native', 'text')),
+    profile    TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX tool_calls_by_channel ON tool_calls (channel_id, created_at);
+
+  -- Comments on messages, in threads. The first comment of a thread has
+  -- thread_id = its own id, and holds the highlighted text and whether the
+  -- thread is resolved.
+  CREATE TABLE comments (
+    id         TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+    thread_id  TEXT NOT NULL,
+    author     TEXT NOT NULL CHECK (author IN ('user', 'partner')),
+    quote      TEXT NOT NULL DEFAULT '',
+    note       TEXT NOT NULL,
+    resolved   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX comments_by_message ON comments (message_id);
+
+  -- Things your partner asks you to approve that aren't notebook changes
+  -- (those are suggestions): for now, deleting a channel.
+  CREATE TABLE proposals (
+    id          TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL CHECK (kind IN ('delete_channel')),
+    target_id   TEXT NOT NULL,
+    -- The target's name when proposed, so the card still makes sense later.
+    target_name TEXT NOT NULL,
+    reason      TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied')),
+    created_at  TEXT NOT NULL,
+    resolved_at TEXT
+  );
+
+  -- Notebook entries you attached to a message, so they're sent to your
+  -- partner in full while that message is in the conversation.
+  CREATE TABLE message_attachments (
+    message_id TEXT NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+    entry_id   TEXT NOT NULL REFERENCES notebook_entries (id) ON DELETE CASCADE,
+    PRIMARY KEY (message_id, entry_id)
+  );
+  `,
 ];
 
 /**
