@@ -210,7 +210,7 @@ Turn it on in your `:root`, then mark which elements are lensed glass:
   --lens-depth: 26;        /* how far the rim bends what's behind, in px (default 24) */
   --lens-bevel: 20;        /* how wide the curved rim is at least, in px (default 18) */
   --lens-dispersion: 0.4;  /* how much the colours split at the rim, 0 to 1 (default 0.3) */
-  --lens-frost: 1.5;       /* a blur behind the glass, in px (default 0: clear) */
+  --lens-frost: 0.5;       /* a blur behind the glass, in px (default 0: clear) */
   --lens-saturate: 1.35;   /* colour boost through the glass (default 1.2) */
 }
 
@@ -222,7 +222,12 @@ Turn it on in your `:root`, then mark which elements are lensed glass:
 - A deeper lens needs a wider rim, so the rim grows with the depth (as far as the element's size allows). The very edge magnifies up to about 3.3 times.
 - Keep a normal `backdrop-filter` on the same elements (e.g. `blur(10px) saturate(160%)`): it's what other browsers show, and what Lite mode shows, since Lite turns lensing off.
 - Glass inside other glass (a button in the composer) isn't lensed. A panel with a backdrop filter only lets the elements in it see its own fill, not the page behind, so there'd be nothing to bend. It keeps your `backdrop-filter`.
-- Outer shadows are fine: Chrome shifts a lensed element's backdrop by how far its shadows reach, and glass.js makes up for it (and checks again on hover, press and focus, in case they change).
+- **A lensed element gets the class `lensed`, and must not reach outside its own box**: no outer `box-shadow` (on it, or on anything inside it) while it's lensed. Chrome versions disagree about where a backdrop filter goes when an element's shadow spills over its edges (some move it by the shadow's size, some don't), so on some phones the lens would miss the right and bottom edges. Keep your floating shadows for other browsers and Lite, and drop them under `.lensed`:
+
+```css
+.message { box-shadow: var(--glass-rim), 0 14px 34px -12px rgb(0 0 0 / 0.3); }
+.lensed { box-shadow: var(--glass-rim) !important; }
+```
 - **Don't move your theme layers with `transform`** (not even a static one): Chrome doesn't give a lens the full picture of a transformed layer, and cuts part of it off behind the rims. For parallax, animate `background-position` instead. Both Liquid Glass themes do. Rainy Window, whose layers also need masks and several backgrounds to move together, animates registered custom properties (`@property --near { syntax: "<length>"; ... }`) and uses them in each `background-position` and `mask-position`:
 
 ```css
@@ -232,7 +237,7 @@ Turn it on in your `:root`, then mark which elements are lensed glass:
 }
 ```
 
-- Lenses are made once per size and settings and shared (most bubbles are the same width), and nothing is recalculated while you scroll.
+- **What it costs.** The lens itself is cheap: a bubble growing as your partner writes only moves the pieces of its map, and nothing is recalculated while you scroll. The browser redraws the glass every frame something behind it moves, though, and two settings multiply that work: rainbow edges (`--lens-dispersion` above 0) take three passes instead of one, and frost (`--lens-frost`) adds a blur. For the smoothest glass, set rainbow edges to 0 and keep frost at 0.5px or less (a hint of blur is free, and smooths the magnified rim).
 
 glass.js also provides two things for liquid themes, in every browser:
 
