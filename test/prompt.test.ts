@@ -25,6 +25,9 @@ import type { Author, Channel, Message, NotebookEntry, Settings } from "../src/t
 const settings: Settings = {
   partnerName: "Arlo",
   partnerPrompt: "You are Arlo, a writer of grounded prose.",
+  literaryPrompt: "LITERARY: take your time.",
+  casualPrompt: "CASUAL: keep it snappy.",
+  oocPrompt: "OOC: one or two sentences.",
   model: "test/model",
   temperature: 0.9,
   maxTokens: 500,
@@ -116,6 +119,17 @@ function build(overrides: Partial<PromptInput> = {}) {
 }
 
 describe("buildPromptStack in an RP channel", () => {
+  test("sends only the prompt for the scene's mode, after its mode instructions", () => {
+    const [literary] = build();
+    expect(literary!.content).toContain(`${modeInstructions("literary", "Ilse Marrow")}\n\n${settings.literaryPrompt}`);
+    expect(literary!.content).not.toContain(settings.casualPrompt);
+    expect(literary!.content).not.toContain(settings.oocPrompt);
+
+    const [casual] = build({ channel: channel({ mode: "casual" }) });
+    expect(casual!.content).toContain(settings.casualPrompt);
+    expect(casual!.content).not.toContain(settings.literaryPrompt);
+  });
+
   test("puts every instruction layer in one system message, in stack order", () => {
     const [system] = build();
     expect(system!.role).toBe("system");
@@ -266,6 +280,15 @@ describe("buildPromptStack in an OOC channel", () => {
     expect(system!.content).not.toContain("lighthouse keeper");
     // Your partner prompt still applies: it's who they are.
     expect(system!.content).toContain(settings.partnerPrompt);
+  });
+
+  test("sends only the OOC prompt, after who your partner is", () => {
+    const [system] = build({ channel: ooc });
+    const text = system!.content;
+    expect(text).toContain(`## How you talk here\n\n${settings.oocPrompt}`);
+    expect(text.indexOf(settings.oocPrompt)).toBeGreaterThan(text.indexOf(settings.partnerPrompt));
+    expect(text).not.toContain(settings.literaryPrompt);
+    expect(text).not.toContain(settings.casualPrompt);
   });
 
   test("lists the channels on the server", () => {

@@ -19,10 +19,12 @@ A small Bun server runs in Termux on the phone and holds all data; you use Aetti
 **The prompt stack**, assembled for every generation:
 
 1. Partner identity and writing style (who is writing)
-2. Channel mode instructions (literary or casual)
+2. How to write in this channel: the mode instructions (literary or casual), then the partner's own prompt for this kind of channel (literary, casual or OOC)
 3. The channel's cast and lore: its pinned notebook entries, and entries they link to
 4. Connection profile's model-quirk prompt
 5. Scene summaries and recent messages
+
+**The partner prompt is split in four:** who the partner is (layer 1, every channel), and how they write in literary scenes, casual scenes and OOC (layer 2, only in that kind of channel). One combined prompt made the model mix them up, e.g. writing paragraphs in OOC despite being asked for a sentence or two, because the literary instructions were in the same prompt.
 
 **The core rule:** a partner turn never requires a user message. The code has one "partner takes a turn" function that anything can call: your message, an event, or (later) a timer. This keeps proactivity an add-on instead of a rewrite.
 

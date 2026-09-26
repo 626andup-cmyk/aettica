@@ -267,10 +267,20 @@ export interface Settings {
   /** Your partner's name, shown on their OOC messages. */
   partnerName: string;
   /**
-   * Layer 1 of the prompt stack: who your partner is and how they write.
+   * Layer 1 of the prompt stack, in every channel: who your partner is.
    * This describes the *writer*, not a character they play.
    */
   partnerPrompt: string;
+  /**
+   * Layer 2, per kind of channel: how your partner writes there. Each is
+   * only sent in its own kind of channel, so instructions for one (long
+   * prose posts) never leak into another (short OOC chat).
+   */
+  literaryPrompt: string;
+  /** How your partner writes casual scenes (see `literaryPrompt`). */
+  casualPrompt: string;
+  /** How your partner talks out of character (see `literaryPrompt`). */
+  oocPrompt: string;
   /** nanoGPT model id, e.g. `deepseek-ai/DeepSeek-V3.1-Terminus`. */
   model: string;
   /**

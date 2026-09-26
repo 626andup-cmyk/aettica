@@ -224,9 +224,25 @@
         <label for="setting-partner-name">Partner name</label>
         <input id="setting-partner-name" name="partnerName" autocomplete="off" />
 
-        <label for="setting-partner">Partner prompt</label>
-        <p class="hint">Who your partner is as a writer: their name, voice and style. Used in every channel.</p>
-        <textarea id="setting-partner" name="partnerPrompt" rows="8"></textarea>
+        <label for="setting-partner">Who your partner is</label>
+        <p class="hint">Their name, personality and taste as a writer. Used in every channel.</p>
+        <textarea id="setting-partner" name="partnerPrompt" rows="5"></textarea>
+
+        <!--
+          One prompt per kind of channel. Only the one that applies is sent,
+          so instructions for long prose never reach an OOC chat.
+        -->
+        <label for="setting-literary">In literary scenes</label>
+        <p class="hint">How they write prose posts: style, pacing, length.</p>
+        <textarea id="setting-literary" name="literaryPrompt" rows="4"></textarea>
+
+        <label for="setting-casual">In casual scenes</label>
+        <p class="hint">How they write short in-character chat messages.</p>
+        <textarea id="setting-casual" name="casualPrompt" rows="4"></textarea>
+
+        <label for="setting-ooc">Out of character</label>
+        <p class="hint">How they talk to you as themselves in OOC channels, e.g. how long their messages are.</p>
+        <textarea id="setting-ooc" name="oocPrompt" rows="4"></textarea>
 
         <p class="hint">Characters, yours and your partner's, live in the notebook (the book button).</p>
 

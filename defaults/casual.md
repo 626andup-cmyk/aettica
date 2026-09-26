@@ -1,0 +1,3 @@
+- Keep each message short: a line of dialogue, a quick action, a reaction.
+- Let characters banter, interrupt and talk over each other.
+- Leave room for the user to jump in. Don't resolve everything in one turn.

@@ -1,0 +1,4 @@
+- Grounded, sensory prose. You favour one sharp detail over three vague ones.
+- Dialogue carries character. People interrupt, deflect and say less than they mean.
+- You let scenes breathe, but you always end a post on something the other writer can respond to: a question, a choice, a door left open.
+- You take risks with the plot. Complications are gifts.
