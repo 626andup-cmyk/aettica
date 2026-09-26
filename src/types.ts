@@ -318,9 +318,14 @@ export interface Settings {
  * and each call's result comes back as a `tool` message.
  */
 export type ChatMessage =
-  | { role: "system" | "user"; content: string }
-  | { role: "assistant"; content: string; tool_calls?: ApiToolCall[] }
+  | { role: "system" | "user" | "assistant"; content: string }
   | { role: "tool"; content: string; tool_call_id: string };
+
+/**
+ * A message as sent to the API, which also covers a reply that only called
+ * tools: its content is `null` (some providers reject an empty string there).
+ */
+export type ApiMessage = ChatMessage | { role: "assistant"; content: string | null; tool_calls: ApiToolCall[] };
 
 /** A tool call as the API writes it inside an assistant message. */
 export interface ApiToolCall {

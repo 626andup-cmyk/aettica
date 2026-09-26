@@ -39,7 +39,7 @@ An entry can leave its visibility and editing unset (`null`), meaning "whatever 
 | See | `canSee` | The owner always can. The other person can unless it's hidden from them. |
 | Edit | `editAccess` | `direct`, `suggest` or `none`. The owner edits directly (except shared lore: suggest-only for both). The other person follows the editing setting, and can't edit what they can't see. |
 | Settings | `canChangeSettings` | Only the owner. |
-| Delete | `canDelete` | Only you, and only your own entries. Your partner never deletes directly: the design has no delete tool, only proposals. |
+| Delete | `canDelete` | Only your own entries, for each of you (since stage 6; at first, only you could delete). |
 
 `src/notebook.ts` applies these to every request. Anything the rules refuse is a `PermissionError`, which the server answers with **403 Forbidden** and a message that says why ("Only this entry's owner can change its settings.").
 
@@ -61,8 +61,8 @@ When you may only suggest a change (shared lore, or an entry whose editing is su
 ### Deleting
 
 - Your own entries are deleted straight away, and unpinned from every channel.
-- Your partner's entries can't be deleted by you. Unpin them instead.
 - Deleting shared lore is a suggestion, like any other change to it.
+- Since stage 6, deleting your partner's entries is a suggestion for them to approve (at first it simply wasn't allowed), and your partner can delete their own. See [stage 6](stage-6.md).
 - Deleting a folder keeps its entries: they move out of it.
 
 ## The cast

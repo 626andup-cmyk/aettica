@@ -20,7 +20,7 @@ A small Bun server runs in Termux on the phone and holds all data; you use Aetti
 
 1. Partner identity and writing style (who is writing)
 2. How to write in this channel: the mode instructions (literary or casual), then the partner's own prompt for this kind of channel (literary, casual or OOC)
-3. The channel's cast and lore: its pinned notebook entries, and entries they link to
+3. The channel's cast and lore: its pinned notebook entries, entries they link to, notes attached to recent messages, open comment threads, and what's waiting for the partner
 4. Connection profile's model-quirk prompt
 5. Scene summaries and recent messages
 
@@ -60,7 +60,7 @@ Each RP channel has a mode. A mode change takes effect at the next scene break, 
 - **A literary post voices the characters it mentions** by full or first name. If it names none and the partner has one character in the cast, it's theirs; otherwise it's narration.
 - **In a casual scene, the prompt names your characters** so the partner doesn't write their lines.
 
-Delete is never direct for the partner; channel deletion needs your approval.
+Channel deletion is never direct for the partner: it needs your approval.
 
 ### Message comments
 
@@ -93,7 +93,7 @@ Every entry and folder has an owner, and only the owner changes its settings.
 - **Characters are played by their owner:** yours by you, your partner's by your partner, and shared ones by either of you. You can give a shared character a proxy prefix; it's yours to set without a suggestion, since it only affects your own posts.
 - **Links pull in one step.** Entries linked with `[[Name]]` (or `[[Name|shown text]]`) from a pinned entry join the prompt as "linked notes", but links from those don't, so the prompt stays small.
 - **You can make entries for your partner** (until stage 6 gives them their own tools), including handing over one of yours. Once given away, only the new owner can change its settings. Only the owner picks an entry's visibility and editing, even when making it.
-- **Deleting:** you delete your own entries. Your partner's are unpinned, not deleted, and deleting shared lore is a suggestion, like any other change to it.
+- **Deleting:** each of you deletes your own entries directly. Deleting the other person's entries, or shared lore, is a suggestion for the other one to approve. (Changed in stage 6: at first your partner couldn't delete anything.)
 - **Suggestions wait.** Suggestions are stored with who made them. Your partner reviews yours from stage 6; until then they wait, and you can withdraw them.
 - **Unpinning always works,** even for an entry hidden from you: it's your story, and you can see that something is pinned.
 - **Folders are one level deep** and belong to whoever made them. Deleting a folder keeps its entries.
@@ -108,9 +108,19 @@ Every entry and folder has an owner, and only the owner changes its settings.
 
 The partner acts through tools, and "do nothing" is always an option and usually the right one.
 
-**Tools:** create channel, rename, reorder, create/edit notebook entries (per permissions), pin/unpin, create scene break, propose shared-lore change, propose deletion, comment on a message, do nothing.
+**Tools:** create channel, rename, reorder, read/search/create/edit notebook entries (per permissions), delete their own entries, hide or reveal their own entries, review your suggestions, pin/unpin, create scene break, propose channel deletion, comment on a message (and reply to or resolve threads), do nothing.
 
-There is no delete tool. Deletion is only ever a proposal, shown to you as an approve/deny card.
+Your partner never deletes a channel, or anything of yours, directly: that's a proposal or suggestion, shown to you as an approve/deny card in the inbox.
+
+**Decided in stage 6:**
+
+- **A turn is a tool loop.** The model can call tools, see the results and call more, up to six rounds; the last round offers no tools, so it has to write. Actions take effect as they happen. `do_nothing` ends the turn without a post.
+- **Tools are only offered on tool-capable profiles**, with short rules in the prompt: use them only when they help, read an entry rather than guess, never mention tools in the writing.
+- **Messy tool calls are handled, not failed.** Broken JSON arguments are repaired or explained back to the model; tool calls written as text (Qwen/GLM, Kimi and DeepSeek formats) are found and run. Every call is logged with its arguments as written, its result and its source, and the app has a per-channel tool log and a per-profile "Test tools" button, since tool support varies so much between models.
+- **Your partner reviews your suggestions on their next turn with tools,** and can accept or reject them.
+- **Attaching notes:** a paperclip in the composer, or `[[Name]]` in a message, attaches notebook entries to it. They're sent in full while the message is in the conversation, so your partner has the details when you're talking about a character. They can also read any entry they can see with a tool.
+- **Comment replies** use the same turn with a different ending: your comment, and a request for a short out-of-character reply that goes into the thread. Your partner replies when it's their message or they're already in the thread.
+- **Actions are shown under the message** that turn wrote ("⚙ Arlo read Ilse Marrow, pinned Tamsin"), or on their own if the turn wrote nothing, and your partner's prompt lists their recent actions and how their proposals went.
 
 **Version one uses event triggers.** The partner gets a turn when:
 
@@ -143,6 +153,13 @@ The quirk prompt tames the *model* ("stop restating the scene"), never defines t
 Agentic jobs only draw from tool-capable profiles. If a writing turn lands on a profile without tools, it writes but can't act.
 
 Current models: DeepSeek 3.1 Terminus and 4 Pro 0813, GLM 4.5 Air and 5.2, MiMo 2.6, Kimi K2.5/6, MiniMax M3, Gemini 3.7 Flash.
+
+**Decided in stage 5:**
+
+- **A profile holds** model, temperature, max tokens, top-p, reasoning effort, a "can use tools" flag, model notes (layer 4), and extra request fields (JSON) for anything else. Settings that aren't set are left out of the request.
+- **Two jobs for now:** roleplay writing and OOC chat, each assigned a profile or roulette server-wide, with per-channel overrides. Summaries and wake-ups get theirs in stages 7 and 8.
+- **Regenerate rerolls; "Regenerate with…" pins a profile.** Each partner message records the profile that wrote it.
+- **The old model settings became the first profile,** and the last profile can't be deleted. Deleting one in use puts its jobs and channels back to the default.
 
 ## Summaries and the server digest
 
@@ -184,7 +201,7 @@ The whole look of Aettica is themeable, including glassy, skeuomorphic styles li
 
 Each stage adds one new concept, so there's only ever one new thing to learn. Stage 1 is essentially Tiny RP.
 
-**Progress:** stages 1 to 4 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md), [docs/stage-3.md](docs/stage-3.md), [docs/stage-3.5.md](docs/stage-3.5.md) and [docs/stage-4.md](docs/stage-4.md) for how they work.
+**Progress:** stages 1 to 6 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md), [docs/stage-3.md](docs/stage-3.md), [docs/stage-3.5.md](docs/stage-3.5.md), [docs/stage-4.md](docs/stage-4.md), [docs/stage-5.md](docs/stage-5.md) and [docs/stage-6.md](docs/stage-6.md) for how they work.
 
 | Stage | Adds | New concept learned |
 | --- | --- | --- |
@@ -212,10 +229,10 @@ These are parked until the core works.
 
 ## Open questions
 
-- [ ] How does the partner review your shared-lore proposals: immediately, or on their next wake-up? Can they reject?
+- [x] How does the partner review your shared-lore proposals: immediately, or on their next wake-up? Can they reject? On their next turn with tools, in any channel; they can accept or reject. (Stage 8's wake-ups will add a turn for it.)
 - [ ] Does the partner keep private notes about you and your friendship for OOC memory?
 - [x] Which Xoul-style fields does a notebook entry have? Flexible labelled fields, starting from a template per kind (see "Decided in stage 4").
-- [ ] Which of your nanoGPT models reliably handle tool calling?
+- [ ] Which of your nanoGPT models reliably handle tool calling? Each profile's "Test tools" button, and the tool log, will answer this.
 - [ ] How often do rolling channel summaries update (every N messages)?
 - [ ] Is there ever more than one partner per server?
 - [ ] Should a channel theme also restyle the sidebar while you're in that channel?

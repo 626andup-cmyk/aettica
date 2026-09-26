@@ -91,6 +91,20 @@
           d="M3 5.5C5.6 4.3 8.9 4.3 11 6v14c-2.1-1.6-5.4-1.6-8-.4V5.5Zm18 0v14.1c-2.6-1.2-5.9-1.2-8 .4V6c2.1-1.7 5.4-1.7 8-.5Z"
         />
       </symbol>
+      <symbol id="icon-inbox" viewBox="0 0 24 24">
+        <!-- A tray: things waiting for you to approve. -->
+        <path
+          fill="currentColor"
+          d="M5 4h14l2 9v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6l2-9Zm1.6 2-1.5 7H9a3 3 0 0 0 6 0h3.9l-1.5-7H6.6Z"
+        />
+      </symbol>
+      <symbol id="icon-clip" viewBox="0 0 24 24">
+        <!-- A paperclip: attach notes to your message. -->
+        <path
+          fill="currentColor"
+          d="M16.5 6v11.5a4.5 4.5 0 0 1-9 0V5a3 3 0 0 1 6 0v10.5a1.5 1.5 0 0 1-3 0V6H9v9.5a3 3 0 0 0 6 0V5a4.5 4.5 0 0 0-9 0v12.5a6 6 0 0 0 12 0V6h-1.5Z"
+        />
+      </symbol>
       <symbol id="icon-menu" viewBox="0 0 24 24">
         <path fill="currentColor" d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z" />
       </symbol>
@@ -101,6 +115,11 @@
       <nav class="sidebar surface" id="sidebar" aria-label="Channels">
         <header class="sidebar-header">
           <h1 class="server-name">Aettica</h1>
+          <!-- Things your partner asked you to approve. The badge counts them. -->
+          <button id="inbox-button" class="icon-button inbox-button" type="button" aria-label="Inbox" title="Inbox">
+            <svg width="20" height="20" aria-hidden="true"><use href="#icon-inbox" /></svg>
+            <span class="inbox-count" id="inbox-count" hidden></span>
+          </button>
           <button id="new-channel-button" class="icon-button" type="button" aria-label="New channel" title="New channel">
             <svg width="20" height="20" aria-hidden="true"><use href="#icon-plus" /></svg>
           </button>
@@ -196,11 +215,17 @@
               Posting as
               <select id="posting-as" class="posting-as"></select>
             </label>
+            <!-- Notebook entries attached to the message you're writing. -->
+            <div class="attach-row" id="attach-row" hidden></div>
             <textarea id="composer-input" class="composer-input" rows="1" aria-label="Your message"></textarea>
             <div class="composer-buttons">
               <!-- Roleplay channels only: end this scene and start a new one. -->
               <button id="scene-button" type="button" class="icon-button scene-button" title="New scene" aria-label="New scene">
                 <svg width="22" height="22" aria-hidden="true"><use href="#icon-scene" /></svg>
+              </button>
+              <!-- Attach notebook entries, so they're sent with your message. -->
+              <button id="attach-button" type="button" class="icon-button attach-button" title="Attach notes" aria-label="Attach notes">
+                <svg width="22" height="22" aria-hidden="true"><use href="#icon-clip" /></svg>
               </button>
               <span class="spacer"></span>
               <button id="turn-button" type="button" class="button" title="Let your partner write without a new message from you">
@@ -332,6 +357,7 @@
           <button type="button" class="button" id="channel-move-up" title="Move up in the sidebar">↑</button>
           <button type="button" class="button" id="channel-move-down" title="Move down in the sidebar">↓</button>
           <button type="button" class="button" id="preview-prompt">Preview prompt</button>
+          <button type="button" class="button" id="open-tool-log">Tool log</button>
           <span class="spacer"></span>
           <button type="button" class="button" data-close>Cancel</button>
           <button type="submit" class="button button-primary">Save</button>
@@ -609,6 +635,12 @@
           <textarea id="profile-extra" name="extraParams" rows="3" spellcheck="false" class="code-input"></textarea>
         </details>
 
+        <!-- Checks whether this profile's model can actually call tools. -->
+        <div class="tool-test-row">
+          <button type="button" class="button" id="profile-test">Test tools</button>
+          <p class="hint tool-test" id="profile-test-result" role="status"></p>
+        </div>
+
         <p class="form-error" role="alert" hidden></p>
 
         <div class="dialog-buttons">
@@ -656,6 +688,79 @@
         </div>
       </form>
     </dialog>
+
+    <!-- The inbox: your partner's proposals and suggestions, and yours waiting on them. -->
+    <dialog id="inbox-dialog" class="dialog surface inbox">
+      <h2 class="dialog-title">Inbox</h2>
+      <p class="hint">What your partner asked you to approve, and your suggestions waiting for them.</p>
+      <div id="inbox-list" class="inbox-list"></div>
+      <p class="form-error" role="alert" hidden></p>
+      <div class="dialog-buttons">
+        <span class="spacer"></span>
+        <button type="button" class="button button-primary" data-close>Done</button>
+      </div>
+    </dialog>
+
+    <!-- Every tool call in the open channel, for troubleshooting. -->
+    <dialog id="tool-log-dialog" class="dialog surface tool-log">
+      <h2 class="dialog-title">Tool log</h2>
+      <p class="hint">
+        Every tool your partner called in this channel, newest first, with the arguments exactly as the model wrote
+        them and what it was told back. "Text" means the model wrote the call into its reply instead of using the API.
+      </p>
+      <div class="dialog-buttons tool-log-actions">
+        <label class="check-inline"><input type="checkbox" id="tool-log-errors" /> Errors only</label>
+        <span class="spacer"></span>
+        <button type="button" class="button" id="tool-log-copy">Copy as text</button>
+      </div>
+      <ol id="tool-log-list" class="tool-log-list"></ol>
+      <p class="form-error" role="alert" hidden></p>
+      <div class="dialog-buttons">
+        <span class="spacer"></span>
+        <button type="button" class="button button-primary" data-close>Close</button>
+      </div>
+    </dialog>
+
+    <!-- A comment thread on a message (or a new comment). -->
+    <dialog id="thread-dialog" class="dialog surface thread">
+      <form id="thread-form" method="dialog">
+        <h2 class="dialog-title" id="thread-title">Comment</h2>
+        <select id="thread-picker" class="thread-picker" aria-label="Thread" hidden></select>
+        <blockquote class="thread-quote" id="thread-quote" hidden></blockquote>
+        <ol class="thread-comments" id="thread-comments"></ol>
+        <p class="status thread-status" id="thread-status" hidden>
+          <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span id="thread-status-text"></span>
+        </p>
+        <label for="thread-note" class="visually-hidden">Your comment</label>
+        <textarea id="thread-note" name="note" rows="3" placeholder="Out of character: the characters never see this."></textarea>
+        <p class="form-error" role="alert" hidden></p>
+        <div class="dialog-buttons">
+          <button type="button" class="button" id="thread-resolve">Resolve</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Close</button>
+          <button type="submit" class="button button-primary" id="thread-send">Comment</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Picking notebook entries to attach to your message. -->
+    <dialog id="attach-dialog" class="dialog surface">
+      <h2 class="dialog-title">Attach notes</h2>
+      <p class="hint">
+        Attached notes are sent to your partner in full with this message, and stay in their view while the message is
+        in the conversation. Writing <code>[[Name]]</code> in your message attaches that entry too.
+      </p>
+      <input id="attach-search" type="search" placeholder="Find an entry…" autocomplete="off" aria-label="Find an entry" />
+      <ul id="attach-list" class="attach-list"></ul>
+      <div class="dialog-buttons">
+        <span class="spacer"></span>
+        <button type="button" class="button button-primary" data-close>Done</button>
+      </div>
+    </dialog>
+
+    <!-- Shown next to text you select in a message: comment on it. -->
+    <button id="comment-float" type="button" class="button comment-float" hidden>💬 Comment</button>
 
     <!-- Appearance: pick the app theme, glass effects, and manage your themes. -->
     <dialog id="appearance-dialog" class="dialog surface">

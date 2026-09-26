@@ -15,7 +15,7 @@
  * This file uses the built-in `fetch`, so there is no SDK to install.
  */
 
-import type { ChatMessage, ReasoningEffort } from "./types.ts";
+import type { ApiMessage, ReasoningEffort } from "./types.ts";
 
 /** What the client needs to know to reach the API. */
 export interface ApiOptions {
@@ -43,7 +43,7 @@ export interface NativeToolCall {
 /** The parameters of one generation request. */
 export interface CompletionRequest {
   model: string;
-  messages: ChatMessage[];
+  messages: ApiMessage[];
   temperature: number;
   maxTokens: number;
   /** Nucleus sampling. Left out of the request when not set. */

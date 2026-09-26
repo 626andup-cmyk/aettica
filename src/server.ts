@@ -13,29 +13,48 @@
  *
  * API overview (all request and response bodies are JSON):
  *
- *   GET    /api/state                          Settings, channels, where the partner is writing, and the app version
+ *   GET    /api/state                          Settings, channels, profiles, roulettes, proposals waiting,
+ *                                              where the partner is writing, and the app version
  *   PUT    /api/settings                       Change settings (any subset of fields)
  *   GET    /api/models                         List models available on nanoGPT
  *
  *   POST   /api/channels                       Create a channel
- *   PATCH  /api/channels/:id                   Rename a channel, or change its style or theme
+ *   PATCH  /api/channels/:id                   Rename a channel, or change its style, theme or profile
  *   DELETE /api/channels/:id                   Delete a channel and all its messages
  *   PUT    /api/channels/order                 Put the channels in a new order
  *
- *   GET    /api/channels/:id/messages          Every message in a channel
- *   POST   /api/channels/:id/messages          Send your message, then the partner replies
+ *   GET    /api/channels/:id/messages          Every message in a channel, with its tool calls and comment threads
+ *   POST   /api/channels/:id/messages          Send your message (with notes attached), then the partner replies
  *                                              (or add a scene break, if the message is `=====`)
  *   POST   /api/channels/:id/scene-breaks      Add a scene break
  *   DELETE /api/channels/:id/messages          Delete every message in a channel
  *   POST   /api/channels/:id/turn              Partner takes a turn without a new message from you
- *   POST   /api/channels/:id/regenerate        Replace the partner's last reply with a new one
+ *   POST   /api/channels/:id/regenerate        Replace the partner's last reply with a new one (optionally
+ *                                              with a given profile)
  *   POST   /api/channels/:id/cancel            Stop the partner's turn in progress (the Stop button)
  *   GET    /api/channels/:id/prompt            The exact prompt stack the next turn would send
+ *   GET    /api/channels/:id/tool-log          Every tool call in a channel, for troubleshooting
  *   PUT    /api/channels/:id/cast/:entryId     Pin a notebook entry to a channel (add it to the cast)
  *   DELETE /api/channels/:id/cast/:entryId     Unpin it
  *
  *   PATCH  /api/messages/:id                   Edit a message's text
  *   DELETE /api/messages/:id                   Delete one message
+ *   POST   /api/messages/:id/comments          Comment on a message (your partner replies if it's theirs)
+ *   POST   /api/comments/:id/replies           Reply in a comment thread
+ *   POST   /api/comments/:id/resolve           Resolve or reopen a thread
+ *   DELETE /api/comments/:id                   Delete one of your comments
+ *
+ *   GET    /api/proposals                      Your partner's proposals waiting for you
+ *   POST   /api/proposals/:id/:action          approve or deny one
+ *
+ *   GET    /api/profiles                       Connection profiles and roulettes
+ *   POST   /api/profiles                       Make a profile
+ *   PATCH  /api/profiles/:id                   Change a profile
+ *   DELETE /api/profiles/:id                   Delete a profile
+ *   POST   /api/profiles/:id/test              Check whether its model can call tools
+ *   POST   /api/roulettes                      Make a roulette
+ *   PATCH  /api/roulettes/:id                  Change a roulette
+ *   DELETE /api/roulettes/:id                  Delete a roulette
  *
  *   GET    /api/notebook                       Folders, entries and suggestions you can see, and field templates
  *   POST   /api/notebook/entries               Make an entry (a character or lore)
@@ -48,8 +67,8 @@
  *   POST   /api/notebook/suggestions/:id/:action  accept, reject or withdraw a suggestion
  *
  * Every channel in a response comes with its `cast`: the entries pinned to
- * it, as you see them (see `ChannelView`). The notebook acts as you
- * ("user"); your partner gets tools for it in stage 6.
+ * it, as you see them (see `ChannelView`). The notebook routes act as you
+ * ("user"); your partner acts through tools (src/tools.ts).
  *
  *   GET    /api/themes                         Every theme, for the theme picker
  *   POST   /api/themes                         Make a new theme, copying another
@@ -609,7 +628,10 @@ export function createApp(config: Config): App {
         json({
           folders: store.notebook.listFolders("user"),
           entries: store.notebook.listEntries("user"),
-          suggestions: store.notebook.listSuggestions("user"),
+          // Each with who reviews it: you, or your partner (through their tools).
+          suggestions: store.notebook
+            .listSuggestions("user")
+            .map((suggestion) => ({ ...suggestion, reviewer: store.notebook.reviewerOf(suggestion) })),
           templates: ENTRY_TEMPLATES,
         }),
     },

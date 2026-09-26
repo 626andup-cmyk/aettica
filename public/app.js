@@ -50,6 +50,20 @@ const state = {
   /** The profile or roulette open in its editor (null for a new one). */
   editingProfile: null,
   editingRoulette: null,
+  /** The open channel's tool calls (your partner's actions), oldest first. */
+  toolCalls: [],
+  /** The open channel's comment threads: {id, messageId, quote, resolved, comments}. */
+  threads: [],
+  /** Your partner's proposals waiting for you (e.g. deleting a channel). */
+  proposals: [],
+  /** The full tool log of the open channel, while the tool log is open. */
+  toolLog: [],
+  /** Turn ids whose action details are expanded under their messages. */
+  openActivity: new Set(),
+  /** Notebook entries attached to the message you're writing, by channel id: a Set of entry ids. */
+  attachments: new Map(),
+  /** The comment thread open in the thread dialog, or a new comment: {messageId, quote}. */
+  thread: null,
   /** Messages in the open channel: {id, channelId, author, content, characters, createdAt, editedAt?, model?}. */
   messages: [],
   /** Ids of channels where the partner is writing right now. */
@@ -148,6 +162,7 @@ async function loadState() {
   state.channels = data.channels;
   state.profiles = data.profiles;
   state.roulettes = data.roulettes;
+  state.proposals = data.proposals;
   state.busy = new Set(data.busyChannels);
   state.appVersion ??= data.appVersion;
   checkForUpdate(data.appVersion);
@@ -204,6 +219,8 @@ async function openChannel(channelId) {
   state.channelId = channelId;
   state.editingId = null;
   state.messages = [];
+  state.toolCalls = [];
+  state.threads = [];
   hideError();
 
   // Put the channel in the address bar without adding a history entry for
@@ -214,10 +231,12 @@ async function openChannel(channelId) {
 
   if (channelId) {
     try {
-      const { messages } = await api("GET", channelPath("messages", channelId));
+      const { messages, toolCalls, threads } = await api("GET", channelPath("messages", channelId));
       // Ignore the answer if you switched again while it was loading.
       if (state.channelId !== channelId) return;
       state.messages = messages;
+      state.toolCalls = toolCalls;
+      state.threads = threads;
     } catch (error) {
       showError(`Couldn't load this channel: ${error.message}`, () => openChannel(channelId));
     }
@@ -488,6 +507,9 @@ async function sendMessage() {
   }
 
   const postingAs = channel.kind === "rp" && channel.mode === "casual" ? state.postingAs.get(channelId) || null : null;
+  // Notes attached with the paperclip go with this message, then are cleared.
+  const attach = [...(state.attachments.get(channelId) ?? [])];
+  state.attachments.delete(channelId);
   const sentAt = new Date();
   const placeholder = {
     id: "pending",
@@ -497,6 +519,7 @@ async function sendMessage() {
     author: "user",
     content,
     characters: postingAs ? [postingAs] : [],
+    attachments: attach,
     createdAt: sentAt.toISOString(),
   };
   state.messages.push(placeholder);
@@ -522,7 +545,7 @@ async function sendMessage() {
     channelId,
     async (stillMine) => {
       try {
-        const data = await api("POST", channelPath("messages", channelId), { content, postingAs });
+        const data = await api("POST", channelPath("messages", channelId), { content, postingAs, attach });
         if (!stillMine()) return; // abandoned; the channel was already reloaded
         if (state.channelId !== channelId) return; // you've moved on; it'll load when you return
         // Posting as one of your characters adds them to the cast.
@@ -530,7 +553,7 @@ async function sendMessage() {
         state.messages = state.messages.filter((m) => m !== placeholder);
         state.messages.push(...data.userMessages);
         if (data.partnerMessages) {
-          state.messages.push(...data.partnerMessages);
+          acceptTurn(data);
         } else if (data.error) {
           // Your message is saved but the reply failed. "Try again" asks the
           // partner for a turn, which answers the message you already sent.
@@ -543,6 +566,7 @@ async function sendMessage() {
         // Nothing was saved (e.g. the server is down), so put your text back
         // in the box; "Try again" simply sends it again.
         state.messages = state.messages.filter((m) => m !== placeholder);
+        state.attachments.set(channelId, new Set(attach));
         if (state.channelId === channelId) {
           els.input.value = content;
           autoGrow();
@@ -558,7 +582,7 @@ async function sendMessage() {
 
 /** Let your partner write without a new message from you. */
 async function partnerTurn() {
-  await runTurn("turn", (data) => state.messages.push(...data.partnerMessages), partnerTurn);
+  await runTurn("turn", acceptTurn, partnerTurn);
 }
 
 /**
@@ -574,7 +598,7 @@ async function regenerate(profileId) {
     (data) => {
       const replaced = new Set(data.replacedIds);
       state.messages = state.messages.filter((m) => !replaced.has(m.id));
-      state.messages.push(...data.partnerMessages);
+      acceptTurn(data);
     },
     () => regenerate(profileId),
     profileId ? { profileId } : {},
@@ -616,6 +640,37 @@ async function renameSceneBreak(sceneBreak) {
   } catch (error) {
     showError(error.message, null);
   }
+}
+
+/**
+ * Take in a partner turn's result: its messages, the tools it called, and
+ * any change those made to the channels. If it acted, the notebook and
+ * inbox may have changed too, so they're reloaded.
+ */
+function acceptTurn(data) {
+  state.messages.push(...data.partnerMessages);
+  state.toolCalls.push(...(data.toolCalls ?? []));
+  if (data.channels) state.channels = data.channels;
+  const skippedNotice = `${state.settings.partnerName} chose not to reply this time.`;
+  if (data.skipped && data.partnerMessages.length === 0) {
+    showNotice(skippedNotice);
+  } else if ($("notice-text").textContent === skippedNotice) {
+    $("notice").hidden = true;
+  }
+  if (data.toolCalls?.length) {
+    refreshNotebook().catch(() => {});
+    // Your partner may have commented on messages.
+    if (data.toolCalls.some((c) => c.name.includes("comment"))) refreshThreads().catch(() => {});
+  }
+}
+
+/** Reload the open channel's comment threads. */
+async function refreshThreads() {
+  const channelId = state.channelId;
+  const { threads } = await api("GET", channelPath("messages", channelId));
+  if (state.channelId !== channelId) return;
+  state.threads = threads;
+  renderMessages();
 }
 
 /** Replace a channel in `state.channels` with a fresh copy from the server. */
@@ -677,6 +732,7 @@ function renderAll() {
   renderChannelHeader();
   renderMessages();
   renderComposer();
+  renderInboxBadge();
 }
 
 /** The channel list and the partner card at the bottom of the sidebar. */
@@ -796,7 +852,13 @@ function renderMessages() {
     return;
   }
 
-  if (state.messages.length === 0) {
+  // Tool calls grouped by turn. Turns that wrote messages show their actions
+  // under them; turns that only acted are shown on their own, in time order.
+  const turns = toolCallsByTurn();
+  const turnsWithMessages = new Set(state.messages.map((m) => m.turnId).filter(Boolean));
+  const loose = [...turns].filter(([turnId]) => !turnsWithMessages.has(turnId));
+
+  if (state.messages.length === 0 && loose.length === 0) {
     els.messages.append(
       emptyNote(
         channel.kind === "ooc"
@@ -810,10 +872,16 @@ function renderMessages() {
   // The last partner turn can be regenerated. In casual mode that's every
   // bubble of the last reply; the button goes on the last one.
   const last = state.messages.at(-1);
-  const canRegenerate = last.kind === "post" && last.author === "partner";
+  const canRegenerate = last?.kind === "post" && last.author === "partner";
 
   let previous = null;
-  for (const message of state.messages) {
+  state.messages.forEach((message, index) => {
+    // Actions from turns that wrote nothing, before this message.
+    while (loose.length && loose[0][1][0].createdAt <= message.createdAt) {
+      const [turnId, calls] = loose.shift();
+      els.messages.append(renderActivity(turnId, calls));
+      previous = null;
+    }
     const element =
       message.kind === "scene_break"
         ? renderSceneBreak(message)
@@ -823,7 +891,13 @@ function renderMessages() {
           });
     els.messages.append(element);
     previous = message;
-  }
+    // After a turn's last message, the actions it took.
+    const next = state.messages[index + 1];
+    if (message.turnId && turns.has(message.turnId) && next?.turnId !== message.turnId) {
+      els.messages.append(renderActivity(message.turnId, turns.get(message.turnId)));
+    }
+  });
+  for (const [turnId, calls] of loose) els.messages.append(renderActivity(turnId, calls));
 }
 
 /**
@@ -915,6 +989,7 @@ function renderMessage(message, { continued = false, regenerate: showRegenerate 
   root.className = ["message", pending && "pending", continued && "continued"].filter(Boolean).join(" ");
   root.dataset.author = message.author;
   root.dataset.mode = mode;
+  root.dataset.messageId = message.id;
   // Tapping a casual bubble shows its Edit/Delete buttons (see style.css).
   if (mode === "casual") root.addEventListener("click", () => root.classList.toggle("selected"));
 
@@ -968,10 +1043,25 @@ function renderMessage(message, { continued = false, regenerate: showRegenerate 
   const content = document.createElement("div");
   content.className = "message-content";
   content.innerHTML = formatText(message.content);
+  const threads = threadsOn(message.id);
+  highlightThreads(content, threads);
   root.append(content);
+  if (message.attachments?.length) root.append(renderAttachments(message));
 
   // A post that's still being sent has no actions yet.
   if (pending) return root;
+
+  // Comments on this message: a chip that opens them (open ones counted).
+  if (threads.length) {
+    const open = threads.filter((t) => !t.resolved).length;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "message-comments";
+    chip.textContent = open ? `💬 ${open}` : "💬 ✓";
+    chip.title = open ? `${open} open comment thread${open === 1 ? "" : "s"}` : "Resolved comments";
+    chip.addEventListener("click", () => openThread((threads.find((t) => !t.resolved) ?? threads[0]).id));
+    root.append(chip);
+  }
 
   const busy = state.busy.has(state.channelId);
   const actions = document.createElement("div");
@@ -983,6 +1073,7 @@ function renderMessage(message, { continued = false, regenerate: showRegenerate 
       renderMessages();
     }),
     actionButton("Delete", () => deleteMessage(message.id), busy),
+    actionButton("Comment", () => newComment(message.id)),
   );
   if (showRegenerate) {
     actions.append(actionButton("Regenerate", () => regenerate(), busy));
@@ -1047,6 +1138,7 @@ function renderComposer() {
 
   const casual = channel.kind === "rp" && channel.mode === "casual";
   $("scene-button").hidden = channel.kind !== "rp";
+  renderAttachRow();
   $("scene-button").disabled = busy;
   renderPostingAs(casual);
 
@@ -1689,12 +1781,14 @@ async function loadNotebook() {
  * redraw whatever's open. Called after any change to the notebook.
  */
 async function refreshNotebook() {
-  const [notebook, { channels }] = await Promise.all([api("GET", "/api/notebook"), api("GET", "/api/state")]);
+  const [notebook, { channels, proposals }] = await Promise.all([api("GET", "/api/notebook"), api("GET", "/api/state")]);
   state.notebook = notebook;
   state.channels = channels;
+  state.proposals = proposals;
   renderAll();
   if ($("notebook-dialog").open) renderNotebook();
   if (els.channelDialog.open) renderCastEditor();
+  if ($("inbox-dialog").open) renderInbox();
 }
 
 /** An entry by id, if you can see it. */
@@ -1835,76 +1929,23 @@ function renderNotebook() {
 }
 
 /**
- * Suggested changes still waiting: yours (waiting for your partner, who
- * reviews them from stage 6) and theirs (waiting for you).
+ * Suggested changes still waiting are in the inbox; the notebook just says
+ * how many, with a button to open it.
  */
 function renderSuggestions() {
   const box = $("suggestion-list");
-  const suggestions = state.notebook.suggestions;
-  box.hidden = suggestions.length === 0;
+  const count = state.notebook.suggestions.length;
+  box.hidden = count === 0;
   if (box.hidden) return;
-
-  const partner = state.settings.partnerName;
-  const title = document.createElement("h3");
-  title.className = "suggestion-title";
-  title.textContent = "Suggestions";
-  box.replaceChildren(
-    title,
-    ...suggestions.map((suggestion) => {
-      const entry = findEntry(suggestion.entryId);
-      const row = document.createElement("div");
-      row.className = "suggestion";
-      row.dataset.author = suggestion.author;
-
-      const text = document.createElement("span");
-      text.className = "suggestion-text";
-      const who = suggestion.author === "user" ? "You suggested" : `${partner} suggested`;
-      text.textContent = `${who} ${describeChange(suggestion.change)} for ${entry?.name ?? "an entry"}.`;
-      row.append(text);
-
-      // Who reviews it: the owner, or for shared lore, whoever didn't suggest it.
-      const reviewer = entry?.owner === "joint" ? (suggestion.author === "user" ? "partner" : "user") : entry?.owner;
-      if (reviewer === "user") {
-        row.append(
-          suggestionButton("Accept", suggestion.id, "accept"),
-          suggestionButton("Reject", suggestion.id, "reject"),
-        );
-      } else {
-        const waiting = document.createElement("span");
-        waiting.className = "hint";
-        waiting.textContent = `Waiting for ${partner}.`;
-        row.append(waiting);
-      }
-      if (suggestion.author === "user") row.append(suggestionButton("Withdraw", suggestion.id, "withdraw"));
-      return row;
-    }),
-  );
-}
-
-/** "renaming it to X", "changes to its fields", ... for the suggestion list. */
-function describeChange(change) {
-  if (change.delete) return "deleting it";
-  const parts = [];
-  if (change.name !== undefined) parts.push(`renaming it to "${change.name}"`);
-  if (change.fields !== undefined) parts.push("changes to its fields");
-  if (change.systemPrompt !== undefined) parts.push("changes to its notes");
-  return parts.join(" and ") || "a change";
-}
-
-function suggestionButton(label, id, action) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "link-button";
-  button.textContent = label;
-  button.addEventListener("click", async () => {
-    try {
-      await api("POST", `/api/notebook/suggestions/${encodeURIComponent(id)}/${action}`, {});
-      await refreshNotebook();
-    } catch (error) {
-      showFormError($("notebook-dialog"), error.message);
-    }
-  });
-  return button;
+  const text = document.createElement("span");
+  text.className = "suggestion-text";
+  text.textContent = `${count} suggested change${count === 1 ? " is" : "s are"} waiting.`;
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "link-button inline-link";
+  open.textContent = "Open the inbox";
+  open.addEventListener("click", openInbox);
+  box.replaceChildren(text, open);
 }
 
 // ------------------------------------------------------ the entry editor
@@ -1960,7 +2001,8 @@ function openEntry(entry, pinTo = null) {
   save.textContent = isNew ? "Create" : entry.access.edit === "suggest" && !entry.access.settings ? "Suggest changes" : "Save";
 
   const del = $("entry-delete");
-  del.hidden = isNew || !(entry.access.delete || entry.access.edit === "suggest");
+  // Your own entries are deleted; deleting anything else is a suggestion.
+  del.hidden = isNew;
   del.textContent = entry.access.delete ? "Delete" : "Suggest deleting";
 
   renderEntryPin();
@@ -2496,6 +2538,7 @@ function openProfile(profile) {
   f.extraParams.value = profile?.extraParams ?? "";
   form.querySelector(".advanced").open = Boolean(profile?.extraParams);
   $("profile-delete").hidden = !profile;
+  renderToolTest(profile);
   $("profile-dialog").showModal();
 }
 
@@ -2665,6 +2708,710 @@ function channelAssignment(channel) {
   return channel.kind === "ooc" ? state.settings.oocAssignment : state.settings.rpAssignment;
 }
 
+// ------------------------------------------------ your partner's actions
+
+/*
+ * Stage 6: your partner acts through tools. Each turn's tool calls are
+ * shown under the messages it wrote, as one line ("Arlo read Ilse Marrow,
+ * pinned Tamsin to #story") that opens into the details: every call, its
+ * arguments exactly as the model wrote them, and what it was told back.
+ * A turn that only acted, and wrote nothing, shows the line on its own.
+ */
+
+/** The open channel's tool calls, grouped by turn: Map of turnId → calls. */
+function toolCallsByTurn() {
+  const turns = new Map();
+  for (const call of state.toolCalls) {
+    if (!turns.has(call.turnId)) turns.set(call.turnId, []);
+    turns.get(call.turnId).push(call);
+  }
+  return turns;
+}
+
+/** One turn's actions: a summary line that opens into the details. */
+function renderActivity(turnId, calls) {
+  const root = document.createElement("div");
+  root.className = "activity";
+  const errors = calls.filter((c) => c.status === "error").length;
+  if (errors) root.classList.add("has-errors");
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "activity-summary";
+  const open = state.openActivity.has(turnId);
+  toggle.setAttribute("aria-expanded", String(open));
+  // Only the actions that did something, once each ("read X" twice is noise).
+  const done = [...new Set(calls.filter((c) => c.status === "ok").map((c) => c.summary))];
+  const text = done.length ? `${state.settings.partnerName} ${done.join(", ")}` : `${state.settings.partnerName} tried to act`;
+  toggle.textContent = `⚙ ${text}${errors ? ` · ${errors} error${errors === 1 ? "" : "s"}` : ""}`;
+  toggle.addEventListener("click", () => {
+    if (state.openActivity.has(turnId)) state.openActivity.delete(turnId);
+    else state.openActivity.add(turnId);
+    renderMessages();
+  });
+  root.append(toggle);
+
+  if (open) {
+    const list = document.createElement("ol");
+    list.className = "activity-details";
+    list.append(...calls.map(renderToolCall));
+    root.append(list);
+  }
+  return root;
+}
+
+/** One tool call, in full: for the activity details and the tool log. */
+function renderToolCall(call) {
+  const item = document.createElement("li");
+  item.className = "tool-call";
+  item.dataset.status = call.status;
+  item.dataset.source = call.source;
+
+  const head = document.createElement("div");
+  head.className = "tool-call-head";
+  const name = document.createElement("code");
+  name.className = "tool-call-name";
+  name.textContent = call.name;
+  head.append(name, badge(call.status === "ok" ? "ok" : "error"));
+  if (call.source === "text") head.append(badge("written as text"));
+  head.append(badge(`round ${call.round + 1}`));
+  if (call.profile) head.append(badge(call.profile));
+  const time = document.createElement("time");
+  time.className = "message-time";
+  time.dateTime = call.createdAt;
+  time.textContent = formatTime(call.createdAt);
+  head.append(time);
+
+  const summary = document.createElement("p");
+  summary.className = "tool-call-summary";
+  summary.textContent = call.summary;
+
+  const details = document.createElement("details");
+  details.className = "tool-call-raw";
+  const label = document.createElement("summary");
+  label.textContent = "Arguments and result";
+  const args = document.createElement("pre");
+  args.textContent = prettyJson(call.arguments);
+  const result = document.createElement("pre");
+  result.textContent = prettyJson(call.result);
+  details.append(label, args, result);
+
+  item.append(head, summary, details);
+  return item;
+}
+
+/** JSON text, indented if it parses, as-is if it doesn't (broken arguments stay visible). */
+function prettyJson(text) {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text || "(empty)";
+  }
+}
+
+// ---------------------------------------------------------------- tool log
+
+async function openToolLog() {
+  $("tool-log-copy").textContent = "Copy as text";
+  try {
+    const { toolCalls } = await api("GET", channelPath("tool-log"));
+    state.toolLog = toolCalls;
+    renderToolLog();
+    $("tool-log-dialog").showModal();
+  } catch (error) {
+    showFormError(els.channelForm, error.message);
+  }
+}
+
+function renderToolLog() {
+  const errorsOnly = $("tool-log-errors").checked;
+  const calls = [...state.toolLog].reverse().filter((c) => !errorsOnly || c.status === "error");
+  const list = $("tool-log-list");
+  if (calls.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "hint";
+    empty.textContent = errorsOnly ? "No errors." : `${state.settings.partnerName} hasn't used any tools here yet.`;
+    list.replaceChildren(empty);
+    return;
+  }
+  list.replaceChildren(...calls.map(renderToolCall));
+}
+
+/** Copy the tool log as plain text, e.g. to share when something goes wrong. */
+async function copyToolLog() {
+  const text = state.toolLog
+    .map((c) =>
+      [
+        `${c.createdAt}  ${c.profile ?? ""}  round ${c.round + 1}  ${c.source}  ${c.status}`,
+        `${c.name} ${c.arguments}`,
+        `-> ${c.result}`,
+      ].join("\n"),
+    )
+    .join("\n\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    $("tool-log-copy").textContent = "Copied";
+  } catch {
+    showFormError($("tool-log-dialog"), "Couldn't copy: your browser didn't allow it.");
+  }
+}
+
+// ------------------------------------------------------------- tool test
+
+/** Under "Test tools" in the profile editor: the last result, or a hint. */
+function renderToolTest(profile, result) {
+  const box = $("profile-test-result");
+  $("profile-test").disabled = !profile;
+  box.dataset.verdict = result?.verdict ?? "";
+  if (!profile) {
+    box.textContent = "Save the profile first, then test it.";
+  } else if (!result) {
+    box.textContent = "Checks whether this model can call tools, with one small request.";
+  } else {
+    const labels = { native: "✓ Works", text: "~ Works, as text", none: "✗ No tool call", broken: "✗ Broken arguments" };
+    box.textContent = `${labels[result.verdict]} (${result.seconds}s). ${result.detail}`;
+  }
+}
+
+async function testProfileTools() {
+  const profile = state.editingProfile;
+  const button = $("profile-test");
+  button.disabled = true;
+  button.textContent = "Testing…";
+  try {
+    const { test } = await api("POST", `/api/profiles/${encodeURIComponent(profile.id)}/test`, {});
+    renderToolTest(profile, test);
+  } catch (error) {
+    showFormError($("profile-form"), error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Test tools";
+  }
+}
+
+// ------------------------------------------------------------------ inbox
+
+/*
+ * The inbox gathers what's waiting on someone: your partner's proposals
+ * (deleting a channel) and suggestions (notebook changes) for you to
+ * approve, and your suggestions waiting for your partner, who reviews them
+ * with their tools on their next turn.
+ */
+
+/** Suggestions waiting for you, and proposals: what the badge counts. */
+function inboxCount() {
+  return state.proposals.length + state.notebook.suggestions.filter((s) => s.reviewer === "user").length;
+}
+
+function renderInboxBadge() {
+  const count = inboxCount();
+  const badge = $("inbox-count");
+  badge.hidden = count === 0;
+  badge.textContent = String(count);
+  $("inbox-button").title = count ? `Inbox: ${count} waiting for you` : "Inbox";
+}
+
+function openInbox() {
+  hideFormError($("inbox-dialog"));
+  renderInbox();
+  $("inbox-dialog").showModal();
+  refreshNotebook().catch((error) => showFormError($("inbox-dialog"), error.message));
+}
+
+function renderInbox() {
+  const partner = state.settings.partnerName;
+  const forYou = state.notebook.suggestions.filter((s) => s.reviewer === "user");
+  const yours = state.notebook.suggestions.filter((s) => s.author === "user" && s.reviewer !== "user");
+  const sections = [];
+
+  if (state.proposals.length) {
+    sections.push(
+      inboxSection(
+        `${partner} asks`,
+        state.proposals.map((proposal) => {
+          const card = inboxCard(`Delete #${proposal.targetName}?`, proposal.reason ? `“${proposal.reason}”` : "");
+          card.append(
+            cardButtons([
+              ["Delete it", () => resolveProposal(proposal.id, "approve"), "button-danger"],
+              ["Keep it", () => resolveProposal(proposal.id, "deny")],
+            ]),
+          );
+          return card;
+        }),
+      ),
+    );
+  }
+  if (forYou.length) {
+    sections.push(
+      inboxSection(
+        "Suggestions for you",
+        forYou.map((s) => {
+          const card = suggestionCard(s);
+          card.append(
+            cardButtons([
+              ["Accept", () => reviewSuggestion(s.id, "accept"), "button-primary"],
+              ["Reject", () => reviewSuggestion(s.id, "reject")],
+            ]),
+          );
+          return card;
+        }),
+      ),
+    );
+  }
+  if (yours.length) {
+    sections.push(
+      inboxSection(
+        `Waiting for ${partner}`,
+        yours.map((s) => {
+          const card = suggestionCard(s);
+          const note = document.createElement("p");
+          note.className = "hint";
+          note.textContent = `${partner} reviews these on their next turn with tools.`;
+          card.append(note, cardButtons([["Withdraw", () => reviewSuggestion(s.id, "withdraw")]]));
+          return card;
+        }),
+      ),
+    );
+  }
+  if (sections.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "Nothing waiting.";
+    sections.push(empty);
+  }
+  $("inbox-list").replaceChildren(...sections);
+}
+
+function inboxSection(title, cards) {
+  const section = document.createElement("section");
+  section.className = "inbox-section";
+  const heading = document.createElement("h3");
+  heading.className = "section-title";
+  heading.textContent = title;
+  section.append(heading, ...cards);
+  return section;
+}
+
+function inboxCard(title, text) {
+  const card = document.createElement("div");
+  card.className = "inbox-card";
+  const heading = document.createElement("p");
+  heading.className = "inbox-card-title";
+  heading.textContent = title;
+  card.append(heading);
+  if (text) {
+    const body = document.createElement("p");
+    body.className = "inbox-card-text";
+    body.textContent = text;
+    card.append(body);
+  }
+  return card;
+}
+
+/** Buttons for a card: [label, onClick, extra class]. */
+function cardButtons(buttons) {
+  const row = document.createElement("div");
+  row.className = "dialog-buttons inbox-card-buttons";
+  for (const [label, onClick, extra] of buttons) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `button ${extra ?? ""}`.trim();
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    row.append(button);
+  }
+  return row;
+}
+
+/**
+ * A suggestion as a before/after comparison: each changed part of the entry,
+ * old struck through, new below it.
+ */
+function suggestionCard(suggestion) {
+  const entry = findEntry(suggestion.entryId);
+  const who = suggestion.author === "user" ? "You" : state.settings.partnerName;
+  const name = entry?.name ?? "an entry";
+  const change = suggestion.change;
+  const card = inboxCard(change.delete ? `${who}: delete ${name}?` : `${who}: change ${name}`, "");
+  if (change.delete || !entry) return card;
+
+  const diff = document.createElement("dl");
+  diff.className = "suggestion-diff";
+  const row = (label, before, after) => {
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const old = document.createElement("dd");
+    old.className = "diff-before";
+    old.textContent = before || "(empty)";
+    const next = document.createElement("dd");
+    next.className = "diff-after";
+    next.textContent = after || "(removed)";
+    diff.append(term, old, next);
+  };
+  if (change.name !== undefined && change.name !== entry.name) row("Name", entry.name, change.name);
+  if (change.fields !== undefined) {
+    const before = new Map(entry.fields.map((f) => [f.label, f.value]));
+    const after = new Map(change.fields.map((f) => [f.label, f.value]));
+    for (const label of new Set([...before.keys(), ...after.keys()])) {
+      if ((before.get(label) ?? "") !== (after.get(label) ?? "")) row(label, before.get(label), after.get(label));
+    }
+  }
+  if (change.systemPrompt !== undefined && change.systemPrompt !== entry.systemPrompt) {
+    row("Notes", entry.systemPrompt, change.systemPrompt);
+  }
+  card.append(diff);
+  return card;
+}
+
+async function reviewSuggestion(id, action) {
+  try {
+    await api("POST", `/api/notebook/suggestions/${encodeURIComponent(id)}/${action}`, {});
+    await refreshNotebook();
+  } catch (error) {
+    showFormError($("inbox-dialog"), error.message);
+  }
+}
+
+async function resolveProposal(id, action) {
+  if (action === "approve" && !confirm("Delete this channel and every message in it? This can't be undone.")) return;
+  try {
+    const { proposals, channels } = await api("POST", `/api/proposals/${encodeURIComponent(id)}/${action}`, {});
+    state.proposals = proposals;
+    state.channels = channels;
+    if (!channels.some((c) => c.id === state.channelId)) await openChannel(channels[0]?.id ?? null);
+    renderAll();
+    renderInbox();
+  } catch (error) {
+    showFormError($("inbox-dialog"), error.message);
+  }
+}
+
+// --------------------------------------------------------------- comments
+
+/*
+ * Comments are out-of-character notes on a message, or on part of one, in
+ * threads. Select some text in a message and a Comment button appears; or
+ * use a message's Comment action for the whole message. Commenting on your
+ * partner's message gets a reply from them in the thread.
+ */
+
+/** The threads on one message. */
+function threadsOn(messageId) {
+  return state.threads.filter((t) => t.messageId === messageId);
+}
+
+/**
+ * Highlight each thread's quoted text inside a rendered message. Formatting
+ * like *italics* is ignored when matching, since it isn't visible.
+ */
+function highlightThreads(content, threads) {
+  for (const thread of threads) {
+    const quote = thread.quote.replace(/[*_]/g, "").trim();
+    if (!quote) continue;
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let text = "";
+    while (walker.nextNode()) {
+      nodes.push({ node: walker.currentNode, start: text.length });
+      text += walker.currentNode.nodeValue;
+    }
+    const start = text.toLowerCase().indexOf(quote.toLowerCase());
+    if (start < 0) continue;
+    const end = start + quote.length;
+    // Wrap the part of each text node that falls inside the quote.
+    for (const { node, start: nodeStart } of nodes) {
+      const nodeEnd = nodeStart + node.nodeValue.length;
+      if (nodeEnd <= start || nodeStart >= end) continue;
+      const range = document.createRange();
+      range.setStart(node, Math.max(0, start - nodeStart));
+      range.setEnd(node, Math.min(node.nodeValue.length, end - nodeStart));
+      const mark = document.createElement("mark");
+      mark.className = "comment-mark";
+      if (thread.resolved) mark.classList.add("resolved");
+      mark.dataset.thread = thread.id;
+      mark.title = "Open the comments";
+      range.surroundContents(mark);
+    }
+  }
+}
+
+/** Open a thread, or several (a picker switches between them). */
+function openThread(threadId) {
+  const thread = state.threads.find((t) => t.id === threadId);
+  if (!thread) return;
+  state.thread = thread;
+  renderThread();
+  $("thread-dialog").showModal();
+}
+
+/** Start a new comment on a message, optionally on some quoted text. */
+function newComment(messageId, quote = "") {
+  state.thread = { id: null, messageId, quote, resolved: false, comments: [] };
+  renderThread();
+  $("thread-dialog").showModal();
+  $("thread-note").focus();
+}
+
+function renderThread() {
+  const thread = state.thread;
+  const form = $("thread-form");
+  hideFormError(form);
+  $("thread-title").textContent = thread.id ? "Comments" : "New comment";
+
+  // More than one thread on this message: pick which.
+  const siblings = thread.id ? threadsOn(thread.messageId) : [];
+  const picker = $("thread-picker");
+  picker.hidden = siblings.length < 2;
+  picker.replaceChildren(
+    ...siblings.map((t) => new Option(`${t.resolved ? "✓ " : ""}${t.quote ? `“${t.quote.slice(0, 40)}”` : "Whole message"}`, t.id)),
+  );
+  if (thread.id) picker.value = thread.id;
+
+  const quote = $("thread-quote");
+  quote.hidden = !thread.quote;
+  quote.textContent = thread.quote;
+
+  const partner = state.settings.partnerName;
+  $("thread-comments").replaceChildren(
+    ...thread.comments.map((comment) => {
+      const item = document.createElement("li");
+      item.className = "thread-comment";
+      item.dataset.author = comment.author;
+      const who = document.createElement("span");
+      who.className = "thread-comment-author";
+      who.textContent = comment.author === "user" ? "You" : partner;
+      const time = document.createElement("time");
+      time.className = "message-time";
+      time.textContent = formatTime(comment.createdAt);
+      const note = document.createElement("p");
+      note.className = "thread-comment-note";
+      note.textContent = comment.note;
+      item.append(who, time, note);
+      if (comment.author === "user") {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "link-button";
+        remove.textContent = "Delete";
+        remove.addEventListener("click", () => deleteComment(comment));
+        item.append(remove);
+      }
+      return item;
+    }),
+  );
+
+  const busy = state.busy.has(state.channelId);
+  $("thread-status").hidden = !thread.replying;
+  $("thread-status-text").textContent = `${partner} is replying…`;
+  $("thread-send").textContent = thread.id ? "Reply" : "Comment";
+  $("thread-send").disabled = Boolean(thread.replying);
+  $("thread-resolve").hidden = !thread.id;
+  $("thread-resolve").textContent = thread.resolved ? "Reopen" : "Resolve";
+  $("thread-note").disabled = Boolean(thread.replying) || busy;
+  $("thread-note").placeholder = busy
+    ? `Wait for ${partner} to finish writing.`
+    : "Out of character: the characters never see this.";
+}
+
+async function sendComment(event) {
+  event.preventDefault();
+  const thread = state.thread;
+  const note = $("thread-note").value.trim();
+  if (!note) return;
+  const channelId = state.channelId;
+  // Your partner replies when it's their message, or they're in the thread.
+  const message = state.messages.find((m) => m.id === thread.messageId);
+  thread.replying = message?.author === "partner" || thread.comments.some((c) => c.author === "partner");
+  thread.comments = [...thread.comments, { author: "user", note, createdAt: new Date().toISOString() }];
+  $("thread-note").value = "";
+  renderThread();
+
+  const request = thread.id
+    ? api("POST", `/api/comments/${encodeURIComponent(thread.id)}/replies`, { note })
+    : api("POST", `/api/messages/${encodeURIComponent(thread.messageId)}/comments`, { note, quote: thread.quote });
+  const work = async () => {
+    try {
+      const data = await request;
+      acceptThread(data.thread);
+      if (data.toolCalls?.length) {
+        state.toolCalls.push(...data.toolCalls);
+        refreshNotebook().catch(() => {});
+      }
+      if (data.error) showFormError($("thread-form"), `${state.settings.partnerName} couldn't reply: ${data.error}`);
+    } catch (error) {
+      thread.replying = false;
+      showFormError($("thread-form"), error.message);
+    }
+  };
+  // While your partner replies, the channel is busy, like any turn.
+  if (thread.replying) await withBusyChannel(channelId, work);
+  else await work();
+  // The channel is free again: unlock the reply box.
+  if ($("thread-dialog").open) renderThread();
+}
+
+/** Put a thread from the server into state, and show it if it's open. */
+function acceptThread(thread) {
+  const index = state.threads.findIndex((t) => t.id === thread.id);
+  if (index >= 0) state.threads[index] = thread;
+  else state.threads.push(thread);
+  if ($("thread-dialog").open && (state.thread.id === thread.id || !state.thread.id)) {
+    state.thread = thread;
+    renderThread();
+  }
+  renderMessages();
+}
+
+async function resolveThread() {
+  const thread = state.thread;
+  try {
+    const data = await api("POST", `/api/comments/${encodeURIComponent(thread.id)}/resolve`, { resolved: !thread.resolved });
+    acceptThread(data.thread);
+  } catch (error) {
+    showFormError($("thread-form"), error.message);
+  }
+}
+
+async function deleteComment(comment) {
+  const first = comment.id === state.thread.id;
+  if (!confirm(first ? "Delete this comment and its whole thread?" : "Delete this comment?")) return;
+  try {
+    await api("DELETE", `/api/comments/${encodeURIComponent(comment.id)}`, {});
+    if (first) {
+      state.threads = state.threads.filter((t) => t.id !== comment.id);
+      $("thread-dialog").close();
+      renderMessages();
+    } else {
+      state.thread.comments = state.thread.comments.filter((c) => c.id !== comment.id);
+      acceptThread(state.thread);
+    }
+  } catch (error) {
+    showFormError($("thread-form"), error.message);
+  }
+}
+
+/**
+ * When you select text inside a message, show a Comment button just below
+ * the selection.
+ */
+function updateCommentButton() {
+  const button = $("comment-float");
+  const selection = document.getSelection();
+  const text = selection?.toString().trim() ?? "";
+  // The selection's ends can be text nodes or elements.
+  const contentOf = (node) => (node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement)?.closest(".message-content");
+  const anchor = contentOf(selection?.anchorNode);
+  const focus = contentOf(selection?.focusNode);
+  if (!text || !anchor || anchor !== focus || text.length > 1000) {
+    button.hidden = true;
+    return;
+  }
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  button.hidden = false;
+  button.style.top = `${Math.min(rect.bottom + 8, window.innerHeight - 56)}px`;
+  button.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 140))}px`;
+  button.dataset.messageId = anchor.closest(".message").dataset.messageId;
+  button.dataset.quote = text;
+}
+
+// ----------------------------------------------------------- attachments
+
+/*
+ * Attaching notes: pick notebook entries with the paperclip, and they're
+ * sent to your partner in full with your next message, and kept in their
+ * view while that message is in the conversation. `[[Name]]` in the text
+ * attaches that entry too (the server finds those).
+ */
+
+/** Entries you can attach: ones your partner can see. */
+function attachable() {
+  return state.notebook.entries.filter((e) => !(e.owner === "user" && e.settings.visibility === "hidden"));
+}
+
+function pickedAttachments() {
+  if (!state.attachments.has(state.channelId)) state.attachments.set(state.channelId, new Set());
+  return state.attachments.get(state.channelId);
+}
+
+function openAttach() {
+  $("attach-search").value = "";
+  renderAttachList();
+  $("attach-dialog").showModal();
+}
+
+function renderAttachList() {
+  const picked = pickedAttachments();
+  const query = $("attach-search").value.trim().toLowerCase();
+  const entries = attachable().filter((e) => !query || e.name.toLowerCase().includes(query));
+  $("attach-list").replaceChildren(
+    ...entries.map((entry) => {
+      const item = document.createElement("li");
+      const label = document.createElement("label");
+      label.className = "attach-option";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = picked.has(entry.id);
+      box.addEventListener("change", () => {
+        if (box.checked) picked.add(entry.id);
+        else picked.delete(entry.id);
+        renderAttachRow();
+      });
+      const name = document.createElement("span");
+      name.textContent = entry.name;
+      label.append(box, entryAvatar(entry.name, entry.kind), name, badge(ownerLabel(entry.owner)));
+      item.append(label);
+      return item;
+    }),
+  );
+  if (entries.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "hint";
+    empty.textContent = "No entries found.";
+    $("attach-list").append(empty);
+  }
+}
+
+/** The chips above the text box: what's attached to the message you're writing. */
+function renderAttachRow() {
+  const row = $("attach-row");
+  const picked = [...(state.attachments.get(state.channelId) ?? [])].map(findEntry).filter(Boolean);
+  row.hidden = picked.length === 0;
+  row.replaceChildren(
+    ...picked.map((entry) => {
+      const chip = document.createElement("span");
+      chip.className = "attach-chip";
+      chip.textContent = `📎 ${entry.name}`;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "link-button";
+      remove.textContent = "✕";
+      remove.setAttribute("aria-label", `Don't attach ${entry.name}`);
+      remove.addEventListener("click", () => {
+        pickedAttachments().delete(entry.id);
+        renderAttachRow();
+      });
+      chip.append(remove);
+      return chip;
+    }),
+  );
+}
+
+/** Under a message: the notes attached to it, each opening its entry. */
+function renderAttachments(message) {
+  const row = document.createElement("div");
+  row.className = "message-attachments";
+  for (const id of message.attachments) {
+    const entry = findEntry(id);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "attach-chip";
+    chip.textContent = `📎 ${entry?.name ?? "a note you can't see"}`;
+    chip.disabled = !entry;
+    if (entry) chip.addEventListener("click", () => openEntry(entry));
+    row.append(chip);
+  }
+  return row;
+}
+
 // ---------------------------------------------------------------- sidebar
 
 /** On phones, the sidebar slides over the channel. These open and close it. */
@@ -2810,6 +3557,31 @@ $("regenerate-form").addEventListener("submit", (event) => {
   event.preventDefault();
   $("regenerate-dialog").close();
   regenerate($("regenerate-profile").value || undefined);
+});
+
+// Stage 6: activity, tool log, inbox, comments, attachments.
+$("inbox-button").addEventListener("click", openInbox);
+$("open-tool-log").addEventListener("click", openToolLog);
+$("tool-log-errors").addEventListener("change", renderToolLog);
+$("tool-log-copy").addEventListener("click", copyToolLog);
+$("profile-test").addEventListener("click", testProfileTools);
+$("attach-button").addEventListener("click", openAttach);
+$("attach-search").addEventListener("input", renderAttachList);
+$("thread-form").addEventListener("submit", sendComment);
+$("thread-resolve").addEventListener("click", resolveThread);
+$("thread-picker").addEventListener("change", (event) => openThread(event.target.value));
+els.messages.addEventListener("click", (event) => {
+  const mark = event.target.closest(".comment-mark");
+  if (mark) openThread(mark.dataset.thread);
+});
+document.addEventListener("selectionchange", updateCommentButton);
+// Keep the selection when the button is pressed, so it's still there to read.
+$("comment-float").addEventListener("pointerdown", (event) => event.preventDefault());
+$("comment-float").addEventListener("click", (event) => {
+  const { messageId, quote } = event.currentTarget.dataset;
+  event.currentTarget.hidden = true;
+  document.getSelection()?.removeAllRanges();
+  newComment(messageId, quote);
 });
 
 $("new-channel-button").addEventListener("click", openNewChannel);

@@ -2,7 +2,7 @@
 
 Aettica gives you an AI **RP partner**, not a character: a writer with their own style who plays characters alongside you. The full vision is in [DESIGN.md](DESIGN.md).
 
-**Status: stage 4 of 8.** A Discord-style server of channels with your partner, with scenes, literary or casual styles, themes, and a shared notebook of characters and lore, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels), [stage 3](docs/stage-3.md) (scenes, modes), [stage 3.5](docs/stage-3.5.md) (themes) and [stage 4](docs/stage-4.md) (the notebook and permissions).
+**Status: stage 6 of 8.** A Discord-style server of channels with your partner, with scenes, literary or casual styles, themes, a shared notebook of characters and lore, a mix of models, and a partner who can act through tools, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels), [stage 3](docs/stage-3.md) (scenes, modes), [stage 3.5](docs/stage-3.5.md) (themes), [stage 4](docs/stage-4.md) (the notebook and permissions), [stage 5](docs/stage-5.md) (connection profiles and roulettes) and [stage 6](docs/stage-6.md) (tools, approvals, comments, and troubleshooting tool calls).
 
 ## What it can do
 
@@ -17,11 +17,16 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - **Two styles** per roleplay channel. A change of style waits for the next scene, so a scene never mixes them.
   - **Literary**: your partner writes prose posts, shown as wide blocks of text.
   - **Casual**: short in-character bubbles, one character each, like a group chat. You post as your own characters (from the notebook) with proxy tags (`k: *waves*`) or the "Posting as" menu, like Tupperbox.
-- Every message records who wrote it, which character it voices, and which model generated it.
-- Edit the **partner prompts**: who your partner is (used everywhere), and how they write in literary scenes, in casual scenes, and out of character. Each channel only gets the one for its own kind, so OOC chat stays short even if your literary style is long. Also the model, temperature, reply length, and how many recent messages the partner sees.
+- Every message records who wrote it, which character it voices, and which profile and model generated it.
+- Edit the **partner prompts**: who your partner is (used everywhere), and how they write in literary scenes, in casual scenes, and out of character. Each channel only gets the one for its own kind, so OOC chat stays short even if your literary style is long. Also how many recent messages the partner sees.
+- **Connection profiles and roulettes** (Settings → Profiles and roulettes): a profile is a model with its settings and its own "model notes"; a roulette picks one of several profiles at random each turn, by weight. Choose what writes roleplay and OOC, and override it per channel.
+- **Your partner acts**, if their profile can use tools: they read the notebook, make and edit entries, pin characters, make channels, start scenes, comment on messages, review your suggestions, or choose not to reply. What they did shows under their message. Each profile has a **Test tools** button, and each channel a **tool log**, for when a model gets it wrong.
+- **Attach notes** to a message with the paperclip, or write `[[Name]]` in it: your partner gets those entries in full.
+- **Comments**: select text in a message to comment on it; your partner replies in the thread.
+- **Inbox** (the tray at the top of the channel list): your partner's proposals and suggested changes, to approve or reject.
 - **Partner's turn**: let your partner write without a new message from you, including opening an empty channel.
 - **Stop** a reply that's taking too long. Nothing is saved, and the channel is free again.
-- **Regenerate** the partner's last reply, **edit** or **delete** any message.
+- **Regenerate** the partner's last reply (or **Regenerate with…** a particular profile), **edit** or **delete** any message.
 - **Preview prompt**: see exactly what the model receives on the next turn in a channel.
 - **Themes**: pick one in Appearance (the palette button). Classic, Frutiger Aero, Aero Glass and Liquid Glass are built in. Any channel can have its own theme, and you can copy a theme and edit its CSS and images right in the app. Glass effects can be Full, Lite (easier on the phone) or Automatic. See the [theme reference](docs/theme-reference.md).
 - Install it to your home screen as an app (PWA).
@@ -93,6 +98,10 @@ src/
   partner.ts   The one "partner takes a turn" function
   prompt.ts    Builds the prompt stack sent to the model
   posts.ts     Turns text into messages: posts, replies, scene breaks
+  tools.ts     Your partner's tools: what each does, run as your partner
+  toolcalls.ts Reading tool calls, including broken or written-as-text ones
+  profiles.ts  Connection profiles and roulettes
+  activity.ts  The tool log, comment threads, and proposals
   notebook.ts  The notebook: entries, folders, suggestions and each channel's cast
   permissions.ts  Who can see, edit and manage each notebook entry
   sheets.ts    Reads a plain-text character sheet into labelled fields

@@ -43,7 +43,7 @@ import { buildPromptStack, type PromptReview, type PromptThread } from "./prompt
 import type { Store } from "./store.ts";
 import { extractTextToolCalls, parseArguments, type ParsedCall } from "./toolcalls.ts";
 import { runTool, toolSpecs, type ToolContext, type ToolOutcome } from "./tools.ts";
-import type { ApiToolCall, Channel, ChatMessage, CommentThread, Message, Profile, ToolCallRecord } from "./types.ts";
+import type { ApiMessage, ApiToolCall, Channel, ChatMessage, CommentThread, Message, Profile, ToolCallRecord } from "./types.ts";
 
 /** The most rounds of tool calls in one turn. The last round is offered no tools, so it has to write. */
 export const MAX_ROUNDS = 6;
@@ -342,7 +342,7 @@ export class Partner {
     this.writingIn.set(channelId, controller);
     try {
       const profile = options.profileId ? this.store.profiles.get(options.profileId) : pickProfile(this.store, channel);
-      const conversation = promptForChannel(this.store, channelId, {
+      const conversation: ApiMessage[] = promptForChannel(this.store, channelId, {
         excludeIds: options.replacing,
         profile,
         replyingTo,
@@ -416,7 +416,7 @@ export class Partner {
    *          your partner chose to do nothing.
    */
   private async toolLoop(turn: {
-    conversation: ChatMessage[];
+    conversation: ApiMessage[];
     tools: ToolSpec[];
     context: ToolContext;
     profile: Profile;
@@ -459,7 +459,7 @@ export class Partner {
           type: "function",
           function: { name: c.name, arguments: c.arguments },
         }));
-        conversation.push({ role: "assistant", content: response.content, tool_calls: apiCalls });
+        conversation.push({ role: "assistant", content: response.content || null, tool_calls: apiCalls });
       } else {
         conversation.push({ role: "assistant", content: response.content });
       }

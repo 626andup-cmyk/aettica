@@ -121,6 +121,20 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.entry-links`, `.entry-links-label`, `.entry-link` | The entry's `[[links]]`. A link to a name that isn't in the notebook also has `.missing`. |
 | `.entry-settings` | The entry's settings (owner, visibility, editing, folder) |
 | `.cast-list`, `.cast-member`, `.cast-member-name`, `.cast-unpin`, `.cast-add` | The cast in channel settings. Each `.cast-member` has `data-played-by` (`user`, `partner` or `both`) and `data-kind`, and `.hidden-entry` for "??? (hidden)". |
+| `.inbox-button`, `.inbox-count` | The inbox button at the top of the channel list, and its count |
+| `.activity`, `.activity-summary`, `.activity-details` | A turn's actions under its messages. `.activity` gets `.has-errors` if a call failed. |
+| `.tool-call`, `.tool-call-head`, `.tool-call-name`, `.tool-call-summary`, `.tool-call-raw` | One tool call, in the activity details and the tool log. Has `data-status` (`ok` or `error`) and `data-source` (`native` or `text`). |
+| `.tool-log`, `.tool-log-list`, `.tool-log-actions` | The tool log dialog |
+| `.profile-list`, `.profile-row`, `.profile-row-name`, `.roulette-entries`, `.roulette-entry`, `.roulette-share` | Profiles and roulettes |
+| `.tool-test-row`, `.tool-test` | "Test tools" and its result, which has `data-verdict` (`native`, `text`, `none` or `broken`) |
+| `.inbox`, `.inbox-list`, `.inbox-section`, `.inbox-card`, `.inbox-card-title`, `.inbox-card-text`, `.inbox-card-buttons` | The inbox |
+| `.suggestion-diff`, `.diff-before`, `.diff-after` | A suggestion's before and after |
+| `.comment-mark` | Highlighted text with a comment on it (`.resolved` once resolved) |
+| `.message-comments` | The 💬 count under a message with comments |
+| `.comment-float` | The Comment button that appears when you select text in a message |
+| `.thread`, `.thread-picker`, `.thread-quote`, `.thread-comments`, `.thread-comment`, `.thread-comment-author`, `.thread-comment-note`, `.thread-status` | The comments dialog. Each `.thread-comment` has `data-author`. |
+| `.attach-row`, `.attach-chip`, `.message-attachments`, `.attach-list`, `.attach-option`, `.attach-button` | Attached notes: above the text box, under messages, and the picker |
+| `.check-option`, `.check-inline`, `.section-title`, `.advanced` | Checkboxes, section headings and "advanced" details in dialogs |
 | `.notice-banner` | Short notices at the top of the channel, e.g. about glass effects |
 
 ## Free layers for glass effects
