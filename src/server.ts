@@ -23,7 +23,8 @@
  *   DELETE /api/channels/:id                   Delete a channel and all its messages
  *   PUT    /api/channels/order                 Put the channels in a new order
  *
- *   GET    /api/channels/:id/messages          Every message in a channel, with its tool calls and comment threads
+ *   GET    /api/channels/:id/messages          Every message in a channel, with its tool calls, comment threads
+ *                                              and summaries
  *   POST   /api/channels/:id/messages          Send your message (with notes attached), then the partner replies
  *                                              (or add a scene break, if the message is `=====`)
  *   POST   /api/channels/:id/scene-breaks      Add a scene break
@@ -34,6 +35,11 @@
  *   POST   /api/channels/:id/cancel            Stop the partner's turn in progress (the Stop button)
  *   GET    /api/channels/:id/prompt            The exact prompt stack the next turn would send
  *   GET    /api/channels/:id/tool-log          Every tool call in a channel, for troubleshooting
+ *   GET    /api/channels/:id/summaries         Its summaries: scenes, the story so far, earlier in the scene, digest
+ *   PUT    /api/channels/:id/summaries         Your own words for the story so far or a scene's summary
+ *   POST   /api/channels/:id/summaries/update  Write the summaries that are due, now
+ *   POST   /api/channels/:id/summaries/rebuild Rewrite all of them from the messages
+ *   POST   /api/channels/:id/summaries/scenes/:sceneId/regenerate  Rewrite one scene's summary
  *   PUT    /api/channels/:id/cast/:entryId     Pin a notebook entry to a channel (add it to the cast)
  *   DELETE /api/channels/:id/cast/:entryId     Unpin it
  *
@@ -89,6 +95,7 @@ import { loadConfig, type Config } from "./config.ts";
 import { ApiError, CancelledError, listModels, type ApiOptions } from "./nanogpt.ts";
 import { BusyError, Partner, pickProfile, promptForChannel, testToolCalling, type TurnResult } from "./partner.ts";
 import { parseSceneBreak, postToMessages } from "./posts.ts";
+import { Summarizer } from "./summarizer.ts";
 import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
 import { ENTRY_TEMPLATES } from "./notebook.ts";
 import type { CastMember, Channel, Message } from "./types.ts";
@@ -128,6 +135,8 @@ export interface App {
   store: Store;
   partner: Partner;
   themes: ThemeLibrary;
+  /** Writes summaries in the background (stage 7). */
+  summarizer: Summarizer;
 }
 
 /**
@@ -202,6 +211,7 @@ export function createApp(config: Config): App {
     timeoutMs: config.requestTimeoutMs,
   };
   const partner = new Partner(store, api);
+  const summarizer = new Summarizer(store, api, config.summaryDelayMs);
   const version = appVersion(config.publicDir);
   const themes = new ThemeLibrary(
     config.themesDir,
@@ -300,10 +310,13 @@ export function createApp(config: Config): App {
       handler: async (request) => {
         const update = validateSettings(await readJson(request));
         ensureTheme(update.appTheme);
-        for (const assignment of [update.rpAssignment, update.oocAssignment]) {
+        for (const assignment of [update.rpAssignment, update.oocAssignment, update.summaryAssignment]) {
           if (assignment) store.profiles.checkAssignment(assignment);
         }
-        return json({ settings: store.updateSettings(update) });
+        const settings = store.updateSettings(update);
+        // Turning summaries on, or changing when they're written: catch up.
+        if (update.summaries || update.summaryEvery || update.historyLimit) summarizer.scheduleAll();
+        return json({ settings });
       },
     },
     {
@@ -363,7 +376,85 @@ export function createApp(config: Config): App {
           // Your partner's actions (shown under their messages), and comments.
           toolCalls: store.toolLog.forChannel(id!),
           threads: store.comments.forChannel(id!),
+          // Scene summaries (shown under scene breaks), the story so far, and more.
+          summaries: summarizer.view(id!),
         }),
+    },
+
+    // --------------------------------------------------------- summaries
+    {
+      method: "GET",
+      pattern: "/api/channels/:id/summaries",
+      handler: (_request, { id }) => {
+        store.getChannel(id!); // 404 for an unknown channel
+        return json({ summaries: summarizer.view(id!) });
+      },
+    },
+    {
+      // Your own words for the story so far, or a scene's summary. Empty
+      // text removes yours, and the model writes one again.
+      method: "PUT",
+      pattern: "/api/channels/:id/summaries",
+      handler: async (request, { id }) => {
+        store.getChannel(id!); // 404 for an unknown channel
+        const body = (await readJson(request)) as { kind?: unknown; sceneId?: unknown; content?: unknown } | null;
+        const content = body?.content;
+        if (typeof content !== "string" || content.length > 20_000) {
+          throw new HttpError(400, '"content" must be text of 20,000 characters at most.');
+        }
+        let throughSeq: number;
+        let sceneId = "";
+        if (body?.kind === "story") {
+          throughSeq = store.summaries.get(id!, "story")?.throughSeq ?? 0;
+        } else if (body?.kind === "scene") {
+          const breakMessage = typeof body.sceneId === "string" ? store.getMessage(body.sceneId) : null;
+          if (!breakMessage || breakMessage.kind !== "scene_break" || breakMessage.channelId !== id) {
+            throw new HttpError(400, '"sceneId" must be a scene break in this channel.');
+          }
+          sceneId = breakMessage.id;
+          throughSeq = store.summaries.withSeq(id!, [breakMessage])[0]!.seq;
+          // The story so far is rewritten with the new scene summary.
+          store.summaries.markStale(id!, "story");
+        } else {
+          throw new HttpError(400, '"kind" must be "story" or "scene".');
+        }
+        if (content.trim() === "") store.summaries.remove(id!, body.kind, sceneId);
+        else store.summaries.edit(id!, body.kind, sceneId, content.trim(), throughSeq);
+        summarizer.schedule(id!);
+        return json({ summaries: summarizer.view(id!) });
+      },
+    },
+    {
+      // "Update now": write whatever summaries are due, and wait for them.
+      method: "POST",
+      pattern: "/api/channels/:id/summaries/update",
+      handler: async (_request, { id }) => {
+        store.getChannel(id!);
+        await summarizer.catchUp(id!);
+        return json({ summaries: summarizer.view(id!) });
+      },
+    },
+    {
+      // "Rebuild": rewrite every summary from the messages, your edits included.
+      method: "POST",
+      pattern: "/api/channels/:id/summaries/rebuild",
+      handler: async (_request, { id }) => {
+        store.getChannel(id!);
+        await summarizer.rebuild(id!);
+        return json({ summaries: summarizer.view(id!) });
+      },
+    },
+    {
+      // Rewrite one scene's summary (your edit to it included).
+      method: "POST",
+      pattern: "/api/channels/:id/summaries/scenes/:sceneId/regenerate",
+      handler: async (_request, { id, sceneId }) => {
+        store.getChannel(id!);
+        store.summaries.remove(id!, "scene", sceneId!);
+        store.summaries.markStale(id!, "story");
+        await summarizer.catchUp(id!);
+        return json({ summaries: summarizer.view(id!) });
+      },
     },
     {
       method: "GET",
@@ -808,7 +899,7 @@ export function createApp(config: Config): App {
     }
   }
 
-  return { fetch, store, partner, themes };
+  return { fetch, store, partner, themes, summarizer };
 }
 
 /**
@@ -957,6 +1048,9 @@ function main(): void {
     // a slow generation. (Bun's limit is in seconds, 255 at most; 0 = never.)
     idleTimeout: 0,
   });
+
+  // Catch up on any summaries that were due when the server last stopped.
+  app.summarizer.scheduleAll(15_000);
 
   console.log(`Aettica is running at http://${server.hostname}:${server.port}`);
   console.log(`Saving your data in ${config.dataDir}`);

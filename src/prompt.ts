@@ -25,8 +25,10 @@
  *     entries you hide from your partner never appear.
  *   - **OOC channels**: layer 1 frames the partner as themselves, talking to
  *     you as a friend, and layer 3 lists the channels on the server (with
- *     who they play in each) and the notebook's entries, so they know what
- *     storylines exist. (Stage 7 adds a summary of each.)
+ *     who they play in each, and each one's digest: a line or two on where
+ *     it stands) and the notebook's entries, so they know what storylines
+ *     exist. A channel that comes up in the conversation gets its fuller
+ *     summary too.
  *
  * Layer 2 holds the fixed instructions for the current scene's mode
  * (literary or casual; none in OOC), then your partner prompt for this kind
@@ -38,6 +40,12 @@
  * the model running this turn ("don't restate the scene"), never who your
  * partner is. It changes with the profile, so a roulette can pair each
  * model with its own notes.
+ *
+ * Layer 5 is what has happened (stage 7, see src/summaries.ts): the story
+ * so far, the last scenes' summaries and what happened earlier in the
+ * current scene, at the end of the system message, then the recent
+ * messages in full. What's summarized isn't sent again, and what isn't
+ * summarized yet is always sent, so nothing falls in between.
  */
 
 import type { PromptEntry } from "./notebook.ts";
@@ -140,8 +148,19 @@ export interface PromptInput {
   channel: Channel;
   /** Every channel on the server, in sidebar order (used by OOC channels). */
   channels: Channel[];
-  /** The channel's messages, oldest first. Only the newest `historyLimit` are sent. */
+  /** The channel's messages, oldest first. Only those from `windowStart` on are sent. */
   messages: Message[];
+  /**
+   * The index in `messages` of the first one sent in full. Everything before
+   * it is covered by `memory`. Default: the newest `historyLimit`.
+   */
+  windowStart?: number;
+  /** Layer 5: summaries of what isn't sent in full. */
+  memory?: PromptMemory;
+  /** OOC channels: each other channel's digest, by channel id. */
+  digests?: Record<string, string>;
+  /** OOC channels: the fuller summary of channels that came up in the conversation. */
+  mentioned?: { name: string; summary: string }[];
   /**
    * RP channels: the notebook entries pinned to the channel, and the ones
    * they link to, as your partner may see them (see `Notebook.forPrompt`).
@@ -171,6 +190,16 @@ export interface PromptInput {
   replyingTo?: { threadId: string; quote: string; note: string; onYourMessage: boolean };
 }
 
+/** Layer 5: the summaries of what came before the recent messages. */
+export interface PromptMemory {
+  /** The story so far (RP). */
+  story?: string;
+  /** The last finished scenes' summaries, oldest first. */
+  scenes?: { heading: string; summary: string }[];
+  /** What happened earlier in the current scene (or, in OOC, the conversation). */
+  earlier?: string;
+}
+
 /** A comment thread, as your partner sees it. */
 export interface PromptThread {
   id: string;
@@ -197,6 +226,10 @@ export function buildPromptStack({
   channel,
   channels,
   messages,
+  windowStart,
+  memory,
+  digests,
+  mentioned,
   notebook,
   overview,
   modelNotes,
@@ -241,7 +274,11 @@ export function buildPromptStack({
       content: isRp ? castRules(yourCharacters, sharedCharacters, userCharacters) : null,
     },
     // Layer 3, in OOC: an overview of the server and the notebook instead.
-    { title: "Channels on your server", content: isRp ? null : describeChannels(channels, channel, overview?.castNames ?? {}) },
+    {
+      title: "Channels on your server",
+      content: isRp ? null : describeChannels(channels, channel, overview?.castNames ?? {}, digests ?? {}),
+    },
+    ...(mentioned ?? []).map((m) => ({ title: `About #${m.name}`, content: m.summary })),
     { title: "Your shared notebook", content: isRp ? null : describeNotebook(overview?.entries ?? []) },
     // Still layer 3, in both: notes attached to messages, comment threads,
     // what's waiting for your partner, and what they've done lately.
@@ -252,12 +289,20 @@ export function buildPromptStack({
     { title: "Tools", content: tools ? toolGuidance(channel.kind) : null },
     // Layer 4: the connection profile's notes on this model's habits.
     { title: "Model notes", content: modelNotes ?? null },
+    // Layer 5, first part: summaries of what came before the recent messages.
+    { title: "The story so far", content: memory?.story ?? null },
+    {
+      title: "Recent scenes",
+      content: memory?.scenes?.length ? memory.scenes.map((s) => `${s.heading}: ${s.summary}`).join("\n\n") : null,
+    },
+    { title: isRp ? "Earlier in this scene" : "Earlier in this conversation", content: memory?.earlier ?? null },
   ];
 
   const system: ChatMessage = { role: "system", content: renderLayers(layers) };
 
-  // Layer 5: the recent conversation. (Stage 7 puts scene summaries first.)
-  const history = toChatHistory(recentMessages(messages, settings.historyLimit));
+  // Layer 5, second part: the recent conversation, in full.
+  const start = windowStart ?? Math.max(0, messages.length - settings.historyLimit);
+  const history = toChatHistory(messages.slice(start));
 
   // If the conversation doesn't end on your message, add a nudge so the model
   // knows it's being asked to continue. This is what lets the partner take a
@@ -334,18 +379,26 @@ export function commentNudge(comment: NonNullable<PromptInput["replyingTo"]>): s
 /**
  * A list of every channel for the OOC prompt, like:
  *
- *   - #story: roleplay, you play Ilse Marrow
+ *   - #story: roleplay, you play Ilse Marrow. Ilse has taken Kestrel in for the night; wary, warming.
  *   - #ooc: this conversation
  *
  * @param castNames  The characters your partner plays in each channel, by id.
+ * @param digests    Each channel's digest (stage 7), by id.
  */
-export function describeChannels(channels: Channel[], current: Channel, castNames: Record<string, string[]>): string {
+export function describeChannels(
+  channels: Channel[],
+  current: Channel,
+  castNames: Record<string, string[]>,
+  digests: Record<string, string> = {},
+): string {
   return channels
     .map((c) => {
       if (c.id === current.id) return `- #${c.name}: this conversation`;
-      if (c.kind === "ooc") return `- #${c.name}: another out-of-character chat`;
+      const digest = digests[c.id]?.trim().replace(/\s*\n\s*/g, " ");
+      const about = digest ? `. ${digest}` : "";
+      if (c.kind === "ooc") return `- #${c.name}: another out-of-character chat${about}`;
       const names = castNames[c.id] ?? [];
-      return `- #${c.name}: roleplay${names.length ? `, you play ${names.join(", ")}` : ""}`;
+      return `- #${c.name}: roleplay${names.length ? `, you play ${names.join(", ")}` : ""}${about}`;
     })
     .join("\n");
 }

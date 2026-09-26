@@ -694,6 +694,63 @@ textarea {
   text-decoration: underline;
 }
 
+/*
+ * A scene's summary (stage 7), under the scene break that ended it: quiet,
+ * like a note in the margin.
+ */
+.scene-summary {
+  order: 4;
+  flex-basis: 100%;
+  max-width: var(--prose-max-width);
+  margin: 6px auto 0;
+  padding: 10px 14px;
+  border-left: 2px solid var(--scene-break-line);
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: left;
+}
+
+.scene-summary-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.scene-summary-text.empty {
+  font-style: italic;
+}
+
+.scene-summary-edit {
+  width: 100%;
+}
+
+.scene-summary-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.scene-summary-note {
+  margin-right: auto;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.scene-summary-actions button {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scene-summary-actions button:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 /* A post that's still being sent. */
 .message.pending {
   opacity: 0.6;
@@ -1012,6 +1069,33 @@ button:disabled {
   margin-top: 20px;
   color: var(--text-muted);
   font-size: 14px;
+}
+
+/* Channel settings → Memory: the channel's summaries. */
+.memory {
+  margin-top: 20px;
+}
+
+.memory > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.memory-text {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  color: var(--text-muted);
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+.memory-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .danger-buttons {

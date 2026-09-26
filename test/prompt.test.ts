@@ -31,6 +31,9 @@ const settings: Settings = {
   rpAssignment: "",
   oocAssignment: "",
   historyLimit: 40,
+  summaries: true,
+  summaryEvery: 20,
+  summaryAssignment: "",
   appTheme: "classic",
   themeOptions: {},
 };

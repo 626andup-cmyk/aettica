@@ -179,6 +179,16 @@ flowchart LR
 - **The server digest** gives each channel one or two lines: who's in it, where the story stands, the emotional temperature. OOC gets the digest, and can pull a fuller channel summary when that channel comes up.
 - Hidden-from-you details never appear in summaries you can see.
 
+**Decided in stage 7:**
+
+- **The rolling summary is per scene.** "Earlier in this scene" condenses the scene still going (in OOC, the whole conversation), and when the scene ends it becomes the start of that scene's summary. "The story so far" is folded forward from scene summaries. So each step reads only what's new, however long the story gets.
+- **Nothing falls in between.** Messages waiting to be summarized are still sent in full: a scene shows its newest `historyLimit` messages plus up to `summaryEvery` waiting ones, which are then folded in together. That's the "every N messages", a setting (`summaryEvery`, default 20).
+- **Only what's missing is summarized in the prompt**: the story so far, the last two finished scenes and "earlier in this scene" appear only when messages they cover aren't sent in full.
+- **Summaries are written only from messages**, never from the notebook, so nothing hidden from you can reach one, and every summary is yours to read, edit or have rewritten.
+- **Summaries are written in the background**, a few seconds after a channel changes, and never hold up a turn. They have their own assignment, so a cheap model can write them.
+- **OOC reads every channel's digest**, and the fuller summary of a channel that comes up in the conversation (by `#name`, or its name as a word), or that your partner looks up with `read_channel_summary`.
+- **Changes are followed**: editing or deleting a message rewrites the summaries that covered it; your own words are only replaced by "Rebuild all".
+
 ## Themes
 
 The whole look of Aettica is themeable, including glassy, skeuomorphic styles like Frutiger Aero, Aero Glass and liquid glass. You can make your own themes, and each channel can have its own.
@@ -211,7 +221,7 @@ The whole look of Aettica is themeable, including glassy, skeuomorphic styles li
 
 Each stage adds one new concept, so there's only ever one new thing to learn. Stage 1 is essentially Tiny RP.
 
-**Progress:** stages 1 to 6 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md), [docs/stage-3.md](docs/stage-3.md), [docs/stage-3.5.md](docs/stage-3.5.md), [docs/stage-4.md](docs/stage-4.md), [docs/stage-5.md](docs/stage-5.md) and [docs/stage-6.md](docs/stage-6.md) for how they work.
+**Progress:** stages 1 to 7 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md), [docs/stage-3.md](docs/stage-3.md), [docs/stage-3.5.md](docs/stage-3.5.md), [docs/stage-4.md](docs/stage-4.md), [docs/stage-5.md](docs/stage-5.md), [docs/stage-6.md](docs/stage-6.md) and [docs/stage-7.md](docs/stage-7.md) for how they work.
 
 | Stage | Adds | New concept learned |
 | --- | --- | --- |
@@ -243,7 +253,7 @@ These are parked until the core works.
 - [ ] Does the partner keep private notes about you and your friendship for OOC memory?
 - [x] Which Xoul-style fields does a notebook entry have? Flexible labelled fields, starting from a template per kind (see "Decided in stage 4").
 - [ ] Which of your nanoGPT models reliably handle tool calling? Each profile's "Test tools" button, and the tool log, will answer this.
-- [ ] How often do rolling channel summaries update (every N messages)?
+- [x] How often do rolling channel summaries update (every N messages)? Every `summaryEvery` messages beyond the recent ones (default 20), a setting. See "Decided in stage 7".
 - [ ] Is there ever more than one partner per server?
 - [ ] Should a channel theme also restyle the sidebar while you're in that channel?
 - [ ] Can the partner pick or suggest a channel's theme (for example when creating a channel)?

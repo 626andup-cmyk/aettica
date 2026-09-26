@@ -131,6 +131,8 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.suggestion-diff`, `.diff-before`, `.diff-after` | A suggestion's before and after |
 | `.comment-mark` | Highlighted text with a comment on it (`.resolved` once resolved) |
 | `.message-comments` | The 💬 count under a message with comments |
+| `.scene-summary`, `.scene-summary-text`, `.scene-summary-actions`, `.scene-summary-note`, `.scene-summary-edit` | A scene's summary, under the scene break that ended it (stage 7) |
+| `.memory`, `.memory-text`, `.memory-buttons` | Memory in channel settings: the story so far, earlier in the scene, the digest |
 | `.comment-float` | The Comment button that appears when you select text in a message |
 | `.thread`, `.thread-picker`, `.thread-quote`, `.thread-comments`, `.thread-comment`, `.thread-comment-author`, `.thread-comment-note`, `.thread-status` | The comments dialog. Each `.thread-comment` has `data-author`. |
 | `.attach-row`, `.attach-chip`, `.message-attachments`, `.attach-list`, `.attach-option`, `.attach-button` | Attached notes: above the text box, under messages, and the picker |

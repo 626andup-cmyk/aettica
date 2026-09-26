@@ -24,6 +24,7 @@ import { NotFoundError, PermissionError, ValidationError } from "./errors.ts";
 import type { EntryView } from "./notebook.ts";
 import type { ToolSpec } from "./nanogpt.ts";
 import type { Store } from "./store.ts";
+import { channelSummaryText } from "./summaries.ts";
 import type { Channel, EntryField, Owner } from "./types.ts";
 
 /** Where a tool runs: the channel of the turn, and what kind of turn. */
@@ -410,6 +411,20 @@ const TOOLS: ToolDefinition[] = [
       const title = maybe(args, "title") ?? "";
       store.addSceneBreak(channel.id, "partner", title.slice(0, 200));
       return { result: { done: true }, summary: title ? `started a new scene, "${title}"` : "started a new scene" };
+    },
+  },
+  {
+    name: "read_channel_summary",
+    description:
+      "Read what's happened in a channel so far, from its summaries: in short, the story so far, the last scene, and the scene still going. Use it when a channel comes up and you need more than its one-line overview.",
+    parameters: object({ channel: str("The channel, like #story.") }, ["channel"]),
+    run: (ctx, args) => {
+      const channel = findChannel(ctx, need(args, "channel"));
+      const summary = channelSummaryText(ctx.store, channel);
+      return {
+        result: summary ? { channel: hash(channel), summary } : { channel: hash(channel), summary: null, note: "Nothing has been summarized there yet." },
+        summary: `read the summary of ${hash(channel)}`,
+      };
     },
   },
   {
