@@ -113,6 +113,14 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.dialog`, `.dialog-title`, `.dialog-buttons`, `.hint`, `.form-error` | Dialogs and their parts |
 | `.theme-list`, `.theme-card`, `.theme-swatch`, `.theme-name`, `.theme-badge`, `.theme-description` | The theme picker in Appearance. The chosen card has `aria-checked="true"`. |
 | `.theme-editor`, `.code-input`, `.theme-files` | The theme editor |
+| `.notebook`, `.notebook-actions`, `.notebook-list`, `.notebook-folder`, `.notebook-folder-header`, `.notebook-folder-name` | The notebook dialog and its folders |
+| `.notebook-entries`, `.notebook-entry`, `.notebook-entry-name`, `.notebook-entry-badges`, `.entry-badge` | Entries in the notebook. Each `.notebook-entry` has `data-kind` (`character` or `lore`) and `data-owner` (`user`, `partner` or `joint`). |
+| `.entry-avatar` | A character's or lore's round badge, in its own colour (`--avatar-hue`). Has `data-kind`. |
+| `.suggestion-list`, `.suggestion-title`, `.suggestion`, `.suggestion-text` | Suggested changes waiting for review. Each `.suggestion` has `data-author`. |
+| `.entry-editor`, `.entry-access`, `.entry-fields`, `.entry-field`, `.entry-field-label`, `.entry-field-value`, `.entry-field-remove`, `.add-field` | The entry editor and its fields |
+| `.entry-links`, `.entry-links-label`, `.entry-link` | The entry's `[[links]]`. A link to a name that isn't in the notebook also has `.missing`. |
+| `.entry-settings` | The entry's settings (owner, visibility, editing, folder) |
+| `.cast-list`, `.cast-member`, `.cast-member-name`, `.cast-unpin`, `.cast-add` | The cast in channel settings. Each `.cast-member` has `data-played-by` and `data-kind`, and `.hidden-entry` for "??? (hidden)". |
 | `.notice-banner` | Short notices at the top of the channel, e.g. about glass effects |
 
 ## Free layers for glass effects

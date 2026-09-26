@@ -59,12 +59,35 @@ export class BusyError extends Error {
  */
 export function promptForChannel(store: Store, channelId: string, excludeIds: string[] = []): ChatMessage[] {
   const excluded = new Set(excludeIds);
+  const channel = store.getChannel(channelId);
+  const channels = store.listChannels();
   return buildPromptStack({
     settings: store.getSettings(),
-    channel: store.getChannel(channelId),
-    channels: store.listChannels(),
+    channel,
+    channels,
     messages: store.getMessages(channelId).filter((m) => !excluded.has(m.id)),
+    // Everything from the notebook is as *your partner* may see it: entries
+    // hidden from them never reach the prompt.
+    notebook: channel.kind === "rp" ? store.notebook.forPrompt(channelId) : undefined,
+    overview:
+      channel.kind === "ooc"
+        ? {
+            castNames: Object.fromEntries(channels.map((c) => [c.id, partnerCharacterNames(store, c.id)])),
+            entries: store.notebook.partnerOverview(),
+          }
+        : undefined,
   });
+}
+
+/**
+ * The characters your partner plays in a channel's cast (their own and
+ * shared ones they can see), in cast order.
+ */
+export function partnerCharacterNames(store: Store, channelId: string): string[] {
+  return store.notebook
+    .forPrompt(channelId)
+    .pinned.filter((p) => p.entry.kind === "character" && p.entry.owner !== "user")
+    .map((p) => p.entry.name);
 }
 
 export class Partner {
@@ -163,7 +186,12 @@ export class Partner {
       const current = this.store.getChannel(channelId);
       // Record the model we *asked* for rather than the one the API reports,
       // because that's the id you'd put back in settings to get it again.
-      const newMessages = replyToMessages(current, result.content, settings.model);
+      const newMessages = replyToMessages(
+        current,
+        result.content,
+        settings.model,
+        partnerCharacterNames(this.store, channelId).map((name) => ({ name })),
+      );
 
       // Swap old for new in one transaction: never both, never neither.
       return this.store.db.transaction(() => {

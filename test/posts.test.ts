@@ -5,7 +5,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { partnerAliases, splitBubbles } from "../src/bubbles.ts";
-import { parseSceneBreak, postToMessages, replyToMessages } from "../src/posts.ts";
+import { mentionedCharacters, parseSceneBreak, postToMessages, replyToMessages } from "../src/posts.ts";
 import type { Channel } from "../src/types.ts";
 
 const you = [
@@ -79,13 +79,29 @@ function channel(overrides: Partial<Channel>): Channel {
     pendingMode: null,
     theme: null,
     position: 0,
-    characterName: "Ilse Marrow",
-    characterSheet: "",
     createdAt: "",
     ...overrides,
   };
 }
-const characters = [{ name: "Kestrel", prefix: "k" }];
+const characters = [{ name: "Kestrel", proxyPrefix: "k" }];
+const ilse = [{ name: "Ilse Marrow" }];
+
+describe("mentionedCharacters", () => {
+  const cast = [{ name: "Ilse Marrow" }, { name: "Tamsin Hale" }];
+
+  test("finds characters by full or first name", () => {
+    expect(mentionedCharacters("Tamsin laughed. Ilse Marrow did not.", cast)).toEqual(["Ilse Marrow", "Tamsin Hale"]);
+  });
+
+  test("doesn't match inside other words", () => {
+    expect(mentionedCharacters("Ilsebeth waved.", cast)).toEqual([]);
+  });
+
+  test("falls back to the only character, or to nobody (narration)", () => {
+    expect(mentionedCharacters("The sea rose.", [cast[0]!])).toEqual(["Ilse Marrow"]);
+    expect(mentionedCharacters("The sea rose.", cast)).toEqual([]);
+  });
+});
 
 describe("postToMessages", () => {
   test("a literary post is one message, voicing no one", () => {
@@ -95,7 +111,7 @@ describe("postToMessages", () => {
   });
 
   test("a casual post is split into bubbles by proxy tag, using the picked character by default", () => {
-    const messages = postToMessages(channel({ mode: "casual" }), "hi\nk: *waves*", [...characters, { name: "Jun", prefix: "j" }], "Jun");
+    const messages = postToMessages(channel({ mode: "casual" }), "hi\nk: *waves*", [...characters, { name: "Jun", proxyPrefix: "j" }], "Jun");
     expect(messages.map((m) => [m.characters, m.content, m.mode])).toEqual([
       [["Jun"], "hi", "casual"],
       [["Kestrel"], "*waves*", "casual"],
@@ -108,26 +124,32 @@ describe("postToMessages", () => {
 });
 
 describe("replyToMessages", () => {
-  test("a literary reply is one post voicing the channel's character", () => {
-    expect(replyToMessages(channel({}), "Ilse: prose", "m")).toEqual([
+  test("a literary reply with one character in the cast voices them", () => {
+    expect(replyToMessages(channel({}), "Ilse: prose", "m", ilse)).toEqual([
       { channelId: "c", author: "partner", model: "m", content: "Ilse: prose", characters: ["Ilse Marrow"], mode: "literary" },
     ]);
   });
 
   test("a casual reply becomes one bubble per Name: line", () => {
-    const messages = replyToMessages(channel({ mode: "casual" }), "Ilse Marrow: Door's open.\nIlse: *nods*\nstill nodding", "m");
+    const messages = replyToMessages(channel({ mode: "casual" }), "Ilse Marrow: Door's open.\nIlse: *nods*\nstill nodding", "m", ilse);
     expect(messages.map((m) => [m.characters, m.content])).toEqual([
       [["Ilse Marrow"], "Door's open."],
       [["Ilse Marrow"], "*nods*\nstill nodding"],
     ]);
   });
 
-  test("a casual reply with no tags is one bubble for the channel's character", () => {
-    expect(replyToMessages(channel({ mode: "casual" }), "Door's open.", "m")).toHaveLength(1);
+  test("a casual reply with no tags is one bubble for the first character in the cast", () => {
+    const messages = replyToMessages(channel({ mode: "casual" }), "Door's open.", "m", [...ilse, { name: "Tamsin Hale" }]);
+    expect(messages.map((m) => m.characters)).toEqual([["Ilse Marrow"]]);
+  });
+
+  test("a casual reply can switch between cast members by first name", () => {
+    const messages = replyToMessages(channel({ mode: "casual" }), "Ilse: Hm.\nTamsin: Ha!", "m", [...ilse, { name: "Tamsin Hale" }]);
+    expect(messages.map((m) => m.characters)).toEqual([["Ilse Marrow"], ["Tamsin Hale"]]);
   });
 
   test("an OOC reply voices no one", () => {
-    expect(replyToMessages(channel({ kind: "ooc", characterName: "" }), "hey!", "m")[0]).toMatchObject({
+    expect(replyToMessages(channel({ kind: "ooc" }), "hey!", "m", ilse)[0]).toMatchObject({
       characters: [],
       mode: null,
     });

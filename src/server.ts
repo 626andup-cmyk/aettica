@@ -18,7 +18,7 @@
  *   GET    /api/models                         List models available on nanoGPT
  *
  *   POST   /api/channels                       Create a channel
- *   PATCH  /api/channels/:id                   Rename a channel or change its character
+ *   PATCH  /api/channels/:id                   Rename a channel, or change its style or theme
  *   DELETE /api/channels/:id                   Delete a channel and all its messages
  *   PUT    /api/channels/order                 Put the channels in a new order
  *
@@ -31,9 +31,25 @@
  *   POST   /api/channels/:id/regenerate        Replace the partner's last reply with a new one
  *   POST   /api/channels/:id/cancel            Stop the partner's turn in progress (the Stop button)
  *   GET    /api/channels/:id/prompt            The exact prompt stack the next turn would send
+ *   PUT    /api/channels/:id/cast/:entryId     Pin a notebook entry to a channel (add it to the cast)
+ *   DELETE /api/channels/:id/cast/:entryId     Unpin it
  *
  *   PATCH  /api/messages/:id                   Edit a message's text
  *   DELETE /api/messages/:id                   Delete one message
+ *
+ *   GET    /api/notebook                       Folders, entries and suggestions you can see, and field templates
+ *   POST   /api/notebook/entries               Make an entry (a character or lore)
+ *   PATCH  /api/notebook/entries/:id           Change an entry's contents (or suggest a change)
+ *   PUT    /api/notebook/entries/:id/settings  Change its owner, visibility, editing or folder (owner only)
+ *   DELETE /api/notebook/entries/:id           Delete an entry (or suggest deleting it)
+ *   POST   /api/notebook/folders               Make a folder
+ *   PATCH  /api/notebook/folders/:id           Rename a folder or change its settings
+ *   DELETE /api/notebook/folders/:id           Delete a folder (its entries are kept)
+ *   POST   /api/notebook/suggestions/:id/:action  accept, reject or withdraw a suggestion
+ *
+ * Every channel in a response comes with its `cast`: the entries pinned to
+ * it, as you see them (see `ChannelView`). The notebook acts as you
+ * ("user"); your partner gets tools for it in stage 6.
  *
  *   GET    /api/themes                         Every theme, for the theme picker
  *   POST   /api/themes                         Make a new theme, copying another
@@ -55,6 +71,9 @@ import { ApiError, CancelledError, listModels, type ApiOptions } from "./nanogpt
 import { BusyError, Partner, promptForChannel } from "./partner.ts";
 import { parseSceneBreak, postToMessages } from "./posts.ts";
 import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
+import { ENTRY_TEMPLATES } from "./notebook.ts";
+import type { CastMember, Channel, Message } from "./types.ts";
+import { PermissionError } from "./errors.ts";
 import {
   NotFoundError,
   Store,
@@ -63,6 +82,9 @@ import {
   validateNewChannel,
   validateSettings,
 } from "./store.ts";
+
+/** A channel as the app receives it: with its cast, as you see it. */
+export type ChannelView = Channel & { cast: CastMember[] };
 
 /** Longest message you can send, in characters. A generous guard against accidents. */
 const MAX_MESSAGE_LENGTH = 100_000;
@@ -173,6 +195,19 @@ export function createApp(config: Config): App {
     if (id && !themes.exists(id)) throw new HttpError(400, "That theme doesn't exist.");
   }
 
+  /** A channel, with its cast as you see it (hidden entries shown as "??? (hidden)"). */
+  function channelView(channel: Channel): ChannelView {
+    return { ...channel, cast: store.notebook.castFor("user", channel.id) };
+  }
+
+  function channelViews(): ChannelView[] {
+    return store.listChannels().map(channelView);
+  }
+
+  function sceneBreakResult(result: { sceneBreak: Message; channel: Channel }) {
+    return { sceneBreak: result.sceneBreak, channel: channelView(result.channel) };
+  }
+
   /** Refuse to change a channel's messages while the partner is writing there. */
   function ensureIdle(channelId: string): void {
     if (partner.isBusy(channelId)) throw new BusyError();
@@ -189,7 +224,7 @@ export function createApp(config: Config): App {
       handler: () =>
         json({
           settings: store.getSettings(),
-          channels: store.listChannels(),
+          channels: channelViews(),
           busyChannels: partner.busyChannels(),
           appVersion: version,
         }),
@@ -213,7 +248,8 @@ export function createApp(config: Config): App {
     {
       method: "POST",
       pattern: "/api/channels",
-      handler: async (request) => json({ channel: store.createChannel(validateNewChannel(await readJson(request))) }),
+      handler: async (request) =>
+        json({ channel: channelView(store.createChannel(validateNewChannel(await readJson(request)))) }),
     },
     {
       method: "PUT",
@@ -223,7 +259,8 @@ export function createApp(config: Config): App {
         if (!Array.isArray(body?.ids) || !body.ids.every((id) => typeof id === "string")) {
           throw new HttpError(400, '"ids" must be a list of channel ids.');
         }
-        return json({ channels: store.reorderChannels(body.ids) });
+        store.reorderChannels(body.ids);
+        return json({ channels: channelViews() });
       },
     },
     {
@@ -232,7 +269,7 @@ export function createApp(config: Config): App {
       handler: async (request, { id }) => {
         const update = validateChannelUpdate(await readJson(request));
         ensureTheme(update.theme);
-        return json({ channel: store.updateChannel(id!, update) });
+        return json({ channel: channelView(store.updateChannel(id!, update)) });
       },
     },
     {
@@ -267,18 +304,25 @@ export function createApp(config: Config): App {
         // `=====` (with an optional title) in an RP channel is a scene break,
         // not a post, and the partner doesn't reply to it.
         const sceneTitle = channel.kind === "rp" ? parseSceneBreak(content) : null;
-        if (sceneTitle !== null) return json(store.addSceneBreak(id!, "user", sceneTitle));
+        if (sceneTitle !== null) return json(sceneBreakResult(store.addSceneBreak(id!, "user", sceneTitle)));
 
-        const settings = store.getSettings();
-        const postingAs = readPostingAs(body, settings.userCharacters);
-        const messages = postToMessages(channel, content, settings.userCharacters, postingAs);
+        const yourCharacters = store.notebook.userCharacters();
+        const postingAs = readPostingAs(body, yourCharacters);
+        const messages = postToMessages(channel, content, yourCharacters, postingAs);
         if (messages.length === 0) throw new HttpError(400, "There's nothing to send after the character tags.");
         const userMessages = store.addTurn(messages);
+
+        // Posting as one of your characters puts them in the channel's cast,
+        // if they aren't already.
+        for (const name of new Set(userMessages.flatMap((m) => m.characters))) {
+          const entry = yourCharacters.find((c) => c.name === name);
+          if (entry) store.notebook.pin("user", id!, entry.id);
+        }
 
         // The reply is attempted separately: if it fails, your message is still
         // saved and the app offers to retry with a partner turn.
         const reply = await tryTurn(() => partner.takeTurn(id!, "user-message"));
-        return json({ userMessages, ...reply });
+        return json({ userMessages, ...reply, channel: channelView(store.getChannel(id!)) });
       },
     },
     {
@@ -307,7 +351,7 @@ export function createApp(config: Config): App {
         // Waits for a turn in progress, so the break can't land in the middle
         // of a reply.
         ensureIdle(id!);
-        return json(store.addSceneBreak(id!, "user", title));
+        return json(sceneBreakResult(store.addSceneBreak(id!, "user", title)));
       },
     },
     {
@@ -369,6 +413,94 @@ export function createApp(config: Config): App {
       },
     },
 
+    // ------------------------------------------------------ notebook & cast
+    // Everything here acts as you ("user"): the notebook checks what you're
+    // allowed to do (see src/permissions.ts).
+    {
+      method: "GET",
+      pattern: "/api/notebook",
+      handler: () =>
+        json({
+          folders: store.notebook.listFolders("user"),
+          entries: store.notebook.listEntries("user"),
+          suggestions: store.notebook.listSuggestions("user"),
+          templates: ENTRY_TEMPLATES,
+        }),
+    },
+    {
+      method: "POST",
+      pattern: "/api/notebook/entries",
+      handler: async (request) => json({ entry: store.notebook.createEntry("user", await readObject(request)) }),
+    },
+    {
+      method: "PATCH",
+      pattern: "/api/notebook/entries/:id",
+      // Returns { entry } if saved, or { suggestion } if you can only suggest changes.
+      handler: async (request, { id }) => json(store.notebook.editEntry("user", id!, await readObject(request))),
+    },
+    {
+      method: "PUT",
+      pattern: "/api/notebook/entries/:id/settings",
+      handler: async (request, { id }) =>
+        json({ entry: store.notebook.updateEntrySettings("user", id!, await readObject(request)) }),
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/notebook/entries/:id",
+      // Returns { deleted: true }, or { suggestion } for shared lore.
+      handler: (_request, { id }) => json(store.notebook.deleteEntry("user", id!)),
+    },
+    {
+      method: "POST",
+      pattern: "/api/notebook/folders",
+      handler: async (request) => json({ folder: store.notebook.createFolder("user", await readObject(request)) }),
+    },
+    {
+      method: "PATCH",
+      pattern: "/api/notebook/folders/:id",
+      handler: async (request, { id }) =>
+        json({ folder: store.notebook.updateFolder("user", id!, await readObject(request)) }),
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/notebook/folders/:id",
+      handler: (_request, { id }) => {
+        store.notebook.deleteFolder("user", id!);
+        return json({ ok: true });
+      },
+    },
+    {
+      method: "POST",
+      pattern: "/api/notebook/suggestions/:id/:action",
+      handler: (_request, { id, action }) => {
+        if (action === "withdraw") {
+          store.notebook.withdrawSuggestion("user", id!);
+          return json({ ok: true });
+        }
+        if (action !== "accept" && action !== "reject") throw new HttpError(404, "No such API route.");
+        const decision = action === "accept" ? "accepted" : "rejected";
+        return json({ suggestion: store.notebook.reviewSuggestion("user", id!, decision) });
+      },
+    },
+    {
+      method: "PUT",
+      pattern: "/api/channels/:id/cast/:entryId",
+      handler: (_request, { id, entryId }) => {
+        const channel = store.getChannel(id!);
+        store.notebook.pin("user", id!, entryId!);
+        return json({ channel: channelView(channel) });
+      },
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/channels/:id/cast/:entryId",
+      handler: (_request, { id, entryId }) => {
+        const channel = store.getChannel(id!);
+        store.notebook.unpin("user", id!, entryId!);
+        return json({ channel: channelView(channel) });
+      },
+    },
+
     // ------------------------------------------------------------ themes
     {
       method: "GET",
@@ -404,7 +536,7 @@ export function createApp(config: Config): App {
         themes.remove(id!);
         // Anything using the theme goes back to the default.
         store.forgetTheme(id!);
-        return json({ settings: store.getSettings(), channels: store.listChannels() });
+        return json({ settings: store.getSettings(), channels: channelViews() });
       },
     },
     {
@@ -456,6 +588,7 @@ export function createApp(config: Config): App {
       if (error instanceof NotFoundError) return errorResponse(404, error.message);
       if (error instanceof BusyError) return errorResponse(409, error.message);
       if (error instanceof ValidationError) return errorResponse(400, error.message);
+      if (error instanceof PermissionError) return errorResponse(403, error.message);
       // A turn you stopped isn't an error: the request that started it just
       // learns that nothing was written.
       if (error instanceof CancelledError) return json({ cancelled: true });
@@ -528,6 +661,15 @@ function readPostingAs(body: unknown, characters: { name: string }[]): string | 
     throw new HttpError(400, `"postingAs" must be one of your characters.`);
   }
   return value;
+}
+
+/** Read a JSON body that must be an object. */
+async function readObject(request: Request): Promise<Record<string, unknown>> {
+  const body = await readJson(request);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new HttpError(400, "The request body must be a JSON object.");
+  }
+  return body as Record<string, unknown>;
 }
 
 /** Read a required, non-empty text field from a JSON body. */

@@ -21,6 +21,7 @@
  */
 
 import { Database } from "bun:sqlite";
+import { parseSheet } from "./sheets.ts";
 
 /**
  * Every change ever made to the database layout, oldest first.
@@ -33,8 +34,13 @@ import { Database } from "bun:sqlite";
  *
  * Never edit a migration once it has been released: databases that already
  * ran it won't run it again. Add a new one to the end instead.
+ *
+ * Most steps are SQL. A step can also be a function, for moving data around
+ * in ways that are easier to write in TypeScript (see step 4).
  */
-export const MIGRATIONS: string[] = [
+export type Migration = string | ((db: Database) => void);
+
+export const MIGRATIONS: Migration[] = [
   // ---------------------------------------------------------------- 1
   // Stage 2: settings, channels, messages, and the characters each message
   // voices.
@@ -125,6 +131,116 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE channels ADD COLUMN theme TEXT;
   `,
+
+  // ---------------------------------------------------------------- 4
+  // Stage 4: the notebook, and the cast of each channel.
+  (db) => {
+    db.exec(`
+    -- Folders group entries, and pass their visibility and editing settings
+    -- down to them.
+    CREATE TABLE notebook_folders (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      owner      TEXT NOT NULL CHECK (owner IN ('user', 'partner', 'joint')),
+      visibility TEXT NOT NULL DEFAULT 'visible' CHECK (visibility IN ('visible', 'hidden')),
+      editing    TEXT NOT NULL DEFAULT 'open' CHECK (editing IN ('open', 'suggest', 'locked')),
+      position   INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE notebook_entries (
+      id            TEXT PRIMARY KEY,
+      kind          TEXT NOT NULL CHECK (kind IN ('character', 'lore')),
+      name          TEXT NOT NULL,
+      -- The labelled fields, as a JSON list of {label, value}.
+      fields        TEXT NOT NULL DEFAULT '[]',
+      system_prompt TEXT NOT NULL DEFAULT '',
+      proxy_prefix  TEXT,
+      -- Deleting a folder moves its entries out of it rather than deleting them.
+      folder_id     TEXT REFERENCES notebook_folders (id) ON DELETE SET NULL,
+      owner         TEXT NOT NULL CHECK (owner IN ('user', 'partner', 'joint')),
+      -- NULL means "use the folder's setting".
+      visibility    TEXT CHECK (visibility IN ('visible', 'hidden')),
+      editing       TEXT CHECK (editing IN ('open', 'suggest', 'locked')),
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
+
+    -- Which entries are pinned to which channels: the channel's cast (and
+    -- its lore). A many-to-many relationship: an entry can be pinned to many
+    -- channels, and a channel can have many entries pinned.
+    CREATE TABLE channel_cast (
+      channel_id TEXT NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+      entry_id   TEXT NOT NULL REFERENCES notebook_entries (id) ON DELETE CASCADE,
+      position   INTEGER NOT NULL,
+      PRIMARY KEY (channel_id, entry_id)
+    );
+
+    -- Suggested changes to entries someone can't edit directly.
+    CREATE TABLE notebook_suggestions (
+      id          TEXT PRIMARY KEY,
+      entry_id    TEXT NOT NULL REFERENCES notebook_entries (id) ON DELETE CASCADE,
+      author      TEXT NOT NULL CHECK (author IN ('user', 'partner')),
+      -- What would change, as JSON (see SuggestedChange in src/types.ts).
+      change      TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'accepted', 'rejected', 'withdrawn')),
+      created_at  TEXT NOT NULL,
+      resolved_at TEXT
+    );
+    `);
+
+    const now = new Date().toISOString();
+    const insertEntry = db.query(
+      `INSERT INTO notebook_entries (id, kind, name, fields, proxy_prefix, owner, created_at, updated_at)
+       VALUES ($id, 'character', $name, $fields, $prefix, $owner, $now, $now)`,
+    );
+    const pin = db.query(
+      "INSERT OR IGNORE INTO channel_cast (channel_id, entry_id, position) VALUES ($channel, $entry, $position)",
+    );
+
+    // Each RP channel's character becomes an entry of your partner's, pinned
+    // to that channel. Identical characters in several channels become one
+    // entry pinned to each.
+    const rpChannels = db
+      .query("SELECT id, name, character_name, character_sheet FROM channels WHERE kind = 'rp' ORDER BY position")
+      .all() as { id: string; name: string; character_name: string; character_sheet: string }[];
+    const made = new Map<string, string>(); // name + sheet -> entry id
+    for (const channel of rpChannels) {
+      if (!channel.character_name.trim() && !channel.character_sheet.trim()) continue;
+      const key = `${channel.character_name}\n${channel.character_sheet}`;
+      let entryId = made.get(key);
+      if (!entryId) {
+        const sheet = parseSheet(channel.character_sheet);
+        entryId = crypto.randomUUID();
+        insertEntry.run({
+          id: entryId,
+          name: channel.character_name.trim() || sheet.name || `${channel.name} character`,
+          fields: JSON.stringify(sheet.fields),
+          prefix: null,
+          owner: "partner",
+          now,
+        });
+        made.set(key, entryId);
+      }
+      pin.run({ channel: channel.id, entry: entryId, position: 0 });
+    }
+
+    // Your casual characters (a list in settings until now) become entries
+    // of yours, keeping their proxy prefixes, pinned to every RP channel.
+    const saved = db.query("SELECT value FROM settings WHERE key = 'userCharacters'").get() as { value: string } | null;
+    const yours = saved ? (JSON.parse(saved.value) as { name: string; prefix: string }[]) : [];
+    yours.forEach((character, index) => {
+      const entryId = crypto.randomUUID();
+      insertEntry.run({ id: entryId, name: character.name, fields: "[]", prefix: character.prefix, owner: "user", now });
+      for (const channel of rpChannels) pin.run({ channel: channel.id, entry: entryId, position: index + 1 });
+    });
+    db.exec("DELETE FROM settings WHERE key = 'userCharacters'");
+
+    // The old per-channel character columns are no longer used.
+    db.exec("ALTER TABLE channels DROP COLUMN character_name");
+    db.exec("ALTER TABLE channels DROP COLUMN character_sheet");
+  },
 ];
 
 /**
@@ -163,7 +279,9 @@ function migrate(db: Database): void {
     // A transaction makes the whole step happen completely or not at all, so
     // a crash can't leave the database half-upgraded.
     db.transaction(() => {
-      db.exec(MIGRATIONS[version]!);
+      const step = MIGRATIONS[version]!;
+      if (typeof step === "string") db.exec(step);
+      else step(db);
       // PRAGMA doesn't accept placeholders, but `version + 1` is our own
       // number, so building the text directly is safe here.
       db.exec(`PRAGMA user_version = ${version + 1}`);

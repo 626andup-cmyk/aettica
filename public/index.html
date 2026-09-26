@@ -6,10 +6,11 @@
       .sidebar          server name, channel list, your partner + settings
       .sidebar-scrim    dark overlay behind the sidebar on phones
       .channel-view     the open channel:
-        .channel-header   channel name, character, channel settings
+        .channel-header   channel name, cast, channel settings
         .messages         the message list
         .composer         your text box, Send, and "Partner's turn"
-    dialogs             settings, channel settings, new channel, prompt preview
+    dialogs             settings, channel settings, new channel, notebook,
+                        entry, folder, appearance, theme editor, prompt preview
 
   All behaviour lives in app.js; all styling in style.css.
 
@@ -83,6 +84,13 @@
           d="M12 3a9 9 0 0 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8Zm-5.5 9a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3-4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm5 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm3 4a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"
         />
       </symbol>
+      <symbol id="icon-book" viewBox="0 0 24 24">
+        <!-- An open notebook. -->
+        <path
+          fill="currentColor"
+          d="M3 5.5C5.6 4.3 8.9 4.3 11 6v14c-2.1-1.6-5.4-1.6-8-.4V5.5Zm18 0v14.1c-2.6-1.2-5.9-1.2-8 .4V6c2.1-1.7 5.4-1.7 8-.5Z"
+        />
+      </symbol>
       <symbol id="icon-menu" viewBox="0 0 24 24">
         <path fill="currentColor" d="M3 6h18v2H3V6Zm0 5h18v2H3v-2Zm0 5h18v2H3v-2Z" />
       </symbol>
@@ -109,6 +117,9 @@
               <div class="partner-card-role">your partner</div>
             </div>
           </div>
+          <button id="notebook-button" class="icon-button" type="button" aria-label="Notebook" title="Notebook">
+            <svg width="20" height="20" aria-hidden="true"><use href="#icon-book" /></svg>
+          </button>
           <button id="appearance-button" class="icon-button" type="button" aria-label="Appearance" title="Appearance">
             <svg width="20" height="20" aria-hidden="true"><use href="#icon-palette" /></svg>
           </button>
@@ -217,12 +228,7 @@
         <p class="hint">Who your partner is as a writer: their name, voice and style. Used in every channel.</p>
         <textarea id="setting-partner" name="partnerPrompt" rows="8"></textarea>
 
-        <label for="setting-characters">Your characters</label>
-        <p class="hint">
-          For casual scenes. One per line, as <code>prefix: Name</code>, e.g. <code>k: Kestrel</code>. Then start a
-          line with <code>k:</code> to post it as Kestrel.
-        </p>
-        <textarea id="setting-characters" name="userCharacters" rows="3" spellcheck="false"></textarea>
+        <p class="hint">Characters, yours and your partner's, live in the notebook (the book button).</p>
 
         <label for="setting-model">Model</label>
         <div class="inline">
@@ -289,12 +295,18 @@
           </fieldset>
           <p class="hint" id="channel-mode-note"></p>
 
-          <label for="channel-setting-character-name">Character name</label>
-          <p class="hint">The character your partner plays here. Shown as the author of their posts.</p>
-          <input id="channel-setting-character-name" name="characterName" autocomplete="off" />
-
-          <label for="channel-setting-sheet">Character sheet</label>
-          <textarea id="channel-setting-sheet" name="characterSheet" rows="8"></textarea>
+          <!--
+            The cast: notebook entries pinned to this channel. Changes here
+            are saved straight away (they don't wait for Save).
+          -->
+          <label>Cast and lore</label>
+          <p class="hint">
+            Who's in this story, and what your partner should know. Your partner plays their characters and shared
+            ones; you play yours.
+          </p>
+          <ul id="cast-list" class="cast-list"></ul>
+          <label for="cast-add" class="visually-hidden">Pin from the notebook</label>
+          <select id="cast-add" class="cast-add"></select>
         </div>
 
         <p class="form-error" role="alert" hidden></p>
@@ -327,7 +339,11 @@
           <legend>Type</legend>
           <label class="kind-option">
             <input type="radio" name="kind" value="rp" checked />
-            <span><strong>Roleplay</strong><br /><span class="hint">A storyline. Your partner plays a character.</span></span>
+            <span
+              ><strong>Roleplay</strong><br /><span class="hint"
+                >A storyline, with a cast of characters from the notebook.</span
+              ></span
+            >
           </label>
           <label class="kind-option">
             <input type="radio" name="kind" value="ooc" />
@@ -349,11 +365,9 @@
             <option value="casual">Casual: short chat bubbles</option>
           </select>
 
-          <label for="new-channel-character-name">Character name</label>
-          <input id="new-channel-character-name" name="characterName" autocomplete="off" />
-          <label for="new-channel-sheet">Character sheet</label>
-          <p class="hint">You can fill these in later from the channel settings.</p>
-          <textarea id="new-channel-sheet" name="characterSheet" rows="6"></textarea>
+          <label for="new-channel-cast">Your partner plays</label>
+          <select id="new-channel-cast" name="cast"></select>
+          <p class="hint">You can change the cast any time in channel settings.</p>
         </div>
 
         <p class="form-error" role="alert" hidden></p>
@@ -362,6 +376,134 @@
           <span class="spacer"></span>
           <button type="button" class="button" data-close>Cancel</button>
           <button type="submit" class="button button-primary">Create</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!--
+      The notebook: every character and piece of lore you can see, in
+      folders, and suggested changes waiting for review. Filled in by app.js.
+    -->
+    <dialog id="notebook-dialog" class="dialog surface notebook">
+      <h2 class="dialog-title">Notebook</h2>
+      <p class="hint">
+        Characters and lore for your stories. Pin an entry to a channel to put it in that channel's cast. Link entries
+        to each other with <code>[[Name]]</code>.
+      </p>
+
+      <div class="dialog-buttons notebook-actions">
+        <button type="button" class="button" id="notebook-new-character">New character</button>
+        <button type="button" class="button" id="notebook-new-lore">New lore</button>
+        <button type="button" class="button" id="notebook-new-folder">New folder</button>
+      </div>
+
+      <section id="suggestion-list" class="suggestion-list" hidden></section>
+      <div id="notebook-list" class="notebook-list"></div>
+
+      <p class="form-error" role="alert" hidden></p>
+
+      <div class="dialog-buttons">
+        <span class="spacer"></span>
+        <button type="button" class="button button-primary" data-close>Done</button>
+      </div>
+    </dialog>
+
+    <!-- One notebook entry: its contents, and (for the owner) its settings. -->
+    <dialog id="entry-dialog" class="dialog surface entry-editor">
+      <form id="entry-form" method="dialog">
+        <h2 class="dialog-title" id="entry-title">Entry</h2>
+        <!-- Whose entry this is, and what you can do with it. -->
+        <p class="hint entry-access" id="entry-access"></p>
+
+        <label for="entry-name">Name</label>
+        <input id="entry-name" name="name" autocomplete="off" />
+
+        <label>Fields</label>
+        <div id="entry-fields" class="entry-fields"></div>
+        <button type="button" class="button add-field" id="entry-add-field">Add field</button>
+
+        <label for="entry-system-prompt">Notes for your partner</label>
+        <p class="hint">How to write this character or use this lore: speech, secrets, tone. For your partner, never shown in the story.</p>
+        <textarea id="entry-system-prompt" name="systemPrompt" rows="4"></textarea>
+
+        <!-- Links to other entries, found in the text above. -->
+        <p class="entry-links" id="entry-links" hidden></p>
+
+        <div id="entry-prefix-row" hidden>
+          <label for="entry-prefix">Proxy prefix</label>
+          <p class="hint">
+            In casual scenes, start a line with this and a colon to post as this character, e.g. <code>k: *waves*</code>.
+          </p>
+          <input id="entry-prefix" name="proxyPrefix" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <!-- Settings: only the entry's owner can change them. -->
+        <fieldset class="entry-settings" id="entry-settings">
+          <legend>Settings</legend>
+          <div class="grid entry-settings-grid">
+            <div>
+              <label for="entry-owner">Owner</label>
+              <select id="entry-owner" name="owner"></select>
+            </div>
+            <div>
+              <label for="entry-visibility">Visibility</label>
+              <select id="entry-visibility" name="visibility"></select>
+            </div>
+            <div>
+              <label for="entry-editing" id="entry-editing-label">Your partner can</label>
+              <select id="entry-editing" name="editing"></select>
+            </div>
+          </div>
+          <label for="entry-folder">Folder</label>
+          <select id="entry-folder" name="folderId"></select>
+        </fieldset>
+
+        <p class="form-error" role="alert" hidden></p>
+
+        <div class="dialog-buttons">
+          <button type="button" class="button" id="entry-pin"></button>
+          <button type="button" class="button button-danger" id="entry-delete">Delete</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary" id="entry-save">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- A notebook folder: a name, and settings its entries inherit. -->
+    <dialog id="folder-dialog" class="dialog surface">
+      <form id="folder-form" method="dialog">
+        <h2 class="dialog-title" id="folder-title">Folder</h2>
+        <p class="hint">Entries in a folder use its visibility and editing settings, unless they have their own.</p>
+
+        <label for="folder-name">Name</label>
+        <input id="folder-name" name="name" autocomplete="off" />
+
+        <div class="grid folder-settings-grid">
+          <div>
+            <label for="folder-visibility">Visibility</label>
+            <select id="folder-visibility" name="visibility">
+              <option value="visible">Visible to both</option>
+              <option value="hidden">Hidden from your partner</option>
+            </select>
+          </div>
+          <div>
+            <label for="folder-editing">Your partner can</label>
+            <select id="folder-editing" name="editing">
+              <option value="open">Edit</option>
+              <option value="suggest">Suggest changes</option>
+              <option value="locked">Only read</option>
+            </select>
+          </div>
+        </div>
+
+        <p class="form-error" role="alert" hidden></p>
+
+        <div class="dialog-buttons">
+          <button type="button" class="button button-danger" id="folder-delete">Delete folder</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Save</button>
         </div>
       </form>
     </dialog>

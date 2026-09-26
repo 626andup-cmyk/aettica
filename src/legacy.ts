@@ -6,7 +6,8 @@
  * its contents are copied into the new database:
  *
  *   - the settings become the server settings
- *   - the chat becomes the `#story` channel, with its character sheet
+ *   - the chat becomes the `#story` channel, and its character sheet becomes
+ *     a notebook entry of your partner's, pinned to it
  *   - an empty `#ooc` channel is added
  *
  * The old file is then renamed to `chat.json.imported`. It isn't deleted, so
@@ -56,13 +57,15 @@ export function importLegacyChat(store: Store, dataDir: string): boolean {
 
   // Everything is imported in one transaction: all of it, or none of it.
   store.db.transaction(() => {
-    // Keep only the settings stage 2 still has, and only valid values.
-    // (`validateSettings` drops `characterSheet`, which moved to the channel.)
+    // Keep only the settings that still exist, and only valid values.
+    // (The character sheet becomes a notebook entry instead.)
     const { characterSheet: _moved, ...rest } = save.settings ?? {};
     store.updateSettings(validateSettingsLeniently(rest));
 
-    const story = store.createChannel({ name: "story", kind: "rp", characterName, characterSheet: sheet });
+    const story = store.createChannel({ name: "story", kind: "rp" });
     store.createChannel({ name: "ooc", kind: "ooc" });
+    // The character becomes an entry of your partner's, pinned to #story.
+    if (sheet.trim()) store.addCharacterFromSheet(characterName, sheet, story.id);
 
     for (const message of save.messages ?? []) {
       if (typeof message.content !== "string") continue;
@@ -90,8 +93,8 @@ export function importLegacyChat(store: Store, dataDir: string): boolean {
 
 /**
  * Find the character's name in a sheet written like `Name: Ilse Marrow`.
- * Returns an empty string if there's no such line; you can set the name in
- * the channel settings afterwards.
+ * Returns an empty string if there's no such line; you can rename the entry
+ * in the notebook afterwards.
  */
 export function guessCharacterName(sheet: string): string {
   const match = sheet.match(/^\s*name\s*:\s*(.+?)\s*$/im);
