@@ -14,10 +14,10 @@
  * *displacement map* (red = sideways, green = up and down, mid-grey = stay
  * put). Used as a `backdrop-filter`, it shifts what's *behind* an element.
  *
- * So for each glass element, this draws a displacement map the size of the
- * element: grey in the middle (flat glass, no bending), and around the rim,
- * arrows pointing inward, strongest at the very edge, like the curved edge
- * of a lens. Each colour channel is shifted by a slightly different amount,
+ * So each glass element gets a displacement map the size of the element:
+ * grey in the middle (flat glass, no bending), and around the rim, arrows
+ * pointing inward, strongest at the very edge, like the curved edge of a
+ * lens. Each colour channel is shifted by a slightly different amount,
  * which splits the light into a rainbow fringe (dispersion).
  *
  * ## For theme authors
@@ -37,23 +37,31 @@
  * The theme's own `backdrop-filter` stays as the fallback: in other
  * browsers, and in Lite mode, it's used instead.
  *
+ * While an element is lensed it has the class `lensed`. **A lensed element
+ * must not reach outside its own box**: no outer box-shadow, on it or
+ * anything inside it. Chrome versions disagree about where a backdrop
+ * filter goes when an element's shadow spills over its edges (some move it
+ * by the shadow's size, some don't), so the lens would land in the wrong
+ * place on some phones. Themes drop their outer shadows under `.lensed`,
+ * and keep them for other browsers and Lite mode.
+ *
  * ## Keeping it fast
  *
- * - A lens is made once per size and settings, and shared by every element
- *   of that size (most bubbles in a channel are the same width).
- * - Only the rim of a map is computed; the middle is filled in one go.
- *   Large maps are drawn at half resolution: the rim is smooth, so nothing
- *   is lost.
- * - Nothing runs while you scroll: the filters are static, and the browser
- *   applies them on the GPU. Work only happens when elements appear or
- *   change size (or are hovered, pressed or focused, which can change
- *   their shadow; see `shadowReach`).
+ * - A map isn't drawn per element. It's put together inside the filter
+ *   from nine pieces, like a nine-slice image: four corners, four edge
+ *   strips stretched along the sides, and flat grey in the middle. The
+ *   pieces only depend on the corner radius and the lens's shape, so every
+ *   bubble with the same corners shares them, whatever its size.
+ * - When an element changes size (a message growing as your partner
+ *   writes), only the pieces' positions change: no drawing, no new images.
+ * - Without rainbow edges the filter is one shift instead of three, and the
+ *   colour boost is folded into the channel split, so the browser does as
+ *   few full passes over the glass as possible.
+ * - New elements are looked for only in what was just added to the page,
+ *   and nothing runs while you scroll.
  *
- * Two quirks of Chrome's are worked around here or in the themes: it shifts
- * a lensed element's backdrop by how far its shadows reach (see
- * `shadowReach`), and it doesn't give a lens the full picture of a layer
- * with a `transform`, so themes shouldn't move their background layers
- * with one.
+ * Chrome also doesn't give a lens the full picture of a layer with a
+ * `transform`, so themes shouldn't move their background layers with one.
  *
  * This file also provides `#aettica-goo`, a "gooey" filter that makes
  * shapes merge like droplets when they touch (used for the typing dots in
@@ -98,25 +106,44 @@ const Glass = (() => {
   const MAX_BEND = 0.7;
   const RIM = 2.2;
 
-  /** At most this many lenses are kept; the least recently used go first. */
-  const MAX_LENSES = 120;
+  /** At most this many sets of map pieces are kept (one per corner shape). */
+  const MAX_PIECE_SETS = 40;
 
   let enabled = false;
   let defs = null;
-  /** Lens key → { id, node } (a Map keeps insertion order, used for least-recently-used). */
-  const lenses = new Map();
-  /** Elements currently lensed → their lens key. */
-  const lensed = new Map();
-  /** Glass elements with no size yet (in a closed dialog), watched until they have one. */
-  const waiting = new Set();
-  let scanQueued = false;
+  let nextId = 0;
+
+  /**
+   * Glass elements being watched → their lens:
+   * `{ size, filter, nodes, shape }`. `size` comes from the resize
+   * observer; `filter` is the element's own <filter> once it has a size.
+   */
+  const watched = new Map();
+  /** Map pieces by corner shape (see `piecesFor`). */
+  const pieceSets = new Map();
 
   const resizes = new ResizeObserver((entries) => {
-    for (const entry of entries) apply(entry.target);
+    for (const entry of entries) {
+      const lens = watched.get(entry.target);
+      if (!lens) continue;
+      // The border box, before any transform (a pressed bubble shrinks a
+      // little, but its lens shouldn't change).
+      const box = entry.borderBoxSize?.[0];
+      lens.size = box
+        ? { width: box.inlineSize, height: box.blockSize }
+        : { width: entry.target.offsetWidth, height: entry.target.offsetHeight };
+      render(entry.target, lens);
+    }
   });
-  const mutations = new MutationObserver(queueScan);
-  /** Lensed elements to look at again on the next frame (see `recheck`). */
-  const pending = new Set();
+
+  // Only what's added to the page needs looking at. (A message growing as
+  // your partner writes changes only text, which is skipped at once.)
+  const mutations = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) if (node.nodeType === 1) queueScan(node);
+      for (const node of record.removedNodes) if (node.nodeType === 1) queueCleanup();
+    }
+  });
 
   // ------------------------------------------------------------- setup
 
@@ -153,60 +180,76 @@ const Glass = (() => {
     enabled = next;
     if (enabled) {
       mutations.observe(document.body, { childList: true, subtree: true });
-      for (const type of RECHECK_ON) document.addEventListener(type, recheck, true);
-      queueScan();
+      queueScan(document.body);
     } else {
-      for (const type of RECHECK_ON) document.removeEventListener(type, recheck, true);
       mutations.disconnect();
-      for (const element of [...lensed.keys()]) clear(element);
+      for (const element of [...watched.keys()]) forget(element);
     }
     return enabled;
   }
 
   /** Look again at every element, e.g. after the theme or a slider changed. */
   function refresh() {
-    if (enabled) queueScan();
+    if (enabled) queueScan(document.body);
   }
 
-  function queueScan() {
-    if (scanQueued) return;
-    scanQueued = true;
+  // Work is batched into the next frame.
+  const scanRoots = new Set();
+  let cleanupQueued = false;
+  let frameQueued = false;
+
+  function queueScan(root) {
+    scanRoots.add(root);
+    queueFrame();
+  }
+
+  function queueCleanup() {
+    cleanupQueued = true;
+    queueFrame();
+  }
+
+  function queueFrame() {
+    if (frameQueued) return;
+    frameQueued = true;
     requestAnimationFrame(() => {
-      scanQueued = false;
-      scan();
+      frameQueued = false;
+      if (!enabled) return;
+      if (cleanupQueued) {
+        cleanupQueued = false;
+        for (const element of [...watched.keys()]) if (!element.isConnected) forget(element);
+      }
+      const roots = [...scanRoots];
+      scanRoots.clear();
+      // Scanning the whole page covers everything else.
+      if (roots.includes(document.body)) scan(document.body, true);
+      else for (const root of roots) if (root.isConnected) scan(root, false);
     });
   }
 
   /**
-   * Events after which a lensed element may have a different shadow or
-   * outline (hovered, pressed, focused), which moves its lens (see
-   * `shadowReach`), so it's looked at again.
+   * Lens every glass element in `root`. A full scan (of the whole page)
+   * also re-reads every lens's settings, and stops lensing whatever isn't
+   * glass any more.
    */
-  const RECHECK_ON = ["pointerover", "pointerout", "pointerdown", "pointerup", "focusin", "focusout", "transitionend"];
-
-  function recheck(event) {
-    for (let element = event.target; element instanceof Element; element = element.parentElement) {
-      if (lensed.has(element)) pending.add(element);
-    }
-    if (pending.size === 0) return;
-    requestAnimationFrame(() => {
-      for (const element of pending) apply(element);
-      pending.clear();
-    });
-  }
-
-  /** Lens every candidate the theme marks as glass, and stop lensing the rest. */
-  function scan() {
-    if (!enabled) return;
+  function scan(root, full) {
+    const blocked = new Map();
+    const found = [...root.querySelectorAll(CANDIDATES)];
+    if (root.matches?.(CANDIDATES)) found.push(root);
     const seen = new Set();
-    for (const element of document.querySelectorAll(CANDIDATES)) {
-      if (isGlass(element)) {
-        seen.add(element);
-        apply(element);
+    for (const element of found) {
+      if (!isGlass(element, blocked)) continue;
+      seen.add(element);
+      const lens = watched.get(element);
+      if (!lens) {
+        // The observer reports its size straight away, and then renders it.
+        watched.set(element, { size: null, filter: null, nodes: null, shape: "" });
+        resizes.observe(element);
+      } else if (full) {
+        render(element, lens);
       }
     }
-    for (const element of [...lensed.keys(), ...waiting]) {
-      if (!seen.has(element)) clear(element);
+    if (full) {
+      for (const element of [...watched.keys()]) if (!seen.has(element)) forget(element);
     }
   }
 
@@ -215,212 +258,264 @@ const Glass = (() => {
    * glass panel: an element with a backdrop filter only lets the elements
    * in it see *its* own fill, not the page behind (it's their "backdrop
    * root"), so a lens there would only bend a faint tint. Those keep the
-   * theme's own backdrop filter, and cost nothing.
+   * theme's own backdrop filter, and cost nothing. (`blocked` remembers
+   * the answer for each parent during one scan.)
    */
-  function isGlass(element) {
+  function isGlass(element, blocked) {
     if (!(parseFloat(getComputedStyle(element).getPropertyValue("--lens")) > 0)) return false;
-    for (let parent = element.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-      const style = getComputedStyle(parent);
-      if (style.backdropFilter !== "none" || style.filter !== "none") return false;
-    }
-    return true;
+    return !insideGlass(element.parentElement, blocked);
+  }
+
+  function insideGlass(parent, blocked) {
+    if (!parent || parent === document.body || parent === document.documentElement) return false;
+    if (blocked.has(parent)) return blocked.get(parent);
+    const style = getComputedStyle(parent);
+    const answer =
+      style.backdropFilter !== "none" || style.filter !== "none" || insideGlass(parent.parentElement, blocked);
+    blocked.set(parent, answer);
+    return answer;
   }
 
   // ---------------------------------------------------------- applying
 
   /** Give an element the lens for its current size and settings. */
-  function apply(element) {
-    if (!enabled || !element.isConnected) return clear(element);
-    const width = Math.round(element.offsetWidth);
-    const height = Math.round(element.offsetHeight);
-    // Too small to see, or not laid out (a closed dialog): look again when
-    // its size changes.
-    if (width < 12 || height < 12) {
-      if (!lensed.has(element) && !waiting.has(element)) {
-        waiting.add(element);
-        resizes.observe(element);
-      }
-      return;
-    }
-    waiting.delete(element);
+  function render(element, lens) {
+    if (!enabled || !element.isConnected) return forget(element);
+    const size = lens.size;
+    // Too small to see, or not laid out (a closed dialog): the observer
+    // calls again when it has a size.
+    if (!size || size.width < 12 || size.height < 12) return unlens(element, lens);
 
     const style = getComputedStyle(element);
     const number = (name, fallback) => {
       const value = parseFloat(style.getPropertyValue(name));
       return Number.isFinite(value) ? value : fallback;
     };
+    const { width, height } = size;
     const half = Math.min(width, height) / 2;
     const radius = Math.min(parseFloat(style.borderTopLeftRadius) || 0, half);
     // A deeper lens needs a wider rim (see RIM).
     const wantedDepth = Math.max(0, number("--lens-depth", 24));
-    const bevel = Math.min(half, Math.max(2, number("--lens-bevel", 18), wantedDepth * RIM));
-    const [left, top] = shadowReach(element, style);
+    const bevel = Math.max(1, Math.round(Math.min(half, Math.max(2, number("--lens-bevel", 18), wantedDepth * RIM))));
     const settings = {
-      width,
-      height,
-      left,
-      top,
       radius: Math.round(radius),
-      bevel: Math.round(bevel),
+      bevel,
       depth: Math.round(Math.min(wantedDepth, bevel / RIM)),
       dispersion: Math.min(1, Math.max(0, number("--lens-dispersion", 0.3))),
       frost: Math.max(0, number("--lens-frost", 0)),
       saturate: Math.max(0, number("--lens-saturate", 1.2)),
     };
-    const key = Object.values(settings).join("|");
-    if (lensed.get(element) === key) return;
 
-    const lens = lensFor(key, settings);
-    const filter = `url(#${lens.id})`;
-    element.style.setProperty("backdrop-filter", filter);
-    element.style.setProperty("-webkit-backdrop-filter", filter);
-    if (!lensed.has(element)) resizes.observe(element);
-    lensed.set(element, key);
+    // A new shape or new settings rebuild the filter; a new size only moves its pieces.
+    const shape = Object.values(settings).join("|");
+    if (!lens.filter) {
+      lens.filter = document.createElementNS(SVG_NS, "filter");
+      lens.filter.id = `aettica-lens-${nextId++}`;
+      lens.filter.setAttribute("x", "0");
+      lens.filter.setAttribute("y", "0");
+      lens.filter.setAttribute("filterUnits", "userSpaceOnUse");
+      lens.filter.setAttribute("color-interpolation-filters", "sRGB");
+      ensureDefs().append(lens.filter);
+    }
+    if (lens.shape !== shape) {
+      lens.shape = shape;
+      lens.nodes = buildFilter(lens.filter, settings);
+    }
+    place(lens, width, height);
+
+    if (!element.classList.contains("lensed")) {
+      const filter = `url(#${lens.filter.id})`;
+      element.style.setProperty("backdrop-filter", filter);
+      element.style.setProperty("-webkit-backdrop-filter", filter);
+      element.classList.add("lensed");
+    }
   }
 
-  /**
-   * How far an element's shadows and outline reach past its left and top
-   * edges, in px.
-   *
-   * Chrome places a backdrop filter by the element's box *including* its
-   * outer shadows and outline, but then draws the result from the
-   * element's own top-left corner. So when a shadow reaches 30px past the
-   * top edge, the whole lens lands 30px too low. The lens is drawn that
-   * much higher and further left to make up for it.
-   *
-   * A shadow reaches (blur × 1.5 + spread − offset) past an edge: Chrome
-   * blurs to three standard deviations, and the standard deviation is half
-   * the blur. Inset shadows stay inside, so they don't count.
-   *
-   * But only as far as it can be seen: a scrolling (or overflow: hidden)
-   * ancestor cuts it off at the start of its content, so a bubble 12px
-   * inside the message list reaches at most 12px to the left. (That's
-   * measured from the start of the scrolled content, not what's showing,
-   * so it doesn't change as you scroll.)
-   */
-  function shadowReach(element, style) {
-    let left = 0;
-    let top = 0;
-    // Shadows are separated by commas, but so are the numbers in rgb(...).
-    for (const shadow of style.boxShadow.split(/,(?![^(]*\))/)) {
-      if (/\binset\b/.test(shadow)) continue;
-      const [x = 0, y = 0, blur = 0, spread = 0] = (shadow.match(/-?[\d.]+px/g) ?? []).map(parseFloat);
-      const reach = blur * 1.5 + spread;
-      left = Math.max(left, reach - x);
-      top = Math.max(top, reach - y);
-    }
-    if (style.outlineStyle !== "none") {
-      const outline = (parseFloat(style.outlineWidth) || 0) + (parseFloat(style.outlineOffset) || 0);
-      left = Math.max(left, outline);
-      top = Math.max(top, outline);
-    }
-    if (left <= 0 && top <= 0) return [0, 0];
-    // Cut off by the page's edge, and by clipping ancestors.
-    const box = element.getBoundingClientRect();
-    left = Math.min(left, box.left + window.scrollX);
-    top = Math.min(top, box.top + window.scrollY);
-    for (let parent = element.parentElement; parent && parent !== document.documentElement; parent = parent.parentElement) {
-      const clip = getComputedStyle(parent);
-      if (clip.overflowX === "visible" && clip.overflowY === "visible") continue;
-      const outer = parent.getBoundingClientRect();
-      left = Math.min(left, box.left - (outer.left + parent.clientLeft - parent.scrollLeft));
-      top = Math.min(top, box.top - (outer.top + parent.clientTop - parent.scrollTop));
-    }
-    return [Math.max(0, Math.round(left)), Math.max(0, Math.round(top))];
-  }
-
-  /** Stop lensing an element: its theme's own backdrop filter applies again. */
-  function clear(element) {
-    if (waiting.delete(element)) resizes.unobserve(element);
-    if (!lensed.has(element)) return;
+  /** Stop lensing an element (for now): its theme's own backdrop filter applies again. */
+  function unlens(element, lens) {
+    if (!element.classList.contains("lensed")) return;
     element.style.removeProperty("backdrop-filter");
     element.style.removeProperty("-webkit-backdrop-filter");
+    element.classList.remove("lensed");
+    lens.filter?.remove();
+    lens.filter = null;
+    lens.shape = "";
+  }
+
+  /** Stop lensing and watching an element. */
+  function forget(element) {
+    const lens = watched.get(element);
+    if (!lens) return;
+    unlens(element, lens);
+    lens.filter?.remove();
     resizes.unobserve(element);
-    lensed.delete(element);
+    watched.delete(element);
   }
 
-  // ------------------------------------------------------------ lenses
-
-  let nextId = 0;
-
-  /** The lens filter for these settings: made once, then reused. */
-  function lensFor(key, settings) {
-    const existing = lenses.get(key);
-    if (existing) {
-      // Most recently used goes to the end.
-      lenses.delete(key);
-      lenses.set(key, existing);
-      return existing;
-    }
-    const id = `aettica-lens-${nextId++}`;
-    const node = buildFilter(id, settings);
-    ensureDefs().append(node);
-    const lens = { id, node };
-    lenses.set(key, lens);
-    // Forget the least recently used lens that nothing is using.
-    if (lenses.size > MAX_LENSES) {
-      const inUse = new Set(lensed.values());
-      for (const [oldKey, old] of lenses) {
-        if (!inUse.has(oldKey)) {
-          old.node.remove();
-          lenses.delete(oldKey);
-          break;
-        }
-      }
-    }
-    return lens;
-  }
+  // ------------------------------------------------------------ filters
 
   /**
-   * The SVG filter: blur (if frosted), then shift the backdrop by the
-   * displacement map three times, a little differently for red, green and
-   * blue, and put the channels back together.
+   * Fill a lens's <filter>: assemble the displacement map from its nine
+   * pieces, blur the backdrop (if frosted), shift it by the map, and boost
+   * its colour. Returns the pieces' nodes, for `place` to position.
    *
-   * Putting them back together takes care where the backdrop is see-through
-   * (the edge of the page, or a translucent parent): blending three
-   * see-through images adds up their opacity, which turns them grey. So
-   * each channel is made opaque first, and the green pass's own opacity is
-   * put back at the end (`operator="in"`).
+   * With rainbow edges, the backdrop is shifted three times, a little
+   * differently for red, green and blue, and the channels are put back
+   * together. That takes care where the backdrop is see-through (the edge
+   * of the page, or a translucent parent): blending three see-through
+   * images adds up their opacity, which turns them grey. So each channel
+   * is made opaque first, and the green pass's own opacity is put back at
+   * the end (`operator="in"`). The colour boost is part of each channel's
+   * matrix, rather than a pass of its own.
    */
-  function buildFilter(id, s) {
-    const map = displacementMap(s);
+  function buildFilter(filter, s) {
+    const pieces = piecesFor(s.radius, s.bevel, s.depth);
     // The map's arrows are at most half its range (0.5 of 1), so the scale
     // is twice the wanted shift. Red bends a little less, blue a little
     // more: that's what splits the colours.
     const scale = s.depth * 2;
-    const spread = s.dispersion * 0.35;
-    const channel = (name, amount, matrix) => `
-      <feDisplacementMap in="source" in2="map" scale="${(scale * amount).toFixed(2)}"
-        xChannelSelector="R" yChannelSelector="G" result="${name}-shifted"/>
-      <feColorMatrix in="${name}-shifted" type="matrix" values="${matrix} 0 0 0 0 1" result="${name}"/>`;
-    const filter = document.createElementNS(SVG_NS, "filter");
-    filter.id = id;
-    // Up and to the left by the shadows' reach (see `shadowReach`).
-    filter.setAttribute("x", String(-s.left));
-    filter.setAttribute("y", String(-s.top));
-    filter.setAttribute("width", String(s.width));
-    filter.setAttribute("height", String(s.height));
-    filter.setAttribute("filterUnits", "userSpaceOnUse");
-    filter.setAttribute("color-interpolation-filters", "sRGB");
-    // Frost blurs the backdrop first; clear glass uses it as it is.
-    const frost = s.frost > 0
-      ? `<feGaussianBlur in="SourceGraphic" stdDeviation="${s.frost}" edgeMode="duplicate" result="source"/>`
-      : `<feOffset in="SourceGraphic" result="source"/>`;
+    const frost =
+      s.frost > 0
+        ? `<feGaussianBlur in="SourceGraphic" stdDeviation="${s.frost}" edgeMode="duplicate" result="source"/>`
+        : `<feOffset in="SourceGraphic" result="source"/>`;
+    const shift = (amount, result) =>
+      `<feDisplacementMap in="source" in2="map" scale="${(scale * amount).toFixed(2)}" xChannelSelector="R" yChannelSelector="G" result="${result}"/>`;
+
+    let glass;
+    if (s.dispersion > 0) {
+      const spread = s.dispersion * 0.35;
+      const m = saturation(s.saturate);
+      // Keep one row of the colour boost, for one channel, and make it opaque.
+      const only = (row) =>
+        [0, 1, 2].map((r) => (r === row ? `${m[r].join(" ")} 0 0` : "0 0 0 0 0")).join("  ") + "  0 0 0 0 1";
+      glass = `
+        ${shift(1 - spread, "red-shifted")}
+        <feColorMatrix in="red-shifted" type="matrix" values="${only(0)}" result="red"/>
+        ${shift(1, "green-shifted")}
+        <feColorMatrix in="green-shifted" type="matrix" values="${only(1)}" result="green"/>
+        ${shift(1 + spread, "blue-shifted")}
+        <feColorMatrix in="blue-shifted" type="matrix" values="${only(2)}" result="blue"/>
+        <feBlend in="red" in2="green" mode="screen" result="red-green"/>
+        <feBlend in="red-green" in2="blue" mode="screen" result="opaque"/>
+        <feComposite in="opaque" in2="green-shifted" operator="in"/>`;
+    } else {
+      glass = `
+        ${shift(1, "shifted")}
+        <feColorMatrix in="shifted" type="saturate" values="${s.saturate}"/>`;
+    }
+
+    const image = (name) =>
+      `<feImage data-piece="${name}" href="${pieces[name]}" preserveAspectRatio="none" result="${name}"/>`;
     filter.innerHTML = `
-      <feImage href="${map}" x="${-s.left}" y="${-s.top}" width="${s.width}" height="${s.height}" preserveAspectRatio="none" result="map"/>
+      <feFlood flood-color="rgb(128,128,128)" result="flat"/>
+      ${["top", "bottom", "left", "right", "topLeft", "topRight", "bottomLeft", "bottomRight"].map(image).join("")}
+      <feMerge result="map">
+        <feMergeNode in="flat"/><feMergeNode in="top"/><feMergeNode in="bottom"/><feMergeNode in="left"/><feMergeNode in="right"/>
+        <feMergeNode in="topLeft"/><feMergeNode in="topRight"/><feMergeNode in="bottomLeft"/><feMergeNode in="bottomRight"/>
+      </feMerge>
       ${frost}
-      ${channel("red", 1 - spread, "1 0 0 0 0  0 0 0 0 0  0 0 0 0 0 ")}
-      ${channel("green", 1, "0 0 0 0 0  0 1 0 0 0  0 0 0 0 0 ")}
-      ${channel("blue", 1 + spread, "0 0 0 0 0  0 0 0 0 0  0 0 1 0 0 ")}
-      <feBlend in="red" in2="green" mode="screen" result="red-green"/>
-      <feBlend in="red-green" in2="blue" mode="screen" result="opaque"/>
-      <feComposite in="opaque" in2="green-shifted" operator="in" result="glass"/>
-      <feColorMatrix in="glass" type="saturate" values="${s.saturate}"/>`;
-    return filter;
+      ${glass}`;
+    const nodes = { corner: pieces.corner };
+    for (const node of filter.querySelectorAll("feImage")) nodes[node.dataset.piece] = node;
+    return nodes;
   }
 
   /**
-   * Draw the displacement map for a rounded rectangle, as a PNG data URL.
+   * Put a lens's pieces in place for the element's size: corners in the
+   * corners, the edge strips stretched along the sides between them, and
+   * the filter covering the whole element. Sizes can be fractions of a
+   * pixel, so the lens reaches the very edge.
+   */
+  function place(lens, width, height) {
+    const { nodes } = lens;
+    const c = nodes.corner;
+    const across = Math.max(0, width - 2 * c);
+    const down = Math.max(0, height - 2 * c);
+    const set = (node, x, y, w, h) => {
+      // An empty strip (a bubble exactly as tall as its two corners) is left out.
+      if (w <= 0 || h <= 0) {
+        node.setAttribute("width", "0");
+        node.setAttribute("height", "0");
+        return;
+      }
+      node.setAttribute("x", x);
+      node.setAttribute("y", y);
+      node.setAttribute("width", w);
+      node.setAttribute("height", h);
+    };
+    lens.filter.setAttribute("width", width);
+    lens.filter.setAttribute("height", height);
+    set(nodes.topLeft, 0, 0, c, c);
+    set(nodes.topRight, width - c, 0, c, c);
+    set(nodes.bottomLeft, 0, height - c, c, c);
+    set(nodes.bottomRight, width - c, height - c, c, c);
+    set(nodes.top, c, 0, across, c);
+    set(nodes.bottom, c, height - c, across, c);
+    set(nodes.left, 0, c, c, down);
+    set(nodes.right, width - c, c, c, down);
+  }
+
+  /** The colour boost (saturation) as a 3×3 matrix, from the SVG spec. */
+  function saturation(s) {
+    const f = (n) => Number(n.toFixed(4));
+    return [
+      [f(0.213 + 0.787 * s), f(0.715 - 0.715 * s), f(0.072 - 0.072 * s)],
+      [f(0.213 - 0.213 * s), f(0.715 + 0.285 * s), f(0.072 - 0.072 * s)],
+      [f(0.213 - 0.213 * s), f(0.715 - 0.715 * s), f(0.072 + 0.928 * s)],
+    ];
+  }
+
+  // ------------------------------------------------------------- pieces
+
+  /**
+   * The nine-slice pieces of the displacement map for this corner shape,
+   * as PNG data URLs, made once and shared by every lens with the same
+   * corners, whatever its size.
+   *
+   * They're cut from the map of a small square with the same corners (see
+   * `drawMap`): each corner is `c × c`, where `c` covers both the rounded
+   * corner and the rim (the part that depends on both directions). Along a
+   * straight side, the map only changes going inward, so a strip one pixel
+   * long can be stretched along the whole side. The middle is flat grey,
+   * which the filter fills in itself.
+   */
+  function piecesFor(radius, bevel, depth) {
+    const key = `${radius}|${bevel}|${depth}`;
+    const known = pieceSets.get(key);
+    if (known) return known;
+
+    const c = Math.max(1, Math.ceil(Math.max(radius, bevel)));
+    // Two pixels wider than two corners, so the middle row and column are
+    // on straight sides.
+    const size = 2 * c + 2;
+    const map = drawMap(size, radius, bevel, depth);
+    const cut = (x, y, w, h) => {
+      const piece = document.createElement("canvas");
+      piece.width = w;
+      piece.height = h;
+      piece.getContext("2d").drawImage(map, x, y, w, h, 0, 0, w, h);
+      return piece.toDataURL("image/png");
+    };
+    const pieces = {
+      corner: c,
+      topLeft: cut(0, 0, c, c),
+      topRight: cut(size - c, 0, c, c),
+      bottomLeft: cut(0, size - c, c, c),
+      bottomRight: cut(size - c, size - c, c, c),
+      top: cut(c + 1, 0, 1, c),
+      bottom: cut(c + 1, size - c, 1, c),
+      left: cut(0, c + 1, c, 1),
+      right: cut(size - c, c + 1, c, 1),
+    };
+    pieceSets.set(key, pieces);
+    // Forget the oldest set, if there are many (lenses already built keep theirs).
+    if (pieceSets.size > MAX_PIECE_SETS) pieceSets.delete(pieceSets.keys().next().value);
+    return pieces;
+  }
+
+  /**
+   * Draw the displacement map of a `size × size` square with rounded
+   * corners, on a canvas.
    *
    * For each pixel within `bevel` of the edge, the arrow points inward
    * (along the edge's normal, so corners curve too). Red holds the
@@ -440,69 +535,52 @@ const Glass = (() => {
    * - it meets the flat middle smoothly (as `k` is more than 1), with no
    *   visible seam.
    */
-  function displacementMap({ width, height, radius, bevel, depth }) {
-    // Big maps at half resolution: the rim is smooth, and it's a quarter the work.
-    const scale = width * height > 40_000 ? 0.5 : 1;
-    const w = Math.max(1, Math.round(width * scale));
-    const h = Math.max(1, Math.round(height * scale));
-    const r = radius * scale;
-    const b = Math.max(1, bevel * scale);
+  function drawMap(size, radius, bevel, depth) {
     const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
+    canvas.width = size;
+    canvas.height = size;
     const context = canvas.getContext("2d");
-    const image = context.createImageData(w, h);
+    const image = context.createImageData(size, size);
     // Fill everything with "no shift" at once (RGBA 128, 128, 128, 255).
     new Uint32Array(image.data.buffer).fill(0xff808080);
 
-    const cx = w / 2;
-    const cy = h / 2;
-    const hx = w / 2 - r;
-    const hy = h / 2 - r;
-    const band = Math.ceil(b) + 1;
+    const centre = size / 2;
+    const straight = centre - radius;
     const power = depth > 0 ? (MAX_BEND * bevel) / depth : 1;
-    const pixel = (x, y) => {
-      // Signed distance to a rounded rectangle (negative inside).
-      const px = x + 0.5 - cx;
-      const py = y + 0.5 - cy;
-      const qx = Math.abs(px) - hx;
-      const qy = Math.abs(py) - hy;
-      const ox = Math.max(qx, 0);
-      const oy = Math.max(qy, 0);
-      const outside = Math.hypot(ox, oy);
-      const distance = outside + Math.min(Math.max(qx, qy), 0) - r;
-      const inside = -distance;
-      if (inside < 0 || inside >= b) return;
-      // The outward normal: towards the nearest corner's centre, or straight out from a side.
-      let nx;
-      let ny;
-      if (qx > 0 && qy > 0) {
-        nx = (ox / outside) * Math.sign(px);
-        ny = (oy / outside) * Math.sign(py);
-      } else if (qx > qy) {
-        nx = Math.sign(px);
-        ny = 0;
-      } else {
-        nx = 0;
-        ny = Math.sign(py);
-      }
-      const strength = (1 - inside / b) ** power;
-      const i = (y * w + x) * 4;
-      // Inward: the opposite of the normal.
-      image.data[i] = Math.round(128 - nx * strength * 127);
-      image.data[i + 1] = Math.round(128 - ny * strength * 127);
-    };
-    // Only the rim: the top and bottom bands, then the left and right bands between them.
-    for (let y = 0; y < h; y++) {
-      if (y < band || y >= h - band) {
-        for (let x = 0; x < w; x++) pixel(x, y);
-      } else {
-        for (let x = 0; x < Math.min(band, w); x++) pixel(x, y);
-        for (let x = Math.max(band, w - band); x < w; x++) pixel(x, y);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        // Signed distance to a rounded rectangle (negative inside).
+        const px = x + 0.5 - centre;
+        const py = y + 0.5 - centre;
+        const qx = Math.abs(px) - straight;
+        const qy = Math.abs(py) - straight;
+        const ox = Math.max(qx, 0);
+        const oy = Math.max(qy, 0);
+        const outside = Math.hypot(ox, oy);
+        const inside = -(outside + Math.min(Math.max(qx, qy), 0) - radius);
+        if (inside < 0 || inside >= bevel) continue;
+        // The outward normal: towards the nearest corner's centre, or straight out from a side.
+        let nx;
+        let ny;
+        if (qx > 0 && qy > 0) {
+          nx = (ox / outside) * Math.sign(px);
+          ny = (oy / outside) * Math.sign(py);
+        } else if (qx > qy) {
+          nx = Math.sign(px);
+          ny = 0;
+        } else {
+          nx = 0;
+          ny = Math.sign(py);
+        }
+        const strength = (1 - inside / bevel) ** power;
+        const i = (y * size + x) * 4;
+        // Inward: the opposite of the normal.
+        image.data[i] = Math.round(128 - nx * strength * 127);
+        image.data[i + 1] = Math.round(128 - ny * strength * 127);
       }
     }
     context.putImageData(image, 0, 0);
-    return canvas.toDataURL("image/png");
+    return canvas;
   }
 
   return { setEnabled, refresh, supported, isEnabled: () => enabled };

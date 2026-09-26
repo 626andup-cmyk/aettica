@@ -6,7 +6,7 @@
     { "id": "tint", "label": "Glass tint", "variable": "--glass-tint", "min": 0, "max": 0.8, "step": 0.02, "default": 0.4 },
     { "id": "refraction", "label": "Refraction", "variable": "--refraction", "min": 0, "max": 60, "step": 1, "default": 28 },
     { "id": "dispersion", "label": "Rainbow edges", "variable": "--dispersion", "min": 0, "max": 1, "step": 0.05, "default": 0.6 },
-    { "id": "frost", "label": "Frost", "variable": "--frost", "min": 0, "max": 20, "step": 0.5, "default": 1 },
+    { "id": "frost", "label": "Frost", "variable": "--frost", "min": 0, "max": 20, "step": 0.5, "default": 0.5 },
     { "id": "neon", "label": "Neon", "variable": "--neon", "min": 0, "max": 1, "step": 0.05, "default": 1 },
     { "id": "smoke", "label": "Smoke", "variable": "--smoke", "min": 0, "max": 1, "step": 0.05, "default": 1 }
   ]

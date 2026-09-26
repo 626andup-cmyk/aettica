@@ -195,6 +195,12 @@ describe("ThemeLibrary", () => {
     expect(css).not.toMatch(/transform:\s*translate/);
   });
 
+  test("every theme with real refraction keeps lensed glass inside its box (no outer shadows under .lensed)", () => {
+    for (const id of ["liquid-glass", "liquid-glass-dark", "rainy-window"]) {
+      expect(library.details(id).css).toMatch(/\.lensed \{\s*box-shadow: var\(--glass-rim\) !important;/);
+    }
+  });
+
   test("both Liquid Glass themes turn on real refraction, with sliders for it", () => {
     for (const id of ["liquid-glass", "liquid-glass-dark"]) {
       const theme = library.details(id);

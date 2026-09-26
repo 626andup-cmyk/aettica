@@ -25,7 +25,7 @@
   --glass-tint: 0.4;
   --refraction: 28;
   --dispersion: 0.6;
-  --frost: 1;
+  --frost: 0.5;
   --neon: 1;
   --smoke: 1;
 
@@ -265,6 +265,16 @@ body {
    uses this instead of --dialog-backdrop). */
 .dialog {
   --lens-frost: 28;
+}
+
+/*
+ * While glass.js lenses an element it has the class `lensed`, and nothing
+ * may reach outside its box (Chrome versions disagree about where the lens
+ * goes when a shadow does). So lensed glass keeps only its rims; the soft
+ * shadows beneath stay for other browsers and Lite mode.
+ */
+.lensed {
+  box-shadow: var(--glass-rim) !important;
 }
 
 /* ------------------------------------------------------------ the bubbles */
