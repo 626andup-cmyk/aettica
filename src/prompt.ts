@@ -7,7 +7,7 @@
  * layers in the same order:
  *
  *   1. Partner identity and writing style   (who is writing)
- *   2. Channel mode instructions            (literary or casual)
+ *   2. How to write in this channel         (literary, casual or OOC)
  *   3. The cast and pinned notebook entries (who's in the story)
  *   4. Connection profile's model-quirk     (taming this particular model)
  *   5. Scene summaries and recent messages  (what has happened)
@@ -28,8 +28,11 @@
  *     who they play in each) and the notebook's entries, so they know what
  *     storylines exist. (Stage 7 adds a summary of each.)
  *
- * In RP channels, layer 2 holds the instructions for the current scene's
- * mode (literary or casual), and layer 5 shows scene breaks where they fall.
+ * Layer 2 holds the fixed instructions for the current scene's mode
+ * (literary or casual; none in OOC), then your partner prompt for this kind
+ * of channel: one each for literary scenes, casual scenes and OOC. Only the
+ * one that applies is sent, so your partner can't mix them up. In RP
+ * channels, layer 5 shows scene breaks where they fall.
  * Layer 4 has its slot here already, empty, so stage 5 adds content without
  * reshaping this file.
  */
@@ -37,6 +40,16 @@
 import type { PromptEntry } from "./notebook.ts";
 import { playedBy } from "./permissions.ts";
 import type { Channel, ChannelKind, ChannelMode, ChatMessage, Message, NotebookEntry, Player, Settings } from "./types.ts";
+
+/**
+ * Your partner prompt for this kind of channel and scene: how they write in
+ * literary scenes, casual scenes, or out of character. Only the one that
+ * applies is sent, so the others can't be confused with it.
+ */
+export function channelPrompt(settings: Settings, channel: Channel): string {
+  if (channel.kind === "ooc") return settings.oocPrompt;
+  return channel.mode === "casual" ? settings.casualPrompt : settings.literaryPrompt;
+}
 
 /**
  * Fixed framing that comes before your partner prompt in RP channels.
@@ -159,10 +172,14 @@ export function buildPromptStack({ settings, channel, channels, messages, notebo
       title: "Who you are",
       content: joinNonEmpty([isRp ? RP_FRAMING : OOC_FRAMING, settings.partnerPrompt]),
     },
-    // Layer 2: how to write in this scene's mode. RP channels only.
+    // Layer 2: how to write here. The fixed instructions for this scene's
+    // mode (RP only), then your partner prompt for this kind of channel.
     {
-      title: "Style",
-      content: isRp ? modeInstructions(channel.mode, yourCharacters[0] ?? sharedCharacters[0] ?? "") : null,
+      title: isRp ? "Style" : "How you talk here",
+      content: joinNonEmpty([
+        isRp ? modeInstructions(channel.mode, yourCharacters[0] ?? sharedCharacters[0] ?? "") : "",
+        channelPrompt(settings, channel),
+      ]),
     },
     // Layer 3, in RP: the notebook entries pinned to the channel (the cast
     // and any lore), then the entries they link to.

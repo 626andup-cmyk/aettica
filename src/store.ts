@@ -40,8 +40,8 @@ const DEFAULTS_DIR = resolve(import.meta.dir, "..", "defaults");
 // ------------------------------------------------------------- defaults
 
 /**
- * Settings used until you change them. The partner prompt comes from
- * `defaults/partner.md` so it's easy to read and edit as plain text.
+ * Settings used until you change them. The partner prompts come from
+ * `defaults/*.md` so they're easy to read and edit as plain text.
  *
  * Settings are merged over these every time they're read, so a setting added
  * in a newer version of Aettica quietly gets its default.
@@ -50,6 +50,9 @@ export function defaultSettings(): Settings {
   return {
     partnerName: "Arlo",
     partnerPrompt: readDefault("partner.md"),
+    literaryPrompt: readDefault("literary.md"),
+    casualPrompt: readDefault("casual.md"),
+    oocPrompt: readDefault("ooc.md"),
     // Check the model list in the settings panel for the exact ids available
     // to your account.
     model: "deepseek-ai/DeepSeek-V3.1-Terminus",
@@ -99,7 +102,9 @@ export function validateSettings(input: unknown): Partial<Settings> {
   const clean: Partial<Settings> = {};
 
   if (raw.partnerName !== undefined) clean.partnerName = name(raw.partnerName, "partnerName");
-  if (raw.partnerPrompt !== undefined) clean.partnerPrompt = longText(raw.partnerPrompt, "partnerPrompt");
+  for (const key of ["partnerPrompt", "literaryPrompt", "casualPrompt", "oocPrompt"] as const) {
+    if (raw[key] !== undefined) clean[key] = longText(raw[key], key);
+  }
 
   if (raw.model !== undefined) {
     if (typeof raw.model !== "string" || raw.model.trim() === "") {

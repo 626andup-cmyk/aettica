@@ -18,7 +18,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
   - **Literary**: your partner writes prose posts, shown as wide blocks of text.
   - **Casual**: short in-character bubbles, one character each, like a group chat. You post as your own characters (from the notebook) with proxy tags (`k: *waves*`) or the "Posting as" menu, like Tupperbox.
 - Every message records who wrote it, which character it voices, and which model generated it.
-- Edit the **partner prompt** (who your partner is as a writer), the model, temperature, reply length, and how many recent messages the partner sees.
+- Edit the **partner prompts**: who your partner is (used everywhere), and how they write in literary scenes, in casual scenes, and out of character. Each channel only gets the one for its own kind, so OOC chat stays short even if your literary style is long. Also the model, temperature, reply length, and how many recent messages the partner sees.
 - **Partner's turn**: let your partner write without a new message from you, including opening an empty channel.
 - **Stop** a reply that's taking too long. Nothing is saved, and the channel is free again.
 - **Regenerate** the partner's last reply, **edit** or **delete** any message.
@@ -107,7 +107,7 @@ src/
   types.ts     The shapes of channels, messages and settings
 public/        The web app (plain HTML, CSS and JavaScript, no build step)
 themes/        Built-in themes (Classic, Frutiger Aero, Aero Glass, Liquid Glass)
-defaults/      Starting partner prompt and character sheet
+defaults/      Starting partner prompts and character sheet
 test/          Tests
 docs/          How things work, stage by stage, and the theme reference
 ```

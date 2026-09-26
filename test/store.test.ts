@@ -45,6 +45,10 @@ describe("a new server", () => {
     const settings = store.getSettings();
     expect(settings.partnerName).toBe("Arlo");
     expect(settings.partnerPrompt).toContain("Arlo");
+    // One prompt per kind of channel, each with its own default.
+    expect(settings.oocPrompt).toContain("one or two sentences");
+    expect(settings.literaryPrompt).toContain("prose");
+    expect(settings.casualPrompt).not.toBe("");
   });
 
   test("isn't re-seeded on restart, even if you deleted every channel", () => {
@@ -321,6 +325,7 @@ describe("validation", () => {
     [{ model: "" }, /model must be/],
     [{ partnerName: "  " }, /partnerName must be non-empty/],
     [{ partnerPrompt: 42 }, /partnerPrompt must be text/],
+    [{ oocPrompt: 42 }, /oocPrompt must be text/],
     [[], /must be a JSON object/],
   ])("rejects settings %j", (input, error) => {
     expect(() => validateSettings(input)).toThrow(error);

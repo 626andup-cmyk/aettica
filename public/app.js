@@ -18,7 +18,11 @@
 
 /** Everything the page is currently showing. */
 const state = {
-  /** Server-wide settings: partnerName, partnerPrompt, model, temperature, maxTokens, historyLimit. */
+  /**
+   * Server-wide settings: partnerName, partnerPrompt (who they are),
+   * literaryPrompt, casualPrompt and oocPrompt (how they write in each kind
+   * of channel), model, temperature, maxTokens, historyLimit, appTheme.
+   */
   settings: null,
   /**
    * Every channel, in sidebar order: {id, name, kind, mode, pendingMode,
@@ -1518,12 +1522,15 @@ function readAsBase64(file) {
 
 // ---------------------------------------------------------------- dialogs
 
+/** The partner prompts: who they are, and how they write in each kind of channel. */
+const PROMPT_SETTINGS = ["partnerPrompt", "literaryPrompt", "casualPrompt", "oocPrompt"];
+
 /** Server-wide settings: fill the form from `state.settings` and open it. */
 function openSettings() {
   const s = state.settings;
   const form = els.settingsForm.elements;
   form.partnerName.value = s.partnerName;
-  form.partnerPrompt.value = s.partnerPrompt;
+  for (const key of PROMPT_SETTINGS) form[key].value = s[key];
   form.model.value = s.model;
   form.temperature.value = s.temperature;
   form.maxTokens.value = s.maxTokens;
@@ -1540,7 +1547,7 @@ async function saveSettings(event) {
   try {
     const data = await api("PUT", "/api/settings", {
       partnerName: form.partnerName.value,
-      partnerPrompt: form.partnerPrompt.value,
+      ...Object.fromEntries(PROMPT_SETTINGS.map((key) => [key, form[key].value])),
       model: form.model.value,
       // Number boxes give text; the server wants numbers.
       temperature: Number(form.temperature.value),
