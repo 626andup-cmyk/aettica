@@ -78,6 +78,7 @@ function channel(overrides: Partial<Channel>): Channel {
     mode: "literary",
     pendingMode: null,
     theme: null,
+    assignment: null,
     position: 0,
     createdAt: "",
     ...overrides,

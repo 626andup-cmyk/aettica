@@ -20,12 +20,25 @@ export type FakeReply =
   /** Wait this many ms before replying, for testing overlapping turns. */
   | { content: string; delayMs: number }
   /** Start the reply, then never finish it: a model that stalls halfway. */
-  | { stallMidReply: true };
+  | { stallMidReply: true }
+  /**
+   * Ask for tool calls through the API's `tool_calls` field, with optional
+   * text alongside. `arguments` can be JSON text or an object (some
+   * providers send objects).
+   */
+  | { toolCalls: { name: string; arguments: string | object }[]; content?: string | null };
 
 export interface FakeNanoGpt {
   baseUrl: string;
   /** Every chat completion request received, oldest first. */
-  requests: Array<{ model: string; messages: ChatMessage[]; temperature: number; max_tokens: number; auth: string | null }>;
+  requests: Array<{
+    model: string;
+    messages: ChatMessage[];
+    temperature: number;
+    max_tokens: number;
+    tools?: { function: { name: string } }[];
+    auth: string | null;
+  }>;
   /** Queue replies; each request takes the next one. Defaults to "Reply N". */
   replies: FakeReply[];
   stop: () => void;
@@ -56,6 +69,25 @@ export function startFakeNanoGpt(): FakeNanoGpt {
             start: (controller) => controller.enqueue(new TextEncoder().encode('{"choices": [')),
           });
           return new Response(stream, { headers: { "Content-Type": "application/json" } });
+        }
+        if ("toolCalls" in reply) {
+          return Response.json({
+            model: body.model,
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: reply.content ?? null,
+                  tool_calls: reply.toolCalls.map((call, i) => ({
+                    id: `call_${fake.requests.length}_${i}`,
+                    type: "function",
+                    function: { name: call.name, arguments: call.arguments },
+                  })),
+                },
+                finish_reason: "tool_calls",
+              },
+            ],
+          });
         }
         if ("delayMs" in reply) await Bun.sleep(reply.delayMs);
         return Response.json({

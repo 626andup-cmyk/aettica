@@ -145,6 +145,33 @@ describe("the database layout", () => {
     db.close();
   });
 
+  test("moves stage 4's model settings into a connection profile", () => {
+    const path = join(dir.path, "stage4.db");
+    const old = new Database(path);
+    for (const step of MIGRATIONS.slice(0, 4)) {
+      if (typeof step === "string") old.exec(step);
+      else step(old);
+    }
+    old.exec("PRAGMA user_version = 4");
+    const setting = old.query("INSERT INTO settings (key, value) VALUES (?, ?)");
+    setting.run("model", JSON.stringify("zai/glm-5.2"));
+    setting.run("temperature", "1.1");
+    setting.run("maxTokens", "700");
+    old.close();
+
+    const db = openDatabase(path);
+    const profiles = db.query("SELECT id, name, model, temperature, max_tokens FROM profiles").all() as {
+      id: string;
+      name: string;
+    }[];
+    expect(profiles).toMatchObject([{ name: "glm-5.2", model: "zai/glm-5.2", temperature: 1.1, max_tokens: 700 }]);
+    const settings = Object.fromEntries(
+      (db.query("SELECT key, value FROM settings").all() as { key: string; value: string }[]).map((r) => [r.key, JSON.parse(r.value)]),
+    );
+    expect(settings).toEqual({ rpAssignment: `profile:${profiles[0]!.id}`, oocAssignment: `profile:${profiles[0]!.id}` });
+    db.close();
+  });
+
   test("refuses a database from a newer version of Aettica", () => {
     const path = join(dir.path, "future.db");
     const db = new Database(path);
@@ -156,10 +183,10 @@ describe("the database layout", () => {
 
 describe("settings", () => {
   test("keep their changes after a restart", () => {
-    store.updateSettings({ temperature: 0.5, partnerName: "Sol" });
+    store.updateSettings({ historyLimit: 12, partnerName: "Sol" });
     store.close();
     store = new Store(dir.path);
-    expect(store.getSettings()).toMatchObject({ temperature: 0.5, partnerName: "Sol", historyLimit: 40 });
+    expect(store.getSettings()).toMatchObject({ historyLimit: 12, partnerName: "Sol" });
   });
 });
 
@@ -314,17 +341,17 @@ describe("messages", () => {
 
 describe("validation", () => {
   test("accepts valid settings and drops unknown fields", () => {
-    expect(validateSettings({ temperature: 1, model: "  a/b  ", sneaky: true })).toEqual({ temperature: 1, model: "a/b" });
+    expect(validateSettings({ historyLimit: 5, rpAssignment: "profile:abc", sneaky: true })).toEqual({
+      historyLimit: 5,
+      rpAssignment: "profile:abc",
+    });
   });
 
   test.each([
-    [{ temperature: 5 }, /temperature must be between/],
-    [{ temperature: "hot" }, /temperature must be a number/],
-    [{ maxTokens: 10.5 }, /maxTokens must be a whole number/],
     [{ historyLimit: 0 }, /historyLimit must be between/],
-    [{ model: "" }, /model must be/],
     [{ partnerName: "  " }, /partnerName must be non-empty/],
     [{ partnerPrompt: 42 }, /partnerPrompt must be text/],
+    [{ rpAssignment: "gpt" }, /rpAssignment must be/],
     [{ oocPrompt: 42 }, /oocPrompt must be text/],
     [[], /must be a JSON object/],
   ])("rejects settings %j", (input, error) => {

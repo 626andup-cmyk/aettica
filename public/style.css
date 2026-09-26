@@ -816,7 +816,7 @@ textarea {
 /* ============================================================ controls */
 
 textarea,
-input:not([type="radio"]) {
+input:not([type="radio"], [type="checkbox"]) {
   width: 100%;
   padding: 10px 12px;
   border: var(--input-border);
@@ -825,7 +825,7 @@ input:not([type="radio"]) {
 }
 
 textarea:focus,
-input:not([type="radio"]):focus {
+input:not([type="radio"], [type="checkbox"]):focus {
   outline: none;
   border: var(--input-focus-border);
 }
@@ -1416,4 +1416,442 @@ button:disabled {
 
 .cast-unpin {
   margin-left: auto;
+}
+
+/* ============================================ profiles and roulettes */
+
+.section-title {
+  margin: 18px 0 6px;
+  font: 600 15px var(--font-heading);
+  color: var(--text-strong);
+}
+
+.profile-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+/* One profile or roulette: its name and badges. The whole row opens it. */
+.profile-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-row:hover {
+  background: var(--message-hover-bg);
+}
+
+.profile-row-name {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.assignment-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.link-button.inline-link {
+  font-size: inherit;
+  color: var(--accent);
+}
+
+/* A checkbox with a title and a hint, like the kind picker's options. */
+.dialog label.check-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  font-size: var(--font-size);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.check-option input {
+  margin-top: 5px;
+  accent-color: var(--accent);
+}
+
+.advanced {
+  margin-top: 14px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* A roulette's rows: profile, weight, share, remove. */
+.roulette-entry {
+  display: grid;
+  grid-template-columns: 1fr 80px 44px auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.roulette-share {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+@media (max-width: 599px) {
+  .assignment-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================ stage 6: your partner acts */
+
+/* A turn's actions, under its messages: one line that opens into details. */
+.activity {
+  padding: 0 16px 4px 68px;
+}
+
+.activity-summary {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.activity-summary:hover {
+  color: var(--text);
+}
+
+.activity.has-errors .activity-summary {
+  color: var(--error-text);
+}
+
+.activity-details,
+.tool-log-list {
+  margin: 4px 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+/* One tool call: its name and badges, a summary, and the raw details. */
+.tool-call {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  font-size: 14px;
+}
+
+.tool-call[data-status="error"] {
+  border-color: var(--error-text);
+}
+
+.tool-call-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-call-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.tool-call[data-status="error"] .tool-call-summary {
+  color: var(--error-text);
+}
+
+.tool-call-summary {
+  margin: 4px 0 0;
+}
+
+.tool-call-raw {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.tool-call-raw pre {
+  margin: 4px 0 0;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px / 1.5 var(--font-mono);
+}
+
+.tool-log {
+  width: min(820px, 100vw - 24px);
+}
+
+.tool-log-actions {
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* A small checkbox with its label, inline. */
+.dialog label.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+}
+
+.check-inline input {
+  accent-color: var(--accent);
+}
+
+.tool-test-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.tool-test {
+  flex: 1;
+  margin: 0;
+}
+
+.tool-test[data-verdict="native"] {
+  color: var(--text);
+}
+
+.tool-test[data-verdict="none"],
+.tool-test[data-verdict="broken"] {
+  color: var(--error-text);
+}
+
+/* ------------------------------------------------------------ the inbox */
+
+.inbox-button {
+  position: relative;
+  margin-left: auto;
+}
+
+/* The count of things waiting for you, on the inbox button. */
+.inbox-count {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--danger);
+  color: var(--danger-text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+
+.inbox-card {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+}
+
+.inbox-card-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.inbox-card-text {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.inbox-card-buttons {
+  margin-top: 8px;
+}
+
+/* A suggestion's before and after, per changed part. */
+.suggestion-diff {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+
+.suggestion-diff dt {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.suggestion-diff dd {
+  margin: 2px 0 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+}
+
+.diff-before {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.diff-after {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* ------------------------------------------------------------- comments */
+
+.comment-mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: inherit;
+  cursor: pointer;
+}
+
+.comment-mark.resolved {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* The 💬 count under a message with comments. */
+.message-comments {
+  grid-column: 2;
+  justify-self: start;
+  margin-top: 2px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--channel-link-active-bg);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Floats below text you select in a message. */
+.comment-float {
+  position: fixed;
+  z-index: 20;
+  box-shadow: var(--dialog-shadow);
+}
+
+.thread-picker {
+  margin-bottom: 8px;
+}
+
+.thread-quote {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.thread-comments {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.thread-comment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 6px 0;
+}
+
+.thread-comment-author {
+  font-weight: 600;
+  color: var(--partner-color);
+}
+
+.thread-comment[data-author="user"] .thread-comment-author {
+  color: var(--user-color);
+}
+
+.thread-comment-note {
+  flex-basis: 100%;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.thread-status {
+  padding: 0 0 8px;
+}
+
+/* ---------------------------------------------------------- attachments */
+
+.attach-row,
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.message-attachments {
+  grid-column: 2;
+  margin-top: 4px;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: var(--input-border);
+  border-radius: 999px;
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+button.attach-chip {
+  cursor: pointer;
+}
+
+.attach-list {
+  max-height: 50vh;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.dialog label.attach-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 4px 2px;
+  font-size: var(--font-size);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.attach-option input {
+  accent-color: var(--accent);
 }

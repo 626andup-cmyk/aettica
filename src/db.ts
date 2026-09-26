@@ -241,6 +241,144 @@ export const MIGRATIONS: Migration[] = [
     db.exec("ALTER TABLE channels DROP COLUMN character_name");
     db.exec("ALTER TABLE channels DROP COLUMN character_sheet");
   },
+
+  // ---------------------------------------------------------------- 5
+  // Stage 5: connection profiles and roulettes.
+  (db) => {
+    db.exec(`
+    -- A connection profile: one model and its settings (see src/profiles.ts).
+    CREATE TABLE profiles (
+      id               TEXT PRIMARY KEY,
+      name             TEXT NOT NULL,
+      model            TEXT NOT NULL,
+      temperature      REAL NOT NULL,
+      max_tokens       INTEGER NOT NULL,
+      top_p            REAL,
+      reasoning_effort TEXT CHECK (reasoning_effort IN ('low', 'medium', 'high')),
+      -- SQLite has no true/false type: 1 is true, 0 is false.
+      supports_tools   INTEGER NOT NULL DEFAULT 1,
+      quirk_prompt     TEXT NOT NULL DEFAULT '',
+      extra_params     TEXT NOT NULL DEFAULT '',
+      position         INTEGER NOT NULL,
+      created_at       TEXT NOT NULL
+    );
+
+    -- A roulette: a weighted set of profiles.
+    CREATE TABLE roulettes (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      position   INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE roulette_profiles (
+      roulette_id TEXT NOT NULL REFERENCES roulettes (id) ON DELETE CASCADE,
+      profile_id  TEXT NOT NULL REFERENCES profiles (id) ON DELETE CASCADE,
+      weight      REAL NOT NULL CHECK (weight > 0),
+      PRIMARY KEY (roulette_id, profile_id)
+    );
+
+    -- A channel's own profile or roulette ("profile:<id>" or
+    -- "roulette:<id>"), overriding the server-wide one. NULL: no override.
+    ALTER TABLE channels ADD COLUMN assignment TEXT;
+
+    -- The name of the profile that wrote each partner message.
+    ALTER TABLE messages ADD COLUMN profile TEXT;
+    `);
+
+    // The model settings become the first profile, which then writes both
+    // jobs, so nothing changes until you change it. (A brand-new server has
+    // no saved settings, and gets the defaults.)
+    const saved = (key: string): unknown => {
+      const row = db.query("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | null;
+      return row ? JSON.parse(row.value) : undefined;
+    };
+    const model = (saved("model") as string | undefined) ?? "deepseek-ai/DeepSeek-V3.1-Terminus";
+    const id = crypto.randomUUID();
+    db.query(
+      `INSERT INTO profiles (id, name, model, temperature, max_tokens, position, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
+    ).run(
+      id,
+      model.split("/").at(-1) || model,
+      model,
+      (saved("temperature") as number | undefined) ?? 0.9,
+      (saved("maxTokens") as number | undefined) ?? 1024,
+      new Date().toISOString(),
+    );
+    db.exec("DELETE FROM settings WHERE key IN ('model', 'temperature', 'maxTokens')");
+    const assign = db.query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+    assign.run("rpAssignment", JSON.stringify(`profile:${id}`));
+    assign.run("oocAssignment", JSON.stringify(`profile:${id}`));
+  },
+
+  // ---------------------------------------------------------------- 6
+  // Stage 6: tools, the approval queue, message comments, and notes attached
+  // to messages.
+  `
+  -- Every tool call your partner makes, kept for the activity shown under
+  -- their messages and for troubleshooting (see src/partner.ts).
+  CREATE TABLE tool_calls (
+    id         TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+    -- The turn the call belongs to: the same id as the messages it wrote.
+    turn_id    TEXT NOT NULL,
+    -- Which round of the turn: a model can call tools, see the results,
+    -- and call more.
+    round      INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    -- The arguments exactly as the model wrote them, even if broken.
+    arguments  TEXT NOT NULL,
+    -- What was sent back to the model, as JSON.
+    result     TEXT NOT NULL,
+    status     TEXT NOT NULL CHECK (status IN ('ok', 'error')),
+    -- A short description for people, e.g. "pinned Tamsin to #story".
+    summary    TEXT NOT NULL DEFAULT '',
+    -- 'native' if the API returned it as a tool call, 'text' if it was
+    -- found written out in the reply (some models do that).
+    source     TEXT NOT NULL CHECK (source IN ('native', 'text')),
+    profile    TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX tool_calls_by_channel ON tool_calls (channel_id, created_at);
+
+  -- Comments on messages, in threads. The first comment of a thread has
+  -- thread_id = its own id, and holds the highlighted text and whether the
+  -- thread is resolved.
+  CREATE TABLE comments (
+    id         TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+    thread_id  TEXT NOT NULL,
+    author     TEXT NOT NULL CHECK (author IN ('user', 'partner')),
+    quote      TEXT NOT NULL DEFAULT '',
+    note       TEXT NOT NULL,
+    resolved   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX comments_by_message ON comments (message_id);
+
+  -- Things your partner asks you to approve that aren't notebook changes
+  -- (those are suggestions): for now, deleting a channel.
+  CREATE TABLE proposals (
+    id          TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL CHECK (kind IN ('delete_channel')),
+    target_id   TEXT NOT NULL,
+    -- The target's name when proposed, so the card still makes sense later.
+    target_name TEXT NOT NULL,
+    reason      TEXT NOT NULL DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied')),
+    created_at  TEXT NOT NULL,
+    resolved_at TEXT
+  );
+
+  -- Notebook entries you attached to a message, so they're sent to your
+  -- partner in full while that message is in the conversation.
+  CREATE TABLE message_attachments (
+    message_id TEXT NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+    entry_id   TEXT NOT NULL REFERENCES notebook_entries (id) ON DELETE CASCADE,
+    PRIMARY KEY (message_id, entry_id)
+  );
+  `,
 ];
 
 /**

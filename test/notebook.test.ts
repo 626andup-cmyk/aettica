@@ -169,20 +169,25 @@ describe("deleting", () => {
     expect(notebook.listEntries("user")).toEqual([]);
   });
 
-  test("your partner's entries can't be deleted by you, only unpinned", () => {
-    const ilse = make({ name: "Ilse", owner: "partner" });
-    expect(() => notebook.deleteEntry("user", ilse.id)).toThrow(/unpin it instead/);
+  test("your partner deletes their own entries straight away", () => {
+    const stranger = partnerMakes({ name: "The Stranger" });
+    expect(notebook.deleteEntry("partner", stranger.id)).toEqual({ deleted: true });
   });
 
-  test("your partner never deletes directly, only suggests it", () => {
-    const kit = make({ name: "Kit", editing: "suggest" });
-    const result = notebook.deleteEntry("partner", kit.id);
-    expect(result).toMatchObject({ suggestion: { change: { delete: true } } });
-    expect(() => notebook.deleteEntry("partner", make({ name: "Jun" }).id)).toThrow(/only suggest deleting/);
+  test("deleting the other person's entry is a suggestion for its owner", () => {
+    const ilse = make({ name: "Ilse", owner: "partner" });
+    const mine = notebook.deleteEntry("user", ilse.id) as { suggestion: { id: string } };
+    expect(notebook.waitingFor("partner").map((s) => s.id)).toEqual([mine.suggestion.id]);
+
+    const kit = make({ name: "Kit" });
+    make({ name: "Jun" });
+    const theirs = notebook.deleteEntry("partner", kit.id) as { suggestion: { id: string } };
+    expect(theirs).toMatchObject({ suggestion: { change: { delete: true } } });
+    expect(() => notebook.reviewSuggestion("partner", theirs.suggestion.id, "accepted")).toThrow(PermissionError);
 
     // Accepting the suggestion deletes it.
-    notebook.reviewSuggestion("user", (result as { suggestion: { id: string } }).suggestion.id, "accepted");
-    expect(notebook.listEntries("user").map((e) => e.name)).toEqual(["Jun"]);
+    notebook.reviewSuggestion("user", theirs.suggestion.id, "accepted");
+    expect(notebook.listEntries("user").map((e) => e.name)).toEqual(["Ilse", "Jun"]);
   });
 
   test("deleting shared lore is a suggestion", () => {

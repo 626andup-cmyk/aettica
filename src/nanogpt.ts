@@ -15,7 +15,7 @@
  * This file uses the built-in `fetch`, so there is no SDK to install.
  */
 
-import type { ChatMessage } from "./types.ts";
+import type { ApiMessage, ReasoningEffort } from "./types.ts";
 
 /** What the client needs to know to reach the API. */
 export interface ApiOptions {
@@ -26,12 +26,40 @@ export interface ApiOptions {
   timeoutMs: number;
 }
 
+/** A tool the model may call, in the API's format (see `src/tools.ts`). */
+export interface ToolSpec {
+  type: "function";
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+}
+
+/** A tool call the model asked for, as returned by the API. */
+export interface NativeToolCall {
+  id: string;
+  name: string;
+  /** The arguments as the model wrote them: JSON text, which may be broken. */
+  arguments: string;
+}
+
 /** The parameters of one generation request. */
 export interface CompletionRequest {
   model: string;
-  messages: ChatMessage[];
+  messages: ApiMessage[];
   temperature: number;
   maxTokens: number;
+  /** Nucleus sampling. Left out of the request when not set. */
+  topP?: number | null;
+  /** How hard a reasoning model thinks. Left out when not set. */
+  reasoningEffort?: ReasoningEffort | null;
+  /** More request fields, sent as they are (a profile's extra parameters). */
+  extraParams?: Record<string, unknown>;
+  /** Tools the model may call. Left out when empty. */
+  tools?: ToolSpec[];
+  /**
+   * Accept a reply with no text and no tool calls instead of treating it as
+   * an error. Used after tool calls, when the model may have nothing more
+   * to say.
+   */
+  allowEmpty?: boolean;
   /**
    * Lets the caller stop the request early (the Stop button). When this
    * signal fires, the request is abandoned and `CancelledError` is thrown.
@@ -41,8 +69,10 @@ export interface CompletionRequest {
 
 /** A successful generation. */
 export interface CompletionResult {
-  /** The generated text, with any `<think>` reasoning removed. */
+  /** The generated text, with any `<think>` reasoning removed. May be "" if the model only called tools. */
   content: string;
+  /** Tool calls the model asked for through the API (not ones written as text). */
+  toolCalls: NativeToolCall[];
   /** The model that actually answered, as reported by the API. */
   model: string;
   /** Why generation stopped: `"stop"` is normal, `"length"` means it hit `maxTokens`. */
@@ -88,30 +118,23 @@ export async function createChatCompletion(
 
   // The request body. Note the API uses snake_case (`max_tokens`), while
   // our own code uses camelCase (`maxTokens`).
-  const body = {
-    model: request.model,
-    messages: request.messages,
-    temperature: request.temperature,
-    max_tokens: request.maxTokens,
-    // We wait for the whole reply rather than streaming it word by word.
-    // Streaming is a nice later improvement but adds complexity.
-    stream: false,
-  };
-
+  const body = requestBody(request);
   const json = await postJson(options, "/chat/completions", body, request.signal);
 
   // Dig the text out of the response. Everything is checked because a model
   // provider having a bad day can return all sorts of shapes.
   const choice = (json as { choices?: unknown[] })?.choices?.[0] as
-    | { message?: { content?: unknown }; finish_reason?: string }
+    | { message?: { content?: unknown; tool_calls?: unknown }; finish_reason?: string }
     | undefined;
   const rawContent = choice?.message?.content;
-  if (typeof rawContent !== "string") {
+  const toolCalls = readToolCalls(choice?.message?.tool_calls);
+  // With tool calls, content is often `null`: the model only acted.
+  if (typeof rawContent !== "string" && toolCalls.length === 0 && !request.allowEmpty) {
     throw new ApiError("The model's reply didn't contain any text.");
   }
 
-  const content = stripReasoning(rawContent);
-  if (content === "") {
+  const content = typeof rawContent === "string" ? stripReasoning(rawContent) : "";
+  if (content === "" && toolCalls.length === 0 && !request.allowEmpty) {
     throw new ApiError(
       choice?.finish_reason === "length"
         ? "The model ran out of tokens before writing anything. Try raising Max tokens."
@@ -121,9 +144,53 @@ export async function createChatCompletion(
 
   return {
     content,
+    toolCalls,
     model: typeof (json as { model?: unknown }).model === "string" ? (json as { model: string }).model : request.model,
     finishReason: choice?.finish_reason ?? null,
   };
+}
+
+/**
+ * The JSON body for a request. Optional settings are only sent when they're
+ * set, because some models reject parameters they don't know.
+ */
+export function requestBody(request: CompletionRequest): Record<string, unknown> {
+  return {
+    // A profile's extra fields go first, so the app's own fields win.
+    ...request.extraParams,
+    model: request.model,
+    messages: request.messages,
+    temperature: request.temperature,
+    max_tokens: request.maxTokens,
+    ...(request.topP != null ? { top_p: request.topP } : {}),
+    ...(request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
+    ...(request.tools && request.tools.length > 0 ? { tools: request.tools, tool_choice: "auto" } : {}),
+    // We wait for the whole reply rather than streaming it word by word.
+    // Streaming is a nice later improvement but adds complexity.
+    stream: false,
+  };
+}
+
+/**
+ * Read `message.tool_calls` from a response, tolerating the variations
+ * between providers: arguments sent as an object instead of JSON text, or a
+ * missing id.
+ */
+function readToolCalls(value: unknown): NativeToolCall[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw, index) => {
+    const call = raw as { id?: unknown; function?: { name?: unknown; arguments?: unknown } };
+    const name = call?.function?.name;
+    if (typeof name !== "string" || name === "") return [];
+    const args = call.function?.arguments;
+    return [
+      {
+        id: typeof call.id === "string" && call.id ? call.id : `call_${index}`,
+        name,
+        arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
+      },
+    ];
+  });
 }
 
 /**

@@ -33,8 +33,11 @@
  * of channel: one each for literary scenes, casual scenes and OOC. Only the
  * one that applies is sent, so your partner can't mix them up. In RP
  * channels, layer 5 shows scene breaks where they fall.
- * Layer 4 has its slot here already, empty, so stage 5 adds content without
- * reshaping this file.
+ *
+ * Layer 4 is the connection profile's "model notes": instructions that tame
+ * the model running this turn ("don't restate the scene"), never who your
+ * partner is. It changes with the profile, so a roulette can pair each
+ * model with its own notes.
  */
 
 import type { PromptEntry } from "./notebook.ts";
@@ -149,6 +152,39 @@ export interface PromptInput {
    * channel, by channel id, and every notebook entry they can see.
    */
   overview?: { castNames: Record<string, string[]>; entries: PromptEntry[] };
+  /** Layer 4: the connection profile's notes on this model's habits. */
+  modelNotes?: string;
+  /** Notebook entries you attached to messages in the conversation, as your partner may see them. */
+  attached?: PromptEntry[];
+  /** Open comment threads on this channel's messages. */
+  threads?: PromptThread[];
+  /** Suggestions waiting for your partner's review (only offered with tools). */
+  reviews?: PromptReview[];
+  /** Short lines about what your partner did recently: tool actions, and how their proposals went. */
+  recentActions?: string[];
+  /** Whether your partner can use tools this turn (adds guidance on them). */
+  tools?: boolean;
+  /**
+   * A comment your partner is replying to: the turn writes a reply in its
+   * thread instead of a post.
+   */
+  replyingTo?: { threadId: string; quote: string; note: string; onYourMessage: boolean };
+}
+
+/** A comment thread, as your partner sees it. */
+export interface PromptThread {
+  id: string;
+  quote: string;
+  /** Whether the message is your partner's own. */
+  onYourMessage: boolean;
+  comments: { author: "user" | "partner"; note: string }[];
+}
+
+/** A suggestion waiting for your partner, described for them. */
+export interface PromptReview {
+  id: string;
+  entry: string;
+  description: string;
 }
 
 /**
@@ -156,7 +192,21 @@ export interface PromptInput {
  *
  * @returns The messages to send to the chat completions API.
  */
-export function buildPromptStack({ settings, channel, channels, messages, notebook, overview }: PromptInput): ChatMessage[] {
+export function buildPromptStack({
+  settings,
+  channel,
+  channels,
+  messages,
+  notebook,
+  overview,
+  modelNotes,
+  attached,
+  threads,
+  reviews,
+  recentActions,
+  tools,
+  replyingTo,
+}: PromptInput): ChatMessage[] {
   const isRp = channel.kind === "rp";
   const pinned = notebook?.pinned ?? [];
   const characterNames = (player: Player) =>
@@ -193,8 +243,15 @@ export function buildPromptStack({ settings, channel, channels, messages, notebo
     // Layer 3, in OOC: an overview of the server and the notebook instead.
     { title: "Channels on your server", content: isRp ? null : describeChannels(channels, channel, overview?.castNames ?? {}) },
     { title: "Your shared notebook", content: isRp ? null : describeNotebook(overview?.entries ?? []) },
-    // Layer 4: model-quirk prompt from the connection profile. Stage 5.
-    { title: "Model notes", content: null },
+    // Still layer 3, in both: notes attached to messages, comment threads,
+    // what's waiting for your partner, and what they've done lately.
+    { title: "Attached notes", content: describeEntries(attached ?? []) },
+    { title: "Comment threads", content: describeThreads(threads ?? []) },
+    { title: "Waiting for your review", content: tools ? describeReviews(reviews ?? []) : null },
+    { title: "What you did recently", content: (recentActions ?? []).map((line) => `- ${line}`).join("\n") },
+    { title: "Tools", content: tools ? toolGuidance(channel.kind) : null },
+    // Layer 4: the connection profile's notes on this model's habits.
+    { title: "Model notes", content: modelNotes ?? null },
   ];
 
   const system: ChatMessage = { role: "system", content: renderLayers(layers) };
@@ -206,7 +263,10 @@ export function buildPromptStack({ settings, channel, channels, messages, notebo
   // knows it's being asked to continue. This is what lets the partner take a
   // turn without you writing anything: the design's core rule.
   const last = history.at(-1);
-  if (messages.at(-1)?.kind === "scene_break") {
+  if (replyingTo) {
+    // A reply to a comment: whatever came last, ask for the reply.
+    history.push({ role: "user", content: commentNudge(replyingTo) });
+  } else if (messages.at(-1)?.kind === "scene_break") {
     // The conversation ends on a scene break (already shown as an OOC
     // line): ask for the new scene's opening.
     last!.content += `\n\n${NEW_SCENE_NUDGE}`;
@@ -216,6 +276,59 @@ export function buildPromptStack({ settings, channel, channels, messages, notebo
   }
 
   return [system, ...history];
+}
+
+/**
+ * Open comment threads, with the short ids your partner uses to reply:
+ *
+ *   [a1b2c3d4] On your message: "the lamp guttered"
+ *     The user: Love this image.
+ *     You: Thank you!
+ */
+export function describeThreads(threads: PromptThread[]): string | null {
+  if (threads.length === 0) return null;
+  const blocks = threads.map((t) => {
+    const where = t.onYourMessage ? "your message" : "the user's message";
+    const head = `[${t.id.slice(0, 8)}] On ${where}${t.quote ? `: "${t.quote}"` : ""}`;
+    const lines = t.comments.map((c) => `  ${c.author === "user" ? "The user" : "You"}: ${c.note}`);
+    return [head, ...lines].join("\n");
+  });
+  return [
+    "Out-of-character notes on messages. The characters never know about these.",
+    "",
+    ...blocks,
+  ].join("\n");
+}
+
+/** Suggestions waiting for your partner, with ids for `review_suggestion`. */
+function describeReviews(reviews: PromptReview[]): string | null {
+  if (reviews.length === 0) return null;
+  return [
+    "The user suggested these notebook changes. Accept or reject each with review_suggestion when you've considered it.",
+    "",
+    ...reviews.map((r) => `- [${r.id.slice(0, 8)}] ${r.entry}: ${r.description}`),
+  ].join("\n");
+}
+
+/** How to use tools, by kind of channel. */
+export function toolGuidance(kind: ChannelKind): string {
+  const common = [
+    "You can act through tools. Use them only when they help: most turns need none, and doing nothing is fine.",
+    "To check details on a character or lore, use read_notebook_entry. Never guess at what an entry says.",
+    "Never mention tools, ids or tool results in what you write.",
+  ];
+  return (
+    kind === "rp"
+      ? [...common, "After any tools, still write your post, unless you call do_nothing."]
+      : [...common, "Act when the user asks, or when you're building something together. Then tell them in your own words what you did."]
+  ).join("\n");
+}
+
+/** The last message of a comment-reply turn. */
+export function commentNudge(comment: NonNullable<PromptInput["replyingTo"]>): string {
+  const where = comment.onYourMessage ? "your message" : "their own message";
+  const quote = comment.quote ? ` on "${comment.quote}"` : "";
+  return `(OOC: The user left a comment on ${where}${quote}: "${comment.note}". Reply to their comment as yourself, out of character, in one to three sentences. Don't continue the story or write a post. Your reply goes in the comment thread.)`;
 }
 
 /**

@@ -395,9 +395,9 @@ export class Notebook {
   }
 
   /**
-   * Delete an entry. Your own entries are deleted at once. Shared lore
-   * becomes a suggestion to delete it; anything else can't be deleted by
-   * you (and your partner never deletes directly).
+   * Delete an entry. Each of you deletes your own entries at once. Deleting
+   * anything else you can see (the other person's entries, or shared lore)
+   * becomes a suggestion for the other person to approve.
    */
   deleteEntry(actor: Author, id: string): { deleted: true } | { suggestion: Suggestion } {
     const current = this.getEntry(actor, id);
@@ -405,12 +405,7 @@ export class Notebook {
       this.db.query("DELETE FROM notebook_entries WHERE id = $id").run({ id });
       return { deleted: true };
     }
-    if (current.access.edit === "suggest" || current.owner === "joint") {
-      return { suggestion: this.addSuggestion(actor, id, { delete: true }) };
-    }
-    throw new PermissionError(
-      actor === "partner" ? "Your partner can only suggest deleting things." : "This entry isn't yours to delete. You can unpin it instead.",
-    );
+    return { suggestion: this.addSuggestion(actor, id, { delete: true }) };
   }
 
   // --------------------------------------------------------- suggestions
@@ -431,8 +426,7 @@ export class Notebook {
   reviewSuggestion(actor: Author, id: string, decision: "accepted" | "rejected"): Suggestion {
     const suggestion = this.getSuggestion(actor, id);
     const entry = this.getEntry(actor, suggestion.entryId);
-    const reviewer = entry.owner === "joint" ? (suggestion.author === "user" ? "partner" : "user") : entry.owner;
-    if (reviewer !== actor) throw new PermissionError("This suggestion is for the other person to review.");
+    if (this.reviewerOf(suggestion) !== actor) throw new PermissionError("This suggestion is for the other person to review.");
 
     this.db.transaction(() => {
       if (decision === "accepted") {
@@ -442,6 +436,24 @@ export class Notebook {
       this.resolveSuggestion(id, decision);
     })();
     return { ...suggestion, status: decision };
+  }
+
+  /**
+   * Who reviews a suggestion: the entry's owner, or for shared lore (or
+   * your partner proposing to delete their own entry), whoever didn't make
+   * it. Nobody reviews their own suggestion.
+   */
+  reviewerOf(suggestion: Suggestion): Author {
+    const entry = this.rawEntry(suggestion.entryId);
+    if (!entry || entry.owner === "joint" || entry.owner === suggestion.author) {
+      return suggestion.author === "user" ? "partner" : "user";
+    }
+    return entry.owner;
+  }
+
+  /** Pending suggestions waiting for someone to review, oldest first. */
+  waitingFor(actor: Author): Suggestion[] {
+    return this.listSuggestions(actor).filter((s) => this.reviewerOf(s) === actor);
   }
 
   /** Take back a suggestion you made. */
@@ -529,6 +541,22 @@ export class Notebook {
   }
 
   /**
+   * Particular entries, as your partner's prompt gets them: only those they
+   * can see, each marked if it's hidden from you. Used for notes attached
+   * to messages.
+   */
+  forPromptEntries(ids: string[]): PromptEntry[] {
+    const folders = this.folderMap();
+    return [...new Set(ids)].flatMap((id) => {
+      const entry = this.rawEntry(id);
+      if (!entry) return [];
+      const settings = this.settingsOf(entry, folders);
+      if (!canSee("partner", settings)) return [];
+      return [{ entry, hiddenFromUser: !canSee("user", settings) }];
+    });
+  }
+
+  /**
    * Every notebook entry your partner can see, for the OOC prompt's
    * overview, each marked if it's hidden from you.
    */
@@ -578,7 +606,8 @@ export class Notebook {
     return effectiveSettings(entry, entry.folderId ? (folders.get(entry.folderId) ?? null) : null);
   }
 
-  private canSeeEntry(actor: Author, id: string): boolean {
+  /** Whether someone can see an entry (false if it doesn't exist). */
+  canSeeEntry(actor: Author, id: string): boolean {
     const entry = this.rawEntry(id);
     return entry !== null && canSee(actor, this.settingsOf(entry));
   }

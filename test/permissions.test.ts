@@ -102,11 +102,12 @@ describe("canChangeSettings and canDelete", () => {
     expect(canChangeSettings("user", "joint")).toBe(false);
   });
 
-  test("you delete only your own entries, and your partner never deletes directly", () => {
+  test("each of you deletes only your own entries", () => {
     expect(canDelete("user", settings("user"))).toBe(true);
     expect(canDelete("user", settings("partner"))).toBe(false);
     expect(canDelete("user", settings("joint"))).toBe(false);
-    expect(canDelete("partner", settings("partner"))).toBe(false);
+    expect(canDelete("partner", settings("partner"))).toBe(true);
+    expect(canDelete("partner", settings("user"))).toBe(false);
   });
 });
 

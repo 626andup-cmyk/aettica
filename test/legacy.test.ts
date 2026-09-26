@@ -50,13 +50,9 @@ describe("importing a stage 1 chat", () => {
       ["m2", "partner", "Ahoy.", ["Captain Reyes"], "2026-09-01T10:01:00.000Z", "old/model"],
     ]);
 
-    expect(store.getSettings()).toMatchObject({
-      partnerPrompt: "You are Sol.",
-      model: "old/model",
-      temperature: 1.1,
-      maxTokens: 800,
-      historyLimit: 20,
-    });
+    expect(store.getSettings()).toMatchObject({ partnerPrompt: "You are Sol.", historyLimit: 20 });
+    // The model settings went into the first connection profile.
+    expect(store.profiles.list()).toMatchObject([{ name: "model", model: "old/model", temperature: 1.1, maxTokens: 800 }]);
     store.close();
   });
 
@@ -75,7 +71,7 @@ describe("importing a stage 1 chat", () => {
   test("skips invalid old settings instead of failing", () => {
     writeStage1Chat({ settings: { temperature: 99, model: "ok/model" }, messages: [] });
     const store = new Store(dir.path);
-    expect(store.getSettings()).toMatchObject({ temperature: 0.9, model: "ok/model" });
+    expect(store.profiles.list()[0]).toMatchObject({ temperature: 0.9, model: "ok/model" });
     store.close();
   });
 

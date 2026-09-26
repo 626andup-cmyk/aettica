@@ -208,6 +208,11 @@ export interface Channel {
    * It only restyles the channel itself; see `src/themes.ts`.
    */
   theme: string | null;
+  /**
+   * The profile or roulette that writes here, overriding the server-wide
+   * one for this kind of channel (see `Settings.rpAssignment`), or `null`.
+   */
+  assignment: string | null;
   /** Where the channel sits in the sidebar: 0 is the top. */
   position: number;
   /** When the channel was created, as an ISO 8601 timestamp. */
@@ -251,12 +256,18 @@ export interface Message {
   createdAt: string;
   /** When the message was last edited, if ever. */
   editedAt?: string;
-  /**
-   * For partner messages: which model wrote it. Stage 5 replaces this with a
-   * connection profile id, but recording the model now means old messages
-   * are never a mystery.
-   */
+  /** For partner messages: which model wrote it. */
   model?: string;
+  /**
+   * For partner messages: the name of the connection profile that wrote it,
+   * as it was called at the time (profiles can be renamed or deleted later).
+   */
+  profile?: string;
+  /**
+   * Ids of notebook entries you attached to this message: they're sent to
+   * your partner in full while the message is in the conversation.
+   */
+  attachments: string[];
 }
 
 /**
@@ -281,15 +292,14 @@ export interface Settings {
   casualPrompt: string;
   /** How your partner talks out of character (see `literaryPrompt`). */
   oocPrompt: string;
-  /** nanoGPT model id, e.g. `deepseek-ai/DeepSeek-V3.1-Terminus`. */
-  model: string;
   /**
-   * Sampling temperature. Higher is more varied, lower is more predictable.
-   * Most models are happy somewhere between 0.7 and 1.1.
+   * Which connection profile or roulette writes each job, server-wide:
+   * `"profile:<id>"`, `"roulette:<id>"`, or `""` for the first profile.
+   * A channel can override its own (`Channel.assignment`).
    */
-  temperature: number;
-  /** Upper limit on the length of one partner reply, in tokens. */
-  maxTokens: number;
+  rpAssignment: string;
+  /** See `rpAssignment`. OOC chat prefers tool-capable profiles. */
+  oocAssignment: string;
   /** The app theme's id (see `src/themes.ts`). "classic" is the default look. */
   appTheme: string;
   /**
@@ -304,8 +314,127 @@ export interface Settings {
  *
  * nanoGPT speaks the same API as OpenAI, where every message has a role:
  * `system` for instructions, `user` for the human, `assistant` for the model.
+ * With tools (stage 6), an assistant message can also ask for tool calls,
+ * and each call's result comes back as a `tool` message.
  */
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
+export type ChatMessage =
+  | { role: "system" | "user" | "assistant"; content: string }
+  | { role: "tool"; content: string; tool_call_id: string };
+
+/**
+ * A message as sent to the API, which also covers a reply that only called
+ * tools: its content is `null` (some providers reject an empty string there).
+ */
+export type ApiMessage = ChatMessage | { role: "assistant"; content: string | null; tool_calls: ApiToolCall[] };
+
+/** A tool call as the API writes it inside an assistant message. */
+export interface ApiToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+// ------------------------------------------------------------ stage 5
+
+/** How hard a reasoning model thinks before answering (`null`: the model's default). */
+export type ReasoningEffort = "low" | "medium" | "high";
+
+/** What a turn is for: roleplay writing, or OOC chat. */
+export type Job = "rp" | "ooc";
+
+/**
+ * A connection profile: one model and its settings (see `src/profiles.ts`).
+ * It changes how your partner's words are produced, never who they are.
+ */
+export interface Profile {
+  id: string;
+  /** Your name for it, e.g. "DeepSeek, warm". */
+  name: string;
+  /** nanoGPT model id, e.g. `deepseek-ai/DeepSeek-V3.1-Terminus`. */
+  model: string;
+  /** Sampling temperature: higher is more varied. Most models like 0.7 to 1.1. */
+  temperature: number;
+  /** Upper limit on one reply's length, in tokens. */
+  maxTokens: number;
+  /** Nucleus sampling, or `null` to leave it to the model. */
+  topP: number | null;
+  reasoningEffort: ReasoningEffort | null;
+  /** Whether the model can call tools (stage 6). Turns on it are given tools only if so. */
+  supportsTools: boolean;
+  /** Layer 4 of the prompt stack: notes that tame this model's habits. */
+  quirkPrompt: string;
+  /** More request fields, as a JSON object in text (e.g. `{"top_k": 40}`), or "". */
+  extraParams: string;
+  position: number;
+  createdAt: string;
+}
+
+/** A weighted set of profiles; each turn picks one (see `src/profiles.ts`). */
+export interface Roulette {
+  id: string;
+  name: string;
+  entries: { profileId: string; weight: number }[];
+  position: number;
+  createdAt: string;
+}
+
+// ------------------------------------------------------------ stage 6
+
+/**
+ * One tool call your partner made during a turn, as kept in the tool log
+ * (see `src/activity.ts`).
+ */
+export interface ToolCallRecord {
+  id: string;
+  channelId: string;
+  /** The turn it belongs to: the same id as the messages that turn wrote. */
+  turnId: string;
+  /** Which round of the turn (a model can call tools, see results, and call more). */
+  round: number;
+  name: string;
+  /** The arguments exactly as the model wrote them. */
+  arguments: string;
+  /** What was sent back to the model, as JSON text. */
+  result: string;
+  status: "ok" | "error";
+  /** For people: "pinned Tamsin to #story". For errors, what went wrong. */
+  summary: string;
+  /** `native` if the API returned it as a tool call; `text` if it was written out in the reply. */
+  source: "native" | "text";
+  profile: string | null;
+  createdAt: string;
+}
+
+/** One comment on a message. The first comment of a thread holds its quote. */
+export interface Comment {
+  id: string;
+  messageId: string;
+  /** The id of the thread's first comment (its own id, for the first). */
+  threadId: string;
+  author: Author;
+  /** The highlighted text (first comment only; "" for the whole message). */
+  quote: string;
+  note: string;
+  createdAt: string;
+}
+
+/** A thread of comments on one part of a message. */
+export interface CommentThread {
+  id: string;
+  messageId: string;
+  quote: string;
+  resolved: boolean;
+  comments: Comment[];
+}
+
+/** Something your partner asked you to approve (other than notebook suggestions). */
+export interface Proposal {
+  id: string;
+  kind: "delete_channel";
+  targetId: string;
+  targetName: string;
+  reason: string;
+  status: "pending" | "approved" | "denied";
+  createdAt: string;
+  resolvedAt: string | null;
 }

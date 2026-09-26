@@ -13,29 +13,48 @@
  *
  * API overview (all request and response bodies are JSON):
  *
- *   GET    /api/state                          Settings, channels, where the partner is writing, and the app version
+ *   GET    /api/state                          Settings, channels, profiles, roulettes, proposals waiting,
+ *                                              where the partner is writing, and the app version
  *   PUT    /api/settings                       Change settings (any subset of fields)
  *   GET    /api/models                         List models available on nanoGPT
  *
  *   POST   /api/channels                       Create a channel
- *   PATCH  /api/channels/:id                   Rename a channel, or change its style or theme
+ *   PATCH  /api/channels/:id                   Rename a channel, or change its style, theme or profile
  *   DELETE /api/channels/:id                   Delete a channel and all its messages
  *   PUT    /api/channels/order                 Put the channels in a new order
  *
- *   GET    /api/channels/:id/messages          Every message in a channel
- *   POST   /api/channels/:id/messages          Send your message, then the partner replies
+ *   GET    /api/channels/:id/messages          Every message in a channel, with its tool calls and comment threads
+ *   POST   /api/channels/:id/messages          Send your message (with notes attached), then the partner replies
  *                                              (or add a scene break, if the message is `=====`)
  *   POST   /api/channels/:id/scene-breaks      Add a scene break
  *   DELETE /api/channels/:id/messages          Delete every message in a channel
  *   POST   /api/channels/:id/turn              Partner takes a turn without a new message from you
- *   POST   /api/channels/:id/regenerate        Replace the partner's last reply with a new one
+ *   POST   /api/channels/:id/regenerate        Replace the partner's last reply with a new one (optionally
+ *                                              with a given profile)
  *   POST   /api/channels/:id/cancel            Stop the partner's turn in progress (the Stop button)
  *   GET    /api/channels/:id/prompt            The exact prompt stack the next turn would send
+ *   GET    /api/channels/:id/tool-log          Every tool call in a channel, for troubleshooting
  *   PUT    /api/channels/:id/cast/:entryId     Pin a notebook entry to a channel (add it to the cast)
  *   DELETE /api/channels/:id/cast/:entryId     Unpin it
  *
  *   PATCH  /api/messages/:id                   Edit a message's text
  *   DELETE /api/messages/:id                   Delete one message
+ *   POST   /api/messages/:id/comments          Comment on a message (your partner replies if it's theirs)
+ *   POST   /api/comments/:id/replies           Reply in a comment thread
+ *   POST   /api/comments/:id/resolve           Resolve or reopen a thread
+ *   DELETE /api/comments/:id                   Delete one of your comments
+ *
+ *   GET    /api/proposals                      Your partner's proposals waiting for you
+ *   POST   /api/proposals/:id/:action          approve or deny one
+ *
+ *   GET    /api/profiles                       Connection profiles and roulettes
+ *   POST   /api/profiles                       Make a profile
+ *   PATCH  /api/profiles/:id                   Change a profile
+ *   DELETE /api/profiles/:id                   Delete a profile
+ *   POST   /api/profiles/:id/test              Check whether its model can call tools
+ *   POST   /api/roulettes                      Make a roulette
+ *   PATCH  /api/roulettes/:id                  Change a roulette
+ *   DELETE /api/roulettes/:id                  Delete a roulette
  *
  *   GET    /api/notebook                       Folders, entries and suggestions you can see, and field templates
  *   POST   /api/notebook/entries               Make an entry (a character or lore)
@@ -48,8 +67,8 @@
  *   POST   /api/notebook/suggestions/:id/:action  accept, reject or withdraw a suggestion
  *
  * Every channel in a response comes with its `cast`: the entries pinned to
- * it, as you see them (see `ChannelView`). The notebook acts as you
- * ("user"); your partner gets tools for it in stage 6.
+ * it, as you see them (see `ChannelView`). The notebook routes act as you
+ * ("user"); your partner acts through tools (src/tools.ts).
  *
  *   GET    /api/themes                         Every theme, for the theme picker
  *   POST   /api/themes                         Make a new theme, copying another
@@ -68,7 +87,7 @@ import { readFileSync } from "node:fs";
 import { join, normalize, sep } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
 import { ApiError, CancelledError, listModels, type ApiOptions } from "./nanogpt.ts";
-import { BusyError, Partner, promptForChannel } from "./partner.ts";
+import { BusyError, Partner, pickProfile, promptForChannel, testToolCalling, type TurnResult } from "./partner.ts";
 import { parseSceneBreak, postToMessages } from "./posts.ts";
 import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
 import { ENTRY_TEMPLATES } from "./notebook.ts";
@@ -208,6 +227,49 @@ export function createApp(config: Config): App {
     return { sceneBreak: result.sceneBreak, channel: channelView(result.channel) };
   }
 
+  /**
+   * After you comment: if the thread is on your partner's message, or
+   * they're already in it, they reply. The reply is reported as data: if it
+   * fails, your comment is still saved.
+   */
+  async function commentReply(threadId: string) {
+    const thread = store.comments.thread(threadId);
+    const message = store.getMessage(thread.messageId);
+    const involved = message.author === "partner" || thread.comments.some((c) => c.author === "partner");
+    if (!involved) return { thread };
+    const reply = await tryTurn(() => partner.replyToComment(threadId));
+    return { thread: store.comments.thread(threadId), ...reply };
+  }
+
+  /**
+   * The notebook entries to attach to a message you're sending: the ids you
+   * picked (`attach`), plus any entry you linked in the text with
+   * `[[Name]]`. You must be able to see each, and so must your partner, or
+   * it couldn't be sent.
+   */
+  function readAttachments(body: unknown, content: string): string[] {
+    const picked = (body as { attach?: unknown } | null)?.attach ?? [];
+    if (!Array.isArray(picked) || !picked.every((id) => typeof id === "string")) {
+      throw new HttpError(400, '"attach" must be a list of notebook entry ids.');
+    }
+    const ids = new Set<string>();
+    for (const id of picked) {
+      const entry = store.notebook.getEntry("user", id); // 404 if you can't see it
+      if (!store.notebook.canSeeEntry("partner", id)) {
+        throw new HttpError(400, `${entry.name} is hidden from your partner, so it can't be sent to them.`);
+      }
+      ids.add(id);
+    }
+    // [[Name]] and [[Name|shown text]] links, silently skipping names that
+    // aren't in the notebook or that your partner can't see.
+    const entries = store.notebook.listEntries("user");
+    for (const [, name] of content.matchAll(/\[\[([^\]|\n]{1,100})(?:\|[^\]\n]*)?\]\]/g)) {
+      const entry = entries.find((e) => e.name.toLowerCase() === name!.trim().toLowerCase());
+      if (entry && store.notebook.canSeeEntry("partner", entry.id)) ids.add(entry.id);
+    }
+    return [...ids];
+  }
+
   /** Refuse to change a channel's messages while the partner is writing there. */
   function ensureIdle(channelId: string): void {
     if (partner.isBusy(channelId)) throw new BusyError();
@@ -225,6 +287,9 @@ export function createApp(config: Config): App {
         json({
           settings: store.getSettings(),
           channels: channelViews(),
+          profiles: store.profiles.list(),
+          roulettes: store.profiles.listRoulettes(),
+          proposals: store.proposals.pending(),
           busyChannels: partner.busyChannels(),
           appVersion: version,
         }),
@@ -235,6 +300,9 @@ export function createApp(config: Config): App {
       handler: async (request) => {
         const update = validateSettings(await readJson(request));
         ensureTheme(update.appTheme);
+        for (const assignment of [update.rpAssignment, update.oocAssignment]) {
+          if (assignment) store.profiles.checkAssignment(assignment);
+        }
         return json({ settings: store.updateSettings(update) });
       },
     },
@@ -269,6 +337,7 @@ export function createApp(config: Config): App {
       handler: async (request, { id }) => {
         const update = validateChannelUpdate(await readJson(request));
         ensureTheme(update.theme);
+        if (update.assignment) store.profiles.checkAssignment(update.assignment);
         return json({ channel: channelView(store.updateChannel(id!, update)) });
       },
     },
@@ -288,7 +357,21 @@ export function createApp(config: Config): App {
     {
       method: "GET",
       pattern: "/api/channels/:id/messages",
-      handler: (_request, { id }) => json({ messages: store.getMessages(id!) }),
+      handler: (_request, { id }) =>
+        json({
+          messages: store.getMessages(id!),
+          // Your partner's actions (shown under their messages), and comments.
+          toolCalls: store.toolLog.forChannel(id!),
+          threads: store.comments.forChannel(id!),
+        }),
+    },
+    {
+      method: "GET",
+      pattern: "/api/channels/:id/tool-log",
+      handler: (_request, { id }) => {
+        store.getChannel(id!); // 404 for an unknown channel
+        return json({ toolCalls: store.toolLog.forChannel(id!, 1000) });
+      },
     },
     {
       method: "POST",
@@ -310,7 +393,10 @@ export function createApp(config: Config): App {
         const postingAs = readPostingAs(body, yourCharacters);
         const messages = postToMessages(channel, content, yourCharacters, postingAs);
         if (messages.length === 0) throw new HttpError(400, "There's nothing to send after the character tags.");
+        // Notes you attached (and entries you [[linked]]) go with the message.
+        const attach = readAttachments(body, content);
         const userMessages = store.addTurn(messages);
+        if (attach.length > 0) userMessages[0] = store.attach(userMessages[0]!.id, attach);
 
         // Posting as one of your characters puts them in the channel's cast,
         // if they aren't already.
@@ -322,7 +408,7 @@ export function createApp(config: Config): App {
         // The reply is attempted separately: if it fails, your message is still
         // saved and the app offers to retry with a partner turn.
         const reply = await tryTurn(() => partner.takeTurn(id!, "user-message"));
-        return json({ userMessages, ...reply, channel: channelView(store.getChannel(id!)) });
+        return json({ userMessages, ...reply, channel: channelView(store.getChannel(id!)), channels: channelViews() });
       },
     },
     {
@@ -337,7 +423,8 @@ export function createApp(config: Config): App {
     {
       method: "POST",
       pattern: "/api/channels/:id/turn",
-      handler: async (_request, { id }) => json({ partnerMessages: await partner.takeTurn(id!, "continue") }),
+      handler: async (_request, { id }) =>
+        json({ ...turnResult(await partner.takeTurn(id!, "continue")), channels: channelViews() }),
     },
     {
       method: "POST",
@@ -357,8 +444,13 @@ export function createApp(config: Config): App {
     {
       method: "POST",
       pattern: "/api/channels/:id/regenerate",
-      handler: async (_request, { id }) => {
+      handler: async (request, { id }) => {
         ensureIdle(id!);
+        // Optional: the profile to write with ("Regenerate with..."). Without
+        // one, the channel's profile or roulette picks again.
+        const body = (await readJson(request)) as { profileId?: unknown } | null;
+        const profileId = typeof body?.profileId === "string" && body.profileId ? body.profileId : undefined;
+        if (profileId) store.profiles.get(profileId); // 404 for an unknown profile
         // The whole last reply: one post, or every bubble of a casual reply.
         const replacedIds = store.lastPartnerTurn(id!).map((m) => m.id);
         if (replacedIds.length === 0) {
@@ -366,8 +458,9 @@ export function createApp(config: Config): App {
         }
         // Generate first, and only delete the old reply once the new one exists.
         // If generation fails you keep the reply you had.
-        const partnerMessages = await partner.takeTurn(id!, "regenerate", { replacing: replacedIds });
-        return json({ partnerMessages, replacedIds });
+        const result = await partner.takeTurn(id!, "regenerate", { replacing: replacedIds, profileId });
+        // If the new turn wrote nothing, the old reply stays.
+        return json({ ...turnResult(result), replacedIds: result.replaced, channels: channelViews() });
       },
     },
     {
@@ -383,7 +476,14 @@ export function createApp(config: Config): App {
     {
       method: "GET",
       pattern: "/api/channels/:id/prompt",
-      handler: (_request, { id }) => json({ messages: promptForChannel(store, id!) }),
+      handler: (request, { id }) => {
+        // For a roulette, the model notes depend on the profile picked, so
+        // the preview shows a given profile (`?profile=<id>`), or the one a
+        // roulette would pick first.
+        const profileId = new URL(request.url).searchParams.get("profile");
+        const profile = profileId ? store.profiles.get(profileId) : pickProfile(store, store.getChannel(id!), 0);
+        return json({ messages: promptForChannel(store, id!, { profile }), profile });
+      },
     },
 
     // ---------------------------------------------------------- messages
@@ -413,6 +513,111 @@ export function createApp(config: Config): App {
       },
     },
 
+    // ---------------------------------------------------------- comments
+    {
+      method: "POST",
+      pattern: "/api/messages/:id/comments",
+      handler: async (request, { id }) => {
+        const body = await readObject(request);
+        const quote = typeof body.quote === "string" ? body.quote : "";
+        const thread = store.comments.start("user", id!, String(body.note ?? ""), quote);
+        return json(await commentReply(thread.id));
+      },
+    },
+    {
+      method: "POST",
+      pattern: "/api/comments/:id/replies",
+      handler: async (request, { id }) => {
+        const body = await readObject(request);
+        store.comments.reply("user", id!, String(body.note ?? ""));
+        return json(await commentReply(id!));
+      },
+    },
+    {
+      method: "POST",
+      pattern: "/api/comments/:id/resolve",
+      handler: async (request, { id }) => {
+        const body = await readObject(request);
+        return json({ thread: store.comments.resolve(id!, body.resolved !== false) });
+      },
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/comments/:id",
+      handler: (_request, { id }) => {
+        store.comments.delete("user", id!);
+        return json({ ok: true });
+      },
+    },
+
+    // --------------------------------------------------------- proposals
+    {
+      method: "GET",
+      pattern: "/api/proposals",
+      handler: () => json({ proposals: store.proposals.pending() }),
+    },
+    {
+      method: "POST",
+      pattern: "/api/proposals/:id/:action",
+      handler: (_request, { id, action }) => {
+        if (action !== "approve" && action !== "deny") throw new HttpError(404, "No such API route.");
+        const proposal = store.proposals.get(id!);
+        // Deleting a channel waits for a turn in progress there.
+        if (action === "approve" && proposal.kind === "delete_channel") ensureIdle(proposal.targetId);
+        store.resolveProposal(id!, action === "approve");
+        return json({ proposals: store.proposals.pending(), channels: channelViews() });
+      },
+    },
+
+    // ------------------------------------------- profiles and roulettes
+    {
+      method: "GET",
+      pattern: "/api/profiles",
+      handler: () => json({ profiles: store.profiles.list(), roulettes: store.profiles.listRoulettes() }),
+    },
+    {
+      method: "POST",
+      pattern: "/api/profiles",
+      handler: async (request) => json({ profile: store.profiles.create(await readObject(request)) }),
+    },
+    {
+      method: "PATCH",
+      pattern: "/api/profiles/:id",
+      handler: async (request, { id }) => json({ profile: store.profiles.update(id!, await readObject(request)) }),
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/profiles/:id",
+      handler: (_request, { id }) => {
+        store.profiles.delete(id!);
+        return json({ settings: store.getSettings(), channels: channelViews() });
+      },
+    },
+    {
+      method: "POST",
+      pattern: "/api/profiles/:id/test",
+      handler: async (_request, { id }) => json({ test: await testToolCalling(api, store.profiles.get(id!)) }),
+    },
+    {
+      method: "POST",
+      pattern: "/api/roulettes",
+      handler: async (request) => json({ roulette: store.profiles.createRoulette(await readObject(request)) }),
+    },
+    {
+      method: "PATCH",
+      pattern: "/api/roulettes/:id",
+      handler: async (request, { id }) =>
+        json({ roulette: store.profiles.updateRoulette(id!, await readObject(request)) }),
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/roulettes/:id",
+      handler: (_request, { id }) => {
+        store.profiles.deleteRoulette(id!);
+        return json({ settings: store.getSettings(), channels: channelViews() });
+      },
+    },
+
     // ------------------------------------------------------ notebook & cast
     // Everything here acts as you ("user"): the notebook checks what you're
     // allowed to do (see src/permissions.ts).
@@ -423,7 +628,10 @@ export function createApp(config: Config): App {
         json({
           folders: store.notebook.listFolders("user"),
           entries: store.notebook.listEntries("user"),
-          suggestions: store.notebook.listSuggestions("user"),
+          // Each with who reviews it: you, or your partner (through their tools).
+          suggestions: store.notebook
+            .listSuggestions("user")
+            .map((suggestion) => ({ ...suggestion, reviewer: store.notebook.reviewerOf(suggestion) })),
           templates: ENTRY_TEMPLATES,
         }),
     },
@@ -609,15 +817,25 @@ export function createApp(config: Config): App {
  * saved successfully and only the reply failed.
  */
 async function tryTurn(
-  turn: () => Promise<unknown>,
-): Promise<{ partnerMessages?: unknown; error?: string; cancelled?: true }> {
+  turn: () => Promise<TurnResult>,
+): Promise<Partial<ReturnType<typeof turnResult>> & { error?: string; cancelled?: true }> {
   try {
-    return { partnerMessages: await turn() };
+    return turnResult(await turn());
   } catch (error) {
     if (error instanceof CancelledError) return { cancelled: true };
     if (error instanceof ApiError || error instanceof BusyError) return { error: error.message };
     throw error;
   }
+}
+
+/** A turn's result, as the app receives it. */
+function turnResult(result: TurnResult) {
+  return {
+    partnerMessages: result.messages,
+    toolCalls: result.toolCalls,
+    skipped: result.skipped,
+    ...(result.thread ? { thread: result.thread } : {}),
+  };
 }
 
 // -------------------------------------------------------- request helpers

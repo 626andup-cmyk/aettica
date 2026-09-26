@@ -28,9 +28,8 @@ const settings: Settings = {
   literaryPrompt: "LITERARY: take your time.",
   casualPrompt: "CASUAL: keep it snappy.",
   oocPrompt: "OOC: one or two sentences.",
-  model: "test/model",
-  temperature: 0.9,
-  maxTokens: 500,
+  rpAssignment: "",
+  oocAssignment: "",
   historyLimit: 40,
   appTheme: "classic",
 };
@@ -43,6 +42,7 @@ function channel(overrides: Partial<Channel>): Channel {
     mode: "literary",
     pendingMode: null,
     theme: null,
+    assignment: null,
     position: 0,
     createdAt: new Date(0).toISOString(),
     ...overrides,
@@ -95,6 +95,7 @@ function msg(author: Author, content: string, extra: Partial<Message> = {}): Mes
     author,
     content,
     characters: [],
+    attachments: [],
     createdAt: new Date(0).toISOString(),
     ...extra,
   };
@@ -186,9 +187,13 @@ describe("buildPromptStack in an RP channel", () => {
     expect(system!.content).toContain(`### The Drowned Man (you play this character)\n(${SECRET_NOTE})`);
   });
 
-  test("leaves out the layers that aren't built yet", () => {
-    const [system] = build();
-    expect(system!.content).not.toContain("Model notes");
+  test("leaves out the model notes when the profile has none, and adds them when it does", () => {
+    expect(build()[0]!.content).not.toContain("Model notes");
+    const [system] = build({ modelNotes: "Don't restate the scene." });
+    const text = system!.content;
+    expect(text).toContain("## Model notes\n\nDon't restate the scene.");
+    // Layer 4 comes after layer 3 (the cast).
+    expect(text.indexOf("## Model notes")).toBeGreaterThan(text.indexOf("## The cast"));
   });
 
   test("layer 2 describes the current scene's mode, between who's writing and the character", () => {

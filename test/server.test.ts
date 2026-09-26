@@ -11,6 +11,7 @@ import { NUDGES, OOC_FRAMING } from "../src/prompt.ts";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { appVersion, createApp, matchRoute, type App } from "../src/server.ts";
+import { MAX_ROUNDS } from "../src/partner.ts";
 import type { Channel } from "../src/types.ts";
 import { startFakeNanoGpt, tempDir, testConfig, type FakeNanoGpt } from "./helpers.ts";
 
@@ -67,14 +68,16 @@ describe("sending a message", () => {
       content: "*Ilse looks up from the lamp.*",
       author: "partner",
       characters: ["Ilse Marrow"],
-      model: app.store.getSettings().model,
+      model: app.store.profiles.list()[0]!.model,
+      profile: app.store.profiles.list()[0]!.name,
     });
     expect(app.store.getMessages(story.id)).toHaveLength(2);
     expect(app.store.getMessages(ooc.id)).toHaveLength(0);
   });
 
-  test("sends the channel's prompt stack and the settings to the API", async () => {
-    app.store.updateSettings({ temperature: 0.7, maxTokens: 321, model: "some/model" });
+  test("sends the channel's prompt stack and the profile's settings to the API", async () => {
+    const [profile] = app.store.profiles.list();
+    app.store.profiles.update(profile!.id, { temperature: 0.7, maxTokens: 321, model: "some/model" });
     await call("POST", `/api/channels/${story.id}/messages`, { content: "Hello" });
 
     const request = fake.requests[0]!;
@@ -354,6 +357,59 @@ describe("scene breaks", () => {
   });
 });
 
+describe("connection profiles", () => {
+  test("a channel can override the server-wide profile", async () => {
+    const glm = app.store.profiles.create({ name: "GLM", model: "zai/glm-5.2", quirkPrompt: "Don't restate the scene." });
+    const { status } = await call("PATCH", `/api/channels/${story.id}`, { assignment: `profile:${glm.id}` });
+    expect(status).toBe(200);
+
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(data.partnerMessages[0]).toMatchObject({ model: "zai/glm-5.2", profile: "GLM" });
+    expect(fake.requests[0]!.model).toBe("zai/glm-5.2");
+    // Its model notes are layer 4 of the prompt.
+    expect(fake.requests[0]!.messages[0]!.content).toContain("## Model notes\n\nDon't restate the scene.");
+
+    // Other channels still use the server-wide one.
+    await call("POST", `/api/channels/${ooc.id}/turn`, {});
+    expect(fake.requests[1]!.model).toBe(app.store.profiles.list()[0]!.model);
+  });
+
+  test("a roulette's pick is recorded on the message", async () => {
+    const [first] = app.store.profiles.list();
+    const roulette = app.store.profiles.createRoulette({ name: "Mix", entries: [{ profileId: first!.id, weight: 1 }] });
+    await call("PUT", "/api/settings", { rpAssignment: `roulette:${roulette.id}` });
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(data.partnerMessages[0].profile).toBe(first!.name);
+  });
+
+  test("regenerate can pin a specific profile", async () => {
+    const glm = app.store.profiles.create({ name: "GLM", model: "zai/glm-5.2" });
+    await call("POST", `/api/channels/${story.id}/turn`, {});
+    const { data } = await call("POST", `/api/channels/${story.id}/regenerate`, { profileId: glm.id });
+    expect(data.partnerMessages[0].profile).toBe("GLM");
+    expect(fake.requests[1]!.model).toBe("zai/glm-5.2");
+  });
+
+  test("profiles and roulettes can be managed through the API", async () => {
+    const made = await call("POST", "/api/profiles", { name: "Kimi", model: "moonshot/kimi-k2.6", supportsTools: false });
+    expect(made.data.profile).toMatchObject({ name: "Kimi", supportsTools: false });
+    const id = made.data.profile.id;
+    expect((await call("PATCH", `/api/profiles/${id}`, { temperature: 0.6 })).data.profile.temperature).toBe(0.6);
+    const roulette = await call("POST", "/api/roulettes", { name: "Mix", entries: [{ profileId: id, weight: 2 }] });
+    expect(roulette.data.roulette.entries).toEqual([{ profileId: id, weight: 2 }]);
+    expect((await call("GET", "/api/profiles")).data.roulettes).toHaveLength(1);
+    expect((await call("DELETE", `/api/profiles/${id}`, {})).status).toBe(200);
+    expect((await call("GET", "/api/profiles")).data.roulettes[0].entries).toEqual([]);
+  });
+
+  test("the prompt preview can show a given profile's model notes", async () => {
+    const glm = app.store.profiles.create({ name: "GLM", model: "zai/glm-5.2", quirkPrompt: "Short sentences." });
+    const { data } = await call("GET", `/api/channels/${story.id}/prompt?profile=${glm.id}`);
+    expect(data.profile.name).toBe("GLM");
+    expect(data.messages[0].content).toContain("Short sentences.");
+  });
+});
+
 describe("casual mode", () => {
   beforeEach(() => {
     app.store.updateChannel(story.id, { mode: "casual" });
@@ -466,13 +522,16 @@ describe("messages and settings", () => {
   });
 
   test("updates settings and rejects invalid ones", async () => {
-    const ok = await call("PUT", "/api/settings", { temperature: 1.2, partnerName: "Sol" });
-    expect(ok.data.settings).toMatchObject({ temperature: 1.2, partnerName: "Sol" });
+    const ok = await call("PUT", "/api/settings", { historyLimit: 12, partnerName: "Sol" });
+    expect(ok.data.settings).toMatchObject({ historyLimit: 12, partnerName: "Sol" });
 
-    const bad = await call("PUT", "/api/settings", { temperature: 99 });
+    const bad = await call("PUT", "/api/settings", { historyLimit: 0 });
     expect(bad.status).toBe(400);
-    expect(bad.data.error).toContain("temperature");
-    expect(app.store.getSettings().temperature).toBe(1.2);
+    expect(bad.data.error).toContain("historyLimit");
+    expect(app.store.getSettings().historyLimit).toBe(12);
+
+    // An assignment must point at a profile or roulette that exists.
+    expect((await call("PUT", "/api/settings", { rpAssignment: "profile:nope" })).status).toBe(404);
   });
 
   test("reports a fingerprint of the app's files, which changes when they change", async () => {
@@ -492,7 +551,8 @@ describe("messages and settings", () => {
   test("returns the server state", async () => {
     const { data } = await call("GET", "/api/state");
     expect(data.channels.map((c: Channel) => c.name)).toEqual(["story", "ooc"]);
-    expect(data.settings.model).toBeString();
+    expect(data.profiles).toHaveLength(1);
+    expect(data.roulettes).toEqual([]);
     expect(data.busyChannels).toEqual([]);
   });
 
@@ -679,5 +739,192 @@ describe("the notebook", () => {
     expect((await call("PATCH", `/api/notebook/folders/${folder.id}`, { name: "Plans" })).data.folder.name).toBe("Plans");
     await call("DELETE", `/api/notebook/folders/${folder.id}`, {});
     expect((await entryIn("The Wreck")).folderId).toBeNull();
+  });
+});
+
+describe("tools", () => {
+  test("a turn can call tools, see the results, then write its post", async () => {
+    app.store.notebook.createEntry("user", { kind: "character", name: "Tamsin Hale", owner: "partner" });
+    fake.replies.push(
+      { toolCalls: [{ name: "read_notebook_entry", arguments: '{"name": "Tamsin"}' }] },
+      { toolCalls: [{ name: "pin_to_channel", arguments: { name: "Tamsin Hale" } }] },
+      { content: "Tamsin: *leans in the doorway*" },
+    );
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+
+    expect(data.partnerMessages.map((m: any) => m.content)).toEqual(["Tamsin: *leans in the doorway*"]);
+    expect(data.toolCalls.map((c: any) => [c.name, c.status, c.summary, c.source])).toEqual([
+      ["read_notebook_entry", "ok", "read Tamsin Hale", "native"],
+      ["pin_to_channel", "ok", "pinned Tamsin Hale to #story", "native"],
+    ]);
+    // The calls belong to the turn that wrote the post.
+    expect(data.toolCalls[0].turnId).toBe(data.partnerMessages[0].turnId);
+    // The pin took effect, and the post voices the newly pinned character.
+    expect(data.channels.find((c: any) => c.id === story.id).cast.map((c: any) => c.name)).toContain("Tamsin Hale");
+    expect(data.partnerMessages[0].characters).toEqual(["Tamsin Hale"]);
+
+    // The model saw its call and the result before writing.
+    const second = fake.requests[1]!.messages;
+    expect(second.at(-2)).toMatchObject({ role: "assistant", tool_calls: [{ function: { name: "read_notebook_entry" } }] });
+    expect(second.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_1_0" });
+    expect(JSON.parse(second.at(-1)!.content)).toMatchObject({ name: "Tamsin Hale", owner: "yours" });
+
+    // The log is kept, and comes with the channel's messages.
+    const listed = await call("GET", `/api/channels/${story.id}/messages`);
+    expect(listed.data.toolCalls).toHaveLength(2);
+  });
+
+  test("tools are only offered when the profile can use them", async () => {
+    await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(fake.requests[0]!.tools!.map((t) => t.function.name)).toContain("read_notebook_entry");
+    expect(fake.requests[0]!.messages[0]!.content).toContain("## Tools");
+
+    const [profile] = app.store.profiles.list();
+    app.store.profiles.update(profile!.id, { supportsTools: false });
+    await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(fake.requests[1]!.tools).toBeUndefined();
+    expect(fake.requests[1]!.messages[0]!.content).not.toContain("## Tools");
+  });
+
+  test("tool calls written in the reply's text are run, and never posted", async () => {
+    fake.replies.push(
+      { content: 'Let me look.\n<tool_call>{"name": "search_notebook", "arguments": {}}</tool_call>' },
+      { content: "*Ilse lights the lamp.*" },
+    );
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(data.toolCalls).toMatchObject([{ name: "search_notebook", source: "text", status: "ok" }]);
+    expect(data.partnerMessages.map((m: any) => m.content)).toEqual(["*Ilse lights the lamp.*"]);
+    // The results went back as a note, since there's no API call id to answer.
+    expect(fake.requests[1]!.messages.at(-1)!.content).toStartWith("(Tool results)\nsearch_notebook:");
+  });
+
+  test("broken arguments are explained to the model, which can try again", async () => {
+    fake.replies.push(
+      { toolCalls: [{ name: "read_notebook_entry", arguments: "name: Ilse" }] },
+      { toolCalls: [{ name: "read_notebook_entry", arguments: '{"name": "Ilse"}' }] },
+      { content: "Done." },
+    );
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(data.toolCalls.map((c: any) => c.status)).toEqual(["error", "ok"]);
+    expect(data.toolCalls[0].summary).toContain("aren't valid JSON");
+    expect(JSON.parse(fake.requests[1]!.messages.at(-1)!.content).error).toContain("valid JSON");
+  });
+
+  test("do_nothing ends the turn without a post, and is reported", async () => {
+    fake.replies.push({ toolCalls: [{ name: "do_nothing", arguments: '{"reason": "Waiting for you."}' }], content: "ignored" });
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(data).toMatchObject({ partnerMessages: [], skipped: true });
+    expect(data.toolCalls[0].summary).toBe("chose not to reply (Waiting for you.)");
+    expect(app.store.getMessages(story.id)).toEqual([]);
+  });
+
+  test("a model that won't stop calling tools is made to write after a few rounds", async () => {
+    for (let i = 0; i < MAX_ROUNDS; i++) fake.replies.push({ toolCalls: [{ name: "search_notebook", arguments: "{}" }] });
+    fake.replies.push({ content: "Finally." });
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(fake.requests).toHaveLength(MAX_ROUNDS);
+    expect(fake.requests.at(-1)!.tools).toBeUndefined();
+    // The last round's calls weren't run.
+    expect(data.toolCalls.at(-1)).toMatchObject({ status: "error" });
+    expect(data.toolCalls.at(-1).summary).toContain("out of tool rounds");
+  });
+
+  test("regenerating keeps the old reply if the new turn writes nothing", async () => {
+    app.store.addTurn([{ channelId: story.id, author: "partner", content: "Old reply" }]);
+    fake.replies.push({ toolCalls: [{ name: "do_nothing", arguments: "{}" }] });
+    const { data } = await call("POST", `/api/channels/${story.id}/regenerate`, {});
+    expect(data).toMatchObject({ replacedIds: [], skipped: true });
+    expect(app.store.getMessages(story.id).map((m) => m.content)).toEqual(["Old reply"]);
+  });
+
+  test("testing a profile's tool calling", async () => {
+    const [profile] = app.store.profiles.list();
+    fake.replies.push(
+      { toolCalls: [{ name: "check_in", arguments: '{"word": "lighthouse"}' }] },
+      { content: '<tool_call>{"name": "check_in", "arguments": {"word": "lighthouse"}}</tool_call>' },
+      { content: "I can't do that." },
+    );
+    const test = async () => (await call("POST", `/api/profiles/${profile!.id}/test`, {})).data.test;
+    expect((await test()).verdict).toBe("native");
+    expect((await test()).verdict).toBe("text");
+    expect(await test()).toMatchObject({ verdict: "none", content: "I can't do that." });
+  });
+});
+
+describe("attaching notes", () => {
+  test("notes you attach, or [[link]], are sent in full with the message", async () => {
+    const sea = app.store.notebook.createEntry("user", {
+      kind: "lore",
+      name: "The Charted Sea",
+      fields: [{ label: "Summary", value: "COLD-AND-GREY" }],
+    });
+    app.store.notebook.createEntry("user", { kind: "character", name: "Kestrel", fields: [{ label: "Age", value: "KESTREL-AGE" }] });
+    const { data } = await call("POST", `/api/channels/${ooc.id}/messages`, {
+      content: "What do you think of [[Kestrel]]?",
+      attach: [sea.id],
+    });
+    expect(data.userMessages[0].attachments.sort()).toHaveLength(2);
+    const system = fake.requests[0]!.messages[0]!.content;
+    expect(system).toContain("## Attached notes");
+    expect(system).toContain("COLD-AND-GREY");
+    expect(system).toContain("KESTREL-AGE");
+  });
+
+  test("an entry hidden from your partner can't be attached", async () => {
+    const twist = app.store.notebook.createEntry("user", { kind: "lore", name: "My Twist", visibility: "hidden" });
+    const { status, data } = await call("POST", `/api/channels/${ooc.id}/messages`, { content: "hm", attach: [twist.id] });
+    expect(status).toBe(400);
+    expect(data.error).toContain("hidden from your partner");
+  });
+});
+
+describe("comments", () => {
+  test("commenting on your partner's message gets a reply in the thread, not a post", async () => {
+    const [message] = app.store.addTurn([{ channelId: story.id, author: "partner", content: "The lamp guttered." }]);
+    fake.replies.push({ content: "Thanks! It's foreshadowing." });
+    const { data } = await call("POST", `/api/messages/${message!.id}/comments`, { quote: "lamp guttered", note: "Ominous!" });
+
+    expect(data.thread.comments.map((c: any) => [c.author, c.note])).toEqual([
+      ["user", "Ominous!"],
+      ["partner", "Thanks! It's foreshadowing."],
+    ]);
+    expect(app.store.getMessages(story.id)).toHaveLength(1);
+    // The model was asked for a reply, out of character.
+    const last = fake.requests[0]!.messages.at(-1)!;
+    expect(last.content).toContain('The user left a comment on your message on "lamp guttered": "Ominous!"');
+    expect(fake.requests[0]!.messages[0]!.content).toContain("## Comment threads");
+  });
+
+  test("commenting on your own message doesn't wake your partner, until they're in the thread", async () => {
+    const [message] = app.store.addTurn([{ channelId: story.id, author: "user", content: "I knock." }]);
+    const started = await call("POST", `/api/messages/${message!.id}/comments`, { note: "Note to self." });
+    expect(started.data.partnerMessages).toBeUndefined();
+    expect(fake.requests).toHaveLength(0);
+
+    const threadId = started.data.thread.id;
+    app.store.comments.reply("partner", threadId, "Noted!");
+    await call("POST", `/api/comments/${threadId}/replies`, { note: "Thanks." });
+    expect(fake.requests).toHaveLength(1);
+
+    const resolved = await call("POST", `/api/comments/${threadId}/resolve`, {});
+    expect(resolved.data.thread.resolved).toBe(true);
+  });
+});
+
+describe("approvals", () => {
+  test("approving your partner's proposal to delete a channel deletes it", async () => {
+    const proposal = app.store.proposals.propose("delete_channel", ooc.id, "ooc", "Unused.");
+    expect((await call("GET", "/api/state")).data.proposals).toHaveLength(1);
+    const { data } = await call("POST", `/api/proposals/${proposal.id}/approve`, {});
+    expect(data.proposals).toEqual([]);
+    expect(data.channels.map((c: Channel) => c.name)).toEqual(["story"]);
+  });
+
+  test("denying one keeps the channel, and your partner hears how it went", async () => {
+    const proposal = app.store.proposals.propose("delete_channel", ooc.id, "ooc", "");
+    await call("POST", `/api/proposals/${proposal.id}/deny`, {});
+    expect(app.store.listChannels()).toHaveLength(2);
+    await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(fake.requests[0]!.messages[0]!.content).toContain("The user denied your proposal to delete #ooc.");
   });
 });
