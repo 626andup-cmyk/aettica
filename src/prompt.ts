@@ -33,8 +33,11 @@
  * of channel: one each for literary scenes, casual scenes and OOC. Only the
  * one that applies is sent, so your partner can't mix them up. In RP
  * channels, layer 5 shows scene breaks where they fall.
- * Layer 4 has its slot here already, empty, so stage 5 adds content without
- * reshaping this file.
+ *
+ * Layer 4 is the connection profile's "model notes": instructions that tame
+ * the model running this turn ("don't restate the scene"), never who your
+ * partner is. It changes with the profile, so a roulette can pair each
+ * model with its own notes.
  */
 
 import type { PromptEntry } from "./notebook.ts";
@@ -149,6 +152,8 @@ export interface PromptInput {
    * channel, by channel id, and every notebook entry they can see.
    */
   overview?: { castNames: Record<string, string[]>; entries: PromptEntry[] };
+  /** Layer 4: the connection profile's notes on this model's habits. */
+  modelNotes?: string;
 }
 
 /**
@@ -156,7 +161,15 @@ export interface PromptInput {
  *
  * @returns The messages to send to the chat completions API.
  */
-export function buildPromptStack({ settings, channel, channels, messages, notebook, overview }: PromptInput): ChatMessage[] {
+export function buildPromptStack({
+  settings,
+  channel,
+  channels,
+  messages,
+  notebook,
+  overview,
+  modelNotes,
+}: PromptInput): ChatMessage[] {
   const isRp = channel.kind === "rp";
   const pinned = notebook?.pinned ?? [];
   const characterNames = (player: Player) =>
@@ -193,8 +206,8 @@ export function buildPromptStack({ settings, channel, channels, messages, notebo
     // Layer 3, in OOC: an overview of the server and the notebook instead.
     { title: "Channels on your server", content: isRp ? null : describeChannels(channels, channel, overview?.castNames ?? {}) },
     { title: "Your shared notebook", content: isRp ? null : describeNotebook(overview?.entries ?? []) },
-    // Layer 4: model-quirk prompt from the connection profile. Stage 5.
-    { title: "Model notes", content: null },
+    // Layer 4: the connection profile's notes on this model's habits.
+    { title: "Model notes", content: modelNotes ?? null },
   ];
 
   const system: ChatMessage = { role: "system", content: renderLayers(layers) };

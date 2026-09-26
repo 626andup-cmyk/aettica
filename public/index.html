@@ -246,28 +246,25 @@
 
         <p class="hint">Characters, yours and your partner's, live in the notebook (the book button).</p>
 
-        <label for="setting-model">Model</label>
-        <div class="inline">
-          <input id="setting-model" name="model" list="model-list" autocomplete="off" spellcheck="false" />
-          <button id="load-models" type="button" class="button">Load list</button>
+        <!-- Which connection profile or roulette writes each kind of channel. -->
+        <div class="grid assignment-grid">
+          <div>
+            <label for="setting-rp-assignment">Roleplay written by</label>
+            <select id="setting-rp-assignment" name="rpAssignment"></select>
+          </div>
+          <div>
+            <label for="setting-ooc-assignment">OOC written by</label>
+            <select id="setting-ooc-assignment" name="oocAssignment"></select>
+          </div>
         </div>
-        <datalist id="model-list"></datalist>
+        <p class="hint">
+          A channel can override these in its own settings.
+          <button type="button" class="link-button inline-link" id="open-models">Profiles and roulettes…</button>
+        </p>
 
-        <div class="grid">
-          <div>
-            <label for="setting-temperature">Temperature</label>
-            <input id="setting-temperature" name="temperature" type="number" min="0" max="2" step="0.05" />
-          </div>
-          <div>
-            <label for="setting-max-tokens">Max tokens</label>
-            <input id="setting-max-tokens" name="maxTokens" type="number" min="16" max="32000" step="1" />
-          </div>
-          <div>
-            <label for="setting-history">History</label>
-            <input id="setting-history" name="historyLimit" type="number" min="1" max="1000" step="1" />
-          </div>
-        </div>
-        <p class="hint">History is how many recent messages in a channel your partner can see.</p>
+        <label for="setting-history">History</label>
+        <input id="setting-history" name="historyLimit" type="number" min="1" max="1000" step="1" />
+        <p class="hint">How many recent messages in a channel your partner can see.</p>
 
         <p class="form-error" role="alert" hidden></p>
 
@@ -287,6 +284,10 @@
 
         <label for="channel-setting-name">Channel name</label>
         <input id="channel-setting-name" name="name" autocomplete="off" />
+
+        <label for="channel-setting-assignment">Written by</label>
+        <p class="hint">The connection profile or roulette that writes here.</p>
+        <select id="channel-setting-assignment" name="assignment"></select>
 
         <label for="channel-setting-theme">Theme</label>
         <p class="hint">A channel's own theme only changes the channel itself, not the channel list.</p>
@@ -520,6 +521,138 @@
           <span class="spacer"></span>
           <button type="button" class="button" data-close>Cancel</button>
           <button type="submit" class="button button-primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Connection profiles and roulettes (stage 5). Filled in by app.js. -->
+    <dialog id="models-dialog" class="dialog surface">
+      <h2 class="dialog-title">Profiles and roulettes</h2>
+      <p class="hint">
+        A <strong>connection profile</strong> is one model with its settings. A <strong>roulette</strong> picks one of
+        several profiles at random each turn, by weight, for variety. Neither changes who your partner is.
+      </p>
+
+      <h3 class="section-title">Profiles</h3>
+      <ul id="profile-list" class="profile-list"></ul>
+      <button type="button" class="button" id="new-profile">New profile</button>
+
+      <h3 class="section-title">Roulettes</h3>
+      <ul id="roulette-list" class="profile-list"></ul>
+      <button type="button" class="button" id="new-roulette">New roulette</button>
+
+      <p class="form-error" role="alert" hidden></p>
+      <div class="dialog-buttons">
+        <span class="spacer"></span>
+        <button type="button" class="button button-primary" data-close>Done</button>
+      </div>
+    </dialog>
+
+    <!-- One connection profile. -->
+    <dialog id="profile-dialog" class="dialog surface">
+      <form id="profile-form" method="dialog">
+        <h2 class="dialog-title" id="profile-title">Profile</h2>
+
+        <label for="profile-name">Name</label>
+        <input id="profile-name" name="name" autocomplete="off" placeholder="e.g. DeepSeek, warm" />
+
+        <label for="profile-model">Model</label>
+        <div class="inline">
+          <input id="profile-model" name="model" list="model-list" autocomplete="off" spellcheck="false" />
+          <button id="load-models" type="button" class="button">Load list</button>
+        </div>
+        <datalist id="model-list"></datalist>
+
+        <div class="grid">
+          <div>
+            <label for="profile-temperature">Temperature</label>
+            <input id="profile-temperature" name="temperature" type="number" min="0" max="2" step="0.05" />
+          </div>
+          <div>
+            <label for="profile-max-tokens">Max tokens</label>
+            <input id="profile-max-tokens" name="maxTokens" type="number" min="16" max="32000" step="1" />
+          </div>
+          <div>
+            <label for="profile-top-p">Top P</label>
+            <input id="profile-top-p" name="topP" type="number" min="0" max="1" step="0.01" placeholder="auto" />
+          </div>
+        </div>
+
+        <label for="profile-reasoning">Reasoning</label>
+        <select id="profile-reasoning" name="reasoningEffort">
+          <option value="">The model's default</option>
+          <option value="low">Low effort</option>
+          <option value="medium">Medium effort</option>
+          <option value="high">High effort</option>
+        </select>
+        <p class="hint">Only for reasoning models. Their thinking is never shown or saved.</p>
+
+        <label class="check-option">
+          <input type="checkbox" name="supportsTools" />
+          <span
+            ><strong>Can use tools</strong><br /><span class="hint"
+              >Lets your partner act (read the notebook, pin characters, comment...). Turn off for models that
+              can't, and they'll just write.</span
+            ></span
+          >
+        </label>
+
+        <label for="profile-quirk">Model notes</label>
+        <p class="hint">
+          Tame this model's habits, e.g. "Don't restate the scene." Not for personality: that's the partner prompts.
+        </p>
+        <textarea id="profile-quirk" name="quirkPrompt" rows="3"></textarea>
+
+        <details class="advanced">
+          <summary>Extra request fields</summary>
+          <p class="hint">A JSON object sent with each request, for settings not listed above, e.g. <code>{"top_k": 40}</code>.</p>
+          <textarea id="profile-extra" name="extraParams" rows="3" spellcheck="false" class="code-input"></textarea>
+        </details>
+
+        <p class="form-error" role="alert" hidden></p>
+
+        <div class="dialog-buttons">
+          <button type="button" class="button button-danger" id="profile-delete">Delete</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- One roulette: profiles and their weights. -->
+    <dialog id="roulette-dialog" class="dialog surface">
+      <form id="roulette-form" method="dialog">
+        <h2 class="dialog-title" id="roulette-title">Roulette</h2>
+
+        <label for="roulette-name">Name</label>
+        <input id="roulette-name" name="name" autocomplete="off" placeholder="e.g. Variety" />
+
+        <label>Profiles and weights</label>
+        <p class="hint">Each turn picks one, with a chance in proportion to its weight.</p>
+        <div id="roulette-entries" class="roulette-entries"></div>
+        <button type="button" class="button" id="roulette-add">Add a profile</button>
+
+        <p class="form-error" role="alert" hidden></p>
+
+        <div class="dialog-buttons">
+          <button type="button" class="button button-danger" id="roulette-delete">Delete</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- "Regenerate with...": pick a profile, or roll the channel's again. -->
+    <dialog id="regenerate-dialog" class="dialog surface">
+      <form id="regenerate-form" method="dialog">
+        <h2 class="dialog-title">Regenerate with</h2>
+        <select id="regenerate-profile" name="profileId"></select>
+        <div class="dialog-buttons">
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Regenerate</button>
         </div>
       </form>
     </dialog>

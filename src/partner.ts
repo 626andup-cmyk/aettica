@@ -20,9 +20,10 @@
 import type { ApiOptions } from "./nanogpt.ts";
 import { CancelledError, createChatCompletion } from "./nanogpt.ts";
 import { replyToMessages } from "./posts.ts";
+import { parseExtraParams } from "./profiles.ts";
 import { buildPromptStack } from "./prompt.ts";
 import type { Store } from "./store.ts";
-import type { ChatMessage, Message } from "./types.ts";
+import type { ChatMessage, Channel, Message, Profile } from "./types.ts";
 
 /**
  * What caused a turn. Stage 1 only uses this for the server log, but it's
@@ -39,6 +40,11 @@ export interface TurnOptions {
    * has been saved. If generation fails, they stay.
    */
   replacing?: string[];
+  /**
+   * Write with this connection profile instead of picking one from the
+   * channel's assignment ("Regenerate with...").
+   */
+  profileId?: string;
 }
 
 /** Thrown when a turn is requested in a channel where one is still being written. */
@@ -50,14 +56,33 @@ export class BusyError extends Error {
 }
 
 /**
+ * The connection profile for one turn in a channel: the channel's own
+ * assignment if it has one, otherwise the server-wide one for its kind.
+ * A roulette picks at random each time (pass `random` to choose).
+ *
+ * OOC chat is an agentic job, so its roulettes prefer tool-capable profiles.
+ */
+export function pickProfile(store: Store, channel: Channel, random?: number): Profile {
+  const settings = store.getSettings();
+  const assignment = channel.assignment ?? (channel.kind === "ooc" ? settings.oocAssignment : settings.rpAssignment);
+  return store.profiles.pick(assignment, channel.kind === "ooc", random);
+}
+
+/**
  * Build the prompt stack for a channel from what's saved.
  *
  * Used by the turn itself and by the "Preview prompt" button, so the preview
  * is always exactly what a turn would send.
  *
  * @param excludeIds  Messages to leave out (the ones being regenerated).
+ * @param profile     The profile writing, for its model notes (layer 4).
  */
-export function promptForChannel(store: Store, channelId: string, excludeIds: string[] = []): ChatMessage[] {
+export function promptForChannel(
+  store: Store,
+  channelId: string,
+  excludeIds: string[] = [],
+  profile?: Profile,
+): ChatMessage[] {
   const excluded = new Set(excludeIds);
   const channel = store.getChannel(channelId);
   const channels = store.listChannels();
@@ -76,6 +101,7 @@ export function promptForChannel(store: Store, channelId: string, excludeIds: st
             entries: store.notebook.partnerOverview(),
           }
         : undefined,
+    modelNotes: profile?.quirkPrompt,
   });
 }
 
@@ -88,6 +114,18 @@ export function partnerCharacterNames(store: Store, channelId: string): string[]
     .forPrompt(channelId)
     .pinned.filter((p) => p.entry.kind === "character" && p.entry.owner !== "user")
     .map((p) => p.entry.name);
+}
+
+/** The request settings a profile locks in (everything but the messages). */
+export function profileRequest(profile: Profile) {
+  return {
+    model: profile.model,
+    temperature: profile.temperature,
+    maxTokens: profile.maxTokens,
+    topP: profile.topP,
+    reasoningEffort: profile.reasoningEffort,
+    extraParams: parseExtraParams(profile.extraParams),
+  };
 }
 
 export class Partner {
@@ -160,17 +198,15 @@ export class Partner {
     const controller = new AbortController();
     this.writingIn.set(channelId, controller);
     try {
-      const settings = this.store.getSettings();
-      const messages = promptForChannel(this.store, channelId, options.replacing);
+      const profile = options.profileId ? this.store.profiles.get(options.profileId) : pickProfile(this.store, channel);
+      const messages = promptForChannel(this.store, channelId, options.replacing, profile);
 
       const started = Date.now();
-      console.log(`[partner] turn started in #${channel.name} (${trigger}) using ${settings.model}`);
+      console.log(`[partner] turn started in #${channel.name} (${trigger}) using "${profile.name}" (${profile.model})`);
 
       const result = await createChatCompletion(this.api, {
-        model: settings.model,
+        ...profileRequest(profile),
         messages,
-        temperature: settings.temperature,
-        maxTokens: settings.maxTokens,
         signal: controller.signal,
       });
 
@@ -189,9 +225,9 @@ export class Partner {
       const newMessages = replyToMessages(
         current,
         result.content,
-        settings.model,
+        profile.model,
         partnerCharacterNames(this.store, channelId).map((name) => ({ name })),
-      );
+      ).map((m) => ({ ...m, profile: profile.name }));
 
       // Swap old for new in one transaction: never both, never neither.
       return this.store.db.transaction(() => {

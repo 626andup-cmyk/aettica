@@ -816,7 +816,7 @@ textarea {
 /* ============================================================ controls */
 
 textarea,
-input:not([type="radio"]) {
+input:not([type="radio"], [type="checkbox"]) {
   width: 100%;
   padding: 10px 12px;
   border: var(--input-border);
@@ -825,7 +825,7 @@ input:not([type="radio"]) {
 }
 
 textarea:focus,
-input:not([type="radio"]):focus {
+input:not([type="radio"], [type="checkbox"]):focus {
   outline: none;
   border: var(--input-focus-border);
 }
@@ -1416,4 +1416,100 @@ button:disabled {
 
 .cast-unpin {
   margin-left: auto;
+}
+
+/* ============================================ profiles and roulettes */
+
+.section-title {
+  margin: 18px 0 6px;
+  font: 600 15px var(--font-heading);
+  color: var(--text-strong);
+}
+
+.profile-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+/* One profile or roulette: its name and badges. The whole row opens it. */
+.profile-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.profile-row:hover {
+  background: var(--message-hover-bg);
+}
+
+.profile-row-name {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.assignment-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.link-button.inline-link {
+  font-size: inherit;
+  color: var(--accent);
+}
+
+/* A checkbox with a title and a hint, like the kind picker's options. */
+.dialog label.check-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+  background: var(--input-bg);
+  font-size: var(--font-size);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.check-option input {
+  margin-top: 5px;
+  accent-color: var(--accent);
+}
+
+.advanced {
+  margin-top: 14px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* A roulette's rows: profile, weight, share, remove. */
+.roulette-entry {
+  display: grid;
+  grid-template-columns: 1fr 80px 44px auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.roulette-share {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+@media (max-width: 599px) {
+  .assignment-grid {
+    grid-template-columns: 1fr;
+  }
 }

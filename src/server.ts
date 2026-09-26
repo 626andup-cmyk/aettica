@@ -68,7 +68,7 @@ import { readFileSync } from "node:fs";
 import { join, normalize, sep } from "node:path";
 import { loadConfig, type Config } from "./config.ts";
 import { ApiError, CancelledError, listModels, type ApiOptions } from "./nanogpt.ts";
-import { BusyError, Partner, promptForChannel } from "./partner.ts";
+import { BusyError, Partner, pickProfile, promptForChannel } from "./partner.ts";
 import { parseSceneBreak, postToMessages } from "./posts.ts";
 import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
 import { ENTRY_TEMPLATES } from "./notebook.ts";
@@ -225,6 +225,8 @@ export function createApp(config: Config): App {
         json({
           settings: store.getSettings(),
           channels: channelViews(),
+          profiles: store.profiles.list(),
+          roulettes: store.profiles.listRoulettes(),
           busyChannels: partner.busyChannels(),
           appVersion: version,
         }),
@@ -235,6 +237,9 @@ export function createApp(config: Config): App {
       handler: async (request) => {
         const update = validateSettings(await readJson(request));
         ensureTheme(update.appTheme);
+        for (const assignment of [update.rpAssignment, update.oocAssignment]) {
+          if (assignment) store.profiles.checkAssignment(assignment);
+        }
         return json({ settings: store.updateSettings(update) });
       },
     },
@@ -269,6 +274,7 @@ export function createApp(config: Config): App {
       handler: async (request, { id }) => {
         const update = validateChannelUpdate(await readJson(request));
         ensureTheme(update.theme);
+        if (update.assignment) store.profiles.checkAssignment(update.assignment);
         return json({ channel: channelView(store.updateChannel(id!, update)) });
       },
     },
@@ -357,8 +363,13 @@ export function createApp(config: Config): App {
     {
       method: "POST",
       pattern: "/api/channels/:id/regenerate",
-      handler: async (_request, { id }) => {
+      handler: async (request, { id }) => {
         ensureIdle(id!);
+        // Optional: the profile to write with ("Regenerate with..."). Without
+        // one, the channel's profile or roulette picks again.
+        const body = (await readJson(request)) as { profileId?: unknown } | null;
+        const profileId = typeof body?.profileId === "string" && body.profileId ? body.profileId : undefined;
+        if (profileId) store.profiles.get(profileId); // 404 for an unknown profile
         // The whole last reply: one post, or every bubble of a casual reply.
         const replacedIds = store.lastPartnerTurn(id!).map((m) => m.id);
         if (replacedIds.length === 0) {
@@ -366,7 +377,7 @@ export function createApp(config: Config): App {
         }
         // Generate first, and only delete the old reply once the new one exists.
         // If generation fails you keep the reply you had.
-        const partnerMessages = await partner.takeTurn(id!, "regenerate", { replacing: replacedIds });
+        const partnerMessages = await partner.takeTurn(id!, "regenerate", { replacing: replacedIds, profileId });
         return json({ partnerMessages, replacedIds });
       },
     },
@@ -383,7 +394,14 @@ export function createApp(config: Config): App {
     {
       method: "GET",
       pattern: "/api/channels/:id/prompt",
-      handler: (_request, { id }) => json({ messages: promptForChannel(store, id!) }),
+      handler: (request, { id }) => {
+        // For a roulette, the model notes depend on the profile picked, so
+        // the preview shows a given profile (`?profile=<id>`), or the one a
+        // roulette would pick first.
+        const profileId = new URL(request.url).searchParams.get("profile");
+        const profile = profileId ? store.profiles.get(profileId) : pickProfile(store, store.getChannel(id!), 0);
+        return json({ messages: promptForChannel(store, id!, [], profile), profile });
+      },
     },
 
     // ---------------------------------------------------------- messages
@@ -410,6 +428,50 @@ export function createApp(config: Config): App {
         ensureIdle(store.getMessage(id!).channelId);
         store.deleteMessage(id!);
         return json({ ok: true });
+      },
+    },
+
+    // ------------------------------------------- profiles and roulettes
+    {
+      method: "GET",
+      pattern: "/api/profiles",
+      handler: () => json({ profiles: store.profiles.list(), roulettes: store.profiles.listRoulettes() }),
+    },
+    {
+      method: "POST",
+      pattern: "/api/profiles",
+      handler: async (request) => json({ profile: store.profiles.create(await readObject(request)) }),
+    },
+    {
+      method: "PATCH",
+      pattern: "/api/profiles/:id",
+      handler: async (request, { id }) => json({ profile: store.profiles.update(id!, await readObject(request)) }),
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/profiles/:id",
+      handler: (_request, { id }) => {
+        store.profiles.delete(id!);
+        return json({ settings: store.getSettings(), channels: channelViews() });
+      },
+    },
+    {
+      method: "POST",
+      pattern: "/api/roulettes",
+      handler: async (request) => json({ roulette: store.profiles.createRoulette(await readObject(request)) }),
+    },
+    {
+      method: "PATCH",
+      pattern: "/api/roulettes/:id",
+      handler: async (request, { id }) =>
+        json({ roulette: store.profiles.updateRoulette(id!, await readObject(request)) }),
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/roulettes/:id",
+      handler: (_request, { id }) => {
+        store.profiles.deleteRoulette(id!);
+        return json({ settings: store.getSettings(), channels: channelViews() });
       },
     },
 

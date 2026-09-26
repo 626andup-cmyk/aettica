@@ -241,6 +241,76 @@ export const MIGRATIONS: Migration[] = [
     db.exec("ALTER TABLE channels DROP COLUMN character_name");
     db.exec("ALTER TABLE channels DROP COLUMN character_sheet");
   },
+
+  // ---------------------------------------------------------------- 5
+  // Stage 5: connection profiles and roulettes.
+  (db) => {
+    db.exec(`
+    -- A connection profile: one model and its settings (see src/profiles.ts).
+    CREATE TABLE profiles (
+      id               TEXT PRIMARY KEY,
+      name             TEXT NOT NULL,
+      model            TEXT NOT NULL,
+      temperature      REAL NOT NULL,
+      max_tokens       INTEGER NOT NULL,
+      top_p            REAL,
+      reasoning_effort TEXT CHECK (reasoning_effort IN ('low', 'medium', 'high')),
+      -- SQLite has no true/false type: 1 is true, 0 is false.
+      supports_tools   INTEGER NOT NULL DEFAULT 1,
+      quirk_prompt     TEXT NOT NULL DEFAULT '',
+      extra_params     TEXT NOT NULL DEFAULT '',
+      position         INTEGER NOT NULL,
+      created_at       TEXT NOT NULL
+    );
+
+    -- A roulette: a weighted set of profiles.
+    CREATE TABLE roulettes (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      position   INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE roulette_profiles (
+      roulette_id TEXT NOT NULL REFERENCES roulettes (id) ON DELETE CASCADE,
+      profile_id  TEXT NOT NULL REFERENCES profiles (id) ON DELETE CASCADE,
+      weight      REAL NOT NULL CHECK (weight > 0),
+      PRIMARY KEY (roulette_id, profile_id)
+    );
+
+    -- A channel's own profile or roulette ("profile:<id>" or
+    -- "roulette:<id>"), overriding the server-wide one. NULL: no override.
+    ALTER TABLE channels ADD COLUMN assignment TEXT;
+
+    -- The name of the profile that wrote each partner message.
+    ALTER TABLE messages ADD COLUMN profile TEXT;
+    `);
+
+    // The model settings become the first profile, which then writes both
+    // jobs, so nothing changes until you change it. (A brand-new server has
+    // no saved settings, and gets the defaults.)
+    const saved = (key: string): unknown => {
+      const row = db.query("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | null;
+      return row ? JSON.parse(row.value) : undefined;
+    };
+    const model = (saved("model") as string | undefined) ?? "deepseek-ai/DeepSeek-V3.1-Terminus";
+    const id = crypto.randomUUID();
+    db.query(
+      `INSERT INTO profiles (id, name, model, temperature, max_tokens, position, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
+    ).run(
+      id,
+      model.split("/").at(-1) || model,
+      model,
+      (saved("temperature") as number | undefined) ?? 0.9,
+      (saved("maxTokens") as number | undefined) ?? 1024,
+      new Date().toISOString(),
+    );
+    db.exec("DELETE FROM settings WHERE key IN ('model', 'temperature', 'maxTokens')");
+    const assign = db.query("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+    assign.run("rpAssignment", JSON.stringify(`profile:${id}`));
+    assign.run("oocAssignment", JSON.stringify(`profile:${id}`));
+  },
 ];
 
 /**

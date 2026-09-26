@@ -43,6 +43,13 @@ const state = {
   editingEntry: null,
   /** The folder open in the folder dialog (null for a new one). */
   editingFolder: null,
+  /** Connection profiles: {id, name, model, temperature, maxTokens, topP, reasoningEffort, supportsTools, quirkPrompt, extraParams}. */
+  profiles: [],
+  /** Roulettes: {id, name, entries: [{profileId, weight}]}. */
+  roulettes: [],
+  /** The profile or roulette open in its editor (null for a new one). */
+  editingProfile: null,
+  editingRoulette: null,
   /** Messages in the open channel: {id, channelId, author, content, characters, createdAt, editedAt?, model?}. */
   messages: [],
   /** Ids of channels where the partner is writing right now. */
@@ -139,6 +146,8 @@ async function loadState() {
   const data = await api("GET", "/api/state");
   state.settings = data.settings;
   state.channels = data.channels;
+  state.profiles = data.profiles;
+  state.roulettes = data.roulettes;
   state.busy = new Set(data.busyChannels);
   state.appVersion ??= data.appVersion;
   checkForUpdate(data.appVersion);
@@ -253,7 +262,7 @@ async function saveChannel(event) {
   event.preventDefault();
   const channel = currentChannel();
   const form = els.channelForm.elements;
-  const body = { name: form.name.value, theme: form.theme.value || null };
+  const body = { name: form.name.value, theme: form.theme.value || null, assignment: form.assignment.value || null };
   if (channel.kind === "rp") body.mode = form.mode.value;
   try {
     const { channel: updated } = await api("PATCH", `/api/channels/${encodeURIComponent(channel.id)}`, body);
@@ -552,8 +561,14 @@ async function partnerTurn() {
   await runTurn("turn", (data) => state.messages.push(...data.partnerMessages), partnerTurn);
 }
 
-/** Replace your partner's last reply (every bubble of it, in casual mode) with a fresh one. */
-async function regenerate() {
+/**
+ * Replace your partner's last reply (every bubble of it, in casual mode) with
+ * a fresh one.
+ *
+ * @param profileId  Write with this profile. Without one, the channel's
+ *                   profile or roulette picks again.
+ */
+async function regenerate(profileId) {
   await runTurn(
     "regenerate",
     (data) => {
@@ -561,7 +576,8 @@ async function regenerate() {
       state.messages = state.messages.filter((m) => !replaced.has(m.id));
       state.messages.push(...data.partnerMessages);
     },
-    regenerate,
+    () => regenerate(profileId),
+    profileId ? { profileId } : {},
   );
 }
 
@@ -614,14 +630,15 @@ function updateChannelInState(channel) {
  * @param onSuccess  Updates `state.messages` with the server's answer. Not
  *                   called if the turn was stopped.
  * @param retry      What "Try again" should do if it fails.
+ * @param body       Sent with the request (e.g. the profile to regenerate with).
  */
-async function runTurn(action, onSuccess, retry) {
+async function runTurn(action, onSuccess, retry, body = {}) {
   const channelId = state.channelId;
   if (!channelId || state.busy.has(channelId)) return;
   hideError();
   await withBusyChannel(channelId, async (stillMine) => {
     try {
-      const data = await api("POST", channelPath(action, channelId), {});
+      const data = await api("POST", channelPath(action, channelId), body);
       if (stillMine() && state.channelId === channelId && data.partnerMessages) onSuccess(data);
     } catch (error) {
       if (stillMine() && state.channelId === channelId) showError(error.message, retry);
@@ -933,9 +950,10 @@ function renderMessage(message, { continued = false, regenerate: showRegenerate 
   if (message.model) {
     const model = document.createElement("span");
     model.className = "message-model";
-    // Show just the part after the last "/" (e.g. "DeepSeek-V3.1-Terminus")
-    // to save space on a phone; the full id appears when you hover or long-press.
-    model.textContent = message.model.split("/").at(-1);
+    // The profile's name if it has one, otherwise just the part of the model
+    // id after the last "/" (e.g. "DeepSeek-V3.1-Terminus"), to save space on
+    // a phone. The full model id appears when you hover or long-press.
+    model.textContent = message.profile ?? message.model.split("/").at(-1);
     model.title = message.model;
     meta.append(model);
   }
@@ -966,7 +984,10 @@ function renderMessage(message, { continued = false, regenerate: showRegenerate 
     }),
     actionButton("Delete", () => deleteMessage(message.id), busy),
   );
-  if (showRegenerate) actions.append(actionButton("Regenerate", regenerate, busy));
+  if (showRegenerate) {
+    actions.append(actionButton("Regenerate", () => regenerate(), busy));
+    if (state.profiles.length > 1) actions.append(actionButton("Regenerate with…", openRegenerateWith, busy));
+  }
   root.append(actions);
   return root;
 }
@@ -1531,9 +1552,8 @@ function openSettings() {
   const form = els.settingsForm.elements;
   form.partnerName.value = s.partnerName;
   for (const key of PROMPT_SETTINGS) form[key].value = s[key];
-  form.model.value = s.model;
-  form.temperature.value = s.temperature;
-  form.maxTokens.value = s.maxTokens;
+  fillAssignmentSelect(form.rpAssignment, s.rpAssignment);
+  fillAssignmentSelect(form.oocAssignment, s.oocAssignment);
   form.historyLimit.value = s.historyLimit;
   hideFormError(els.settingsForm);
   els.settingsDialog.showModal();
@@ -1548,10 +1568,9 @@ async function saveSettings(event) {
     const data = await api("PUT", "/api/settings", {
       partnerName: form.partnerName.value,
       ...Object.fromEntries(PROMPT_SETTINGS.map((key) => [key, form[key].value])),
-      model: form.model.value,
+      rpAssignment: form.rpAssignment.value,
+      oocAssignment: form.oocAssignment.value,
       // Number boxes give text; the server wants numbers.
-      temperature: Number(form.temperature.value),
-      maxTokens: Number(form.maxTokens.value),
       historyLimit: Number(form.historyLimit.value),
     });
     state.settings = data.settings;
@@ -1559,30 +1578,6 @@ async function saveSettings(event) {
     renderAll();
   } catch (error) {
     showFormError(els.settingsForm, error.message);
-  }
-}
-
-/** Ask the server which models nanoGPT offers and offer them as suggestions. */
-async function loadModels() {
-  els.loadModels.disabled = true;
-  els.loadModels.textContent = "Loading…";
-  try {
-    const { models } = await api("GET", "/api/models");
-    els.modelList.replaceChildren(
-      ...models.map((id) => {
-        const option = document.createElement("option");
-        option.value = id;
-        return option;
-      }),
-    );
-    els.loadModels.textContent = `${models.length} models`;
-    // Focus the model box so the suggestions are one tap away.
-    els.settingsForm.elements.model.focus();
-  } catch (error) {
-    showFormError(els.settingsForm, error.message);
-    els.loadModels.textContent = "Load list";
-  } finally {
-    els.loadModels.disabled = false;
   }
 }
 
@@ -1597,6 +1592,8 @@ function openChannelSettings() {
     ...state.themes.map((t) => new Option(t.name, t.id)),
   );
   form.theme.value = channel.theme ?? "";
+  const serverWide = channel.kind === "ooc" ? state.settings.oocAssignment : state.settings.rpAssignment;
+  fillAssignmentSelect(form.assignment, channel.assignment, `Same as the server (${assignmentName(serverWide)})`);
   // Show the mode you'll get: a waiting change if there is one.
   form.mode.value = channel.pendingMode ?? channel.mode;
   updateModeNote();
@@ -2362,6 +2359,312 @@ async function changeCast(entryId, pin) {
   }
 }
 
+// ------------------------------------------------- profiles and roulettes
+
+/*
+ * Stage 5: connection profiles (a model and its settings) and roulettes (a
+ * weighted set of profiles). The server keeps them; the app lists, edits
+ * and assigns them. An assignment is written "profile:<id>" or
+ * "roulette:<id>"; "" means the first profile.
+ */
+
+/** Reload profiles and roulettes, and redraw whatever shows them. */
+async function refreshProfiles() {
+  const { profiles, roulettes } = await api("GET", "/api/profiles");
+  state.profiles = profiles;
+  state.roulettes = roulettes;
+  if ($("models-dialog").open) renderModels();
+  // Settings may be open underneath: keep its choices current.
+  if (els.settingsDialog.open) {
+    const form = els.settingsForm.elements;
+    fillAssignmentSelect(form.rpAssignment, form.rpAssignment.value);
+    fillAssignmentSelect(form.oocAssignment, form.oocAssignment.value);
+  }
+}
+
+/**
+ * Fill a select with every profile and roulette.
+ *
+ * @param emptyLabel  If given, a first option with value "" and this label
+ *                    (e.g. "Same as the server").
+ */
+function fillAssignmentSelect(select, value, emptyLabel) {
+  const profiles = document.createElement("optgroup");
+  profiles.label = "Profiles";
+  profiles.append(...state.profiles.map((p) => new Option(p.name, `profile:${p.id}`)));
+  const roulettes = document.createElement("optgroup");
+  roulettes.label = "Roulettes";
+  roulettes.append(...state.roulettes.map((r) => new Option(`🎲 ${r.name}`, `roulette:${r.id}`)));
+  select.replaceChildren(
+    ...(emptyLabel ? [new Option(emptyLabel, "")] : []),
+    profiles,
+    ...(state.roulettes.length ? [roulettes] : []),
+  );
+  // "" (no assignment) means the first profile, where there's no "" option.
+  select.value = value || (emptyLabel ? "" : `profile:${state.profiles[0]?.id}`);
+  if (select.selectedIndex < 0) select.selectedIndex = 0;
+}
+
+/** A readable name for an assignment, e.g. "DeepSeek" or "🎲 Variety". */
+function assignmentName(value) {
+  const [kind, id] = (value || "").split(":");
+  if (kind === "roulette") return `🎲 ${state.roulettes.find((r) => r.id === id)?.name ?? "?"}`;
+  return (state.profiles.find((p) => p.id === id) ?? state.profiles[0])?.name ?? "?";
+}
+
+function openModels() {
+  hideFormError($("models-dialog"));
+  renderModels();
+  $("models-dialog").showModal();
+}
+
+/** Draw the lists of profiles and roulettes. */
+function renderModels() {
+  const inUse = (value) => {
+    const jobs = [];
+    if (state.settings.rpAssignment === value) jobs.push("roleplay");
+    if (state.settings.oocAssignment === value) jobs.push("OOC");
+    const channels = state.channels.filter((c) => c.assignment === value).map((c) => `#${c.name}`);
+    return [...jobs, ...channels];
+  };
+
+  $("profile-list").replaceChildren(
+    ...state.profiles.map((profile, index) => {
+      const uses = inUse(`profile:${profile.id}`);
+      if (index === 0 && !state.settings.rpAssignment) uses.unshift("roleplay");
+      if (index === 0 && !state.settings.oocAssignment) uses.unshift("OOC");
+      return profileRow(
+        profile.name,
+        [profile.model.split("/").at(-1), profile.supportsTools ? "tools" : "no tools", ...uses.map((u) => `used by ${u}`)],
+        () => openProfile(profile),
+      );
+    }),
+  );
+
+  const byId = new Map(state.profiles.map((p) => [p.id, p]));
+  $("roulette-list").replaceChildren(
+    ...state.roulettes.map((roulette) => {
+      const total = roulette.entries.reduce((sum, e) => sum + e.weight, 0);
+      const shares = roulette.entries.map(
+        (e) => `${Math.round((e.weight / total) * 100)}% ${byId.get(e.profileId)?.name ?? "?"}`,
+      );
+      return profileRow(
+        `🎲 ${roulette.name}`,
+        [...(shares.length ? shares : ["empty"]), ...inUse(`roulette:${roulette.id}`).map((u) => `used by ${u}`)],
+        () => openRoulette(roulette),
+      );
+    }),
+  );
+}
+
+/** One row in the profile or roulette list: a name, badges, and the whole row opens it. */
+function profileRow(name, badges, onOpen) {
+  const item = document.createElement("li");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "profile-row";
+  const title = document.createElement("span");
+  title.className = "profile-row-name";
+  title.textContent = name;
+  const tags = document.createElement("span");
+  tags.className = "notebook-entry-badges";
+  tags.append(...badges.map(badge));
+  button.append(title, tags);
+  button.addEventListener("click", onOpen);
+  item.append(button);
+  return item;
+}
+
+// --------------------------------------------------------- profile editor
+
+/** Open a profile in the editor, or start a new one (`null`). */
+function openProfile(profile) {
+  state.editingProfile = profile;
+  const form = $("profile-form");
+  const f = form.elements;
+  hideFormError(form);
+  $("profile-title").textContent = profile ? profile.name : "New profile";
+  const base = profile ?? state.profiles[0] ?? {};
+  f.name.value = profile?.name ?? "";
+  f.model.value = profile?.model ?? base.model ?? "";
+  f.temperature.value = profile?.temperature ?? 0.9;
+  f.maxTokens.value = profile?.maxTokens ?? 1024;
+  f.topP.value = profile?.topP ?? "";
+  f.reasoningEffort.value = profile?.reasoningEffort ?? "";
+  f.supportsTools.checked = profile?.supportsTools ?? true;
+  f.quirkPrompt.value = profile?.quirkPrompt ?? "";
+  f.extraParams.value = profile?.extraParams ?? "";
+  form.querySelector(".advanced").open = Boolean(profile?.extraParams);
+  $("profile-delete").hidden = !profile;
+  $("profile-dialog").showModal();
+}
+
+async function saveProfile(event) {
+  event.preventDefault();
+  const form = $("profile-form");
+  const f = form.elements;
+  const body = {
+    name: f.name.value,
+    model: f.model.value,
+    // Number boxes give text; the server wants numbers.
+    temperature: Number(f.temperature.value),
+    maxTokens: Number(f.maxTokens.value),
+    topP: f.topP.value === "" ? null : Number(f.topP.value),
+    reasoningEffort: f.reasoningEffort.value || null,
+    supportsTools: f.supportsTools.checked,
+    quirkPrompt: f.quirkPrompt.value,
+    extraParams: f.extraParams.value,
+  };
+  try {
+    const profile = state.editingProfile;
+    if (profile) await api("PATCH", `/api/profiles/${encodeURIComponent(profile.id)}`, body);
+    else await api("POST", "/api/profiles", body);
+    $("profile-dialog").close();
+    await refreshProfiles();
+  } catch (error) {
+    showFormError(form, error.message);
+  }
+}
+
+async function deleteProfile() {
+  const profile = state.editingProfile;
+  if (!confirm(`Delete the profile "${profile.name}"? Anything using it goes back to the default.`)) return;
+  try {
+    const { settings, channels } = await api("DELETE", `/api/profiles/${encodeURIComponent(profile.id)}`, {});
+    state.settings = settings;
+    state.channels = channels;
+    $("profile-dialog").close();
+    await refreshProfiles();
+  } catch (error) {
+    showFormError($("profile-form"), error.message);
+  }
+}
+
+/** Ask the server which models nanoGPT offers and offer them as suggestions. */
+async function loadModels() {
+  els.loadModels.disabled = true;
+  els.loadModels.textContent = "Loading…";
+  try {
+    const { models } = await api("GET", "/api/models");
+    els.modelList.replaceChildren(...models.map((id) => new Option(id, id)));
+    els.loadModels.textContent = `${models.length} models`;
+    // Focus the model box so the suggestions are one tap away.
+    $("profile-form").elements.model.focus();
+  } catch (error) {
+    showFormError($("profile-form"), error.message);
+    els.loadModels.textContent = "Load list";
+  } finally {
+    els.loadModels.disabled = false;
+  }
+}
+
+// -------------------------------------------------------- roulette editor
+
+function openRoulette(roulette) {
+  state.editingRoulette = roulette;
+  const form = $("roulette-form");
+  hideFormError(form);
+  $("roulette-title").textContent = roulette ? `🎲 ${roulette.name}` : "New roulette";
+  form.elements.name.value = roulette?.name ?? "";
+  const entries = roulette?.entries ?? state.profiles.slice(0, 2).map((p) => ({ profileId: p.id, weight: 1 }));
+  $("roulette-entries").replaceChildren(...entries.map(rouletteEntryRow));
+  updateRouletteShares();
+  $("roulette-delete").hidden = !roulette;
+  $("roulette-dialog").showModal();
+}
+
+/** One row of the roulette editor: a profile, its weight, its share, and a remove button. */
+function rouletteEntryRow(entry) {
+  const row = document.createElement("div");
+  row.className = "roulette-entry";
+  const select = document.createElement("select");
+  select.className = "roulette-profile";
+  select.setAttribute("aria-label", "Profile");
+  select.append(...state.profiles.map((p) => new Option(p.name, p.id)));
+  select.value = entry.profileId;
+  const weight = document.createElement("input");
+  weight.className = "roulette-weight";
+  weight.type = "number";
+  weight.min = "0.01";
+  weight.step = "any";
+  weight.value = entry.weight;
+  weight.setAttribute("aria-label", "Weight");
+  const share = document.createElement("span");
+  share.className = "roulette-share";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "link-button";
+  remove.textContent = "✕";
+  remove.setAttribute("aria-label", "Remove");
+  remove.addEventListener("click", () => {
+    row.remove();
+    updateRouletteShares();
+  });
+  row.append(select, weight, share, remove);
+  return row;
+}
+
+/** Show each row's chance, e.g. "40%". */
+function updateRouletteShares() {
+  const rows = [...$("roulette-entries").querySelectorAll(".roulette-entry")];
+  const weights = rows.map((row) => Math.max(0, Number(row.querySelector(".roulette-weight").value) || 0));
+  const total = weights.reduce((a, b) => a + b, 0);
+  rows.forEach((row, i) => {
+    row.querySelector(".roulette-share").textContent = total ? `${Math.round((weights[i] / total) * 100)}%` : "";
+  });
+}
+
+async function saveRoulette(event) {
+  event.preventDefault();
+  const form = $("roulette-form");
+  const entries = [...$("roulette-entries").querySelectorAll(".roulette-entry")].map((row) => ({
+    profileId: row.querySelector(".roulette-profile").value,
+    weight: Number(row.querySelector(".roulette-weight").value),
+  }));
+  try {
+    const roulette = state.editingRoulette;
+    const body = { name: form.elements.name.value, entries };
+    if (roulette) await api("PATCH", `/api/roulettes/${encodeURIComponent(roulette.id)}`, body);
+    else await api("POST", "/api/roulettes", body);
+    $("roulette-dialog").close();
+    await refreshProfiles();
+  } catch (error) {
+    showFormError(form, error.message);
+  }
+}
+
+async function deleteRoulette() {
+  const roulette = state.editingRoulette;
+  if (!confirm(`Delete the roulette "${roulette.name}"? Anything using it goes back to the default.`)) return;
+  try {
+    const { settings, channels } = await api("DELETE", `/api/roulettes/${encodeURIComponent(roulette.id)}`, {});
+    state.settings = settings;
+    state.channels = channels;
+    $("roulette-dialog").close();
+    await refreshProfiles();
+  } catch (error) {
+    showFormError($("roulette-form"), error.message);
+  }
+}
+
+// ---------------------------------------------------- regenerate with...
+
+/** "Regenerate with...": choose a profile, or let the channel's pick again. */
+function openRegenerateWith() {
+  const select = $("regenerate-profile");
+  select.replaceChildren(
+    new Option(`Pick again (${assignmentName(channelAssignment(currentChannel()))})`, ""),
+    ...state.profiles.map((p) => new Option(p.name, p.id)),
+  );
+  $("regenerate-dialog").showModal();
+}
+
+/** The assignment that writes in a channel: its own, or the server-wide one for its kind. */
+function channelAssignment(channel) {
+  if (channel.assignment) return channel.assignment;
+  return channel.kind === "ooc" ? state.settings.oocAssignment : state.settings.rpAssignment;
+}
+
 // ---------------------------------------------------------------- sidebar
 
 /** On phones, the sidebar slides over the channel. These open and close it. */
@@ -2488,6 +2791,26 @@ $("entry-pin").addEventListener("click", toggleEntryPin);
 $("entry-delete").addEventListener("click", deleteEntry);
 $("folder-form").addEventListener("submit", saveFolder);
 $("folder-delete").addEventListener("click", deleteFolder);
+
+$("open-models").addEventListener("click", openModels);
+$("new-profile").addEventListener("click", () => openProfile(null));
+$("new-roulette").addEventListener("click", () => openRoulette(null));
+$("profile-form").addEventListener("submit", saveProfile);
+$("profile-delete").addEventListener("click", deleteProfile);
+$("roulette-form").addEventListener("submit", saveRoulette);
+$("roulette-delete").addEventListener("click", deleteRoulette);
+$("roulette-add").addEventListener("click", () => {
+  const used = new Set([...$("roulette-entries").querySelectorAll(".roulette-profile")].map((s) => s.value));
+  const next = state.profiles.find((p) => !used.has(p.id)) ?? state.profiles[0];
+  $("roulette-entries").append(rouletteEntryRow({ profileId: next.id, weight: 1 }));
+  updateRouletteShares();
+});
+$("roulette-entries").addEventListener("input", updateRouletteShares);
+$("regenerate-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  $("regenerate-dialog").close();
+  regenerate($("regenerate-profile").value || undefined);
+});
 
 $("new-channel-button").addEventListener("click", openNewChannel);
 els.newChannelForm.addEventListener("submit", createChannel);

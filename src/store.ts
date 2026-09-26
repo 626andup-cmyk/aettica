@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 import { openDatabase } from "./db.ts";
 import { NotFoundError, ValidationError } from "./errors.ts";
 import { Notebook } from "./notebook.ts";
+import { Profiles } from "./profiles.ts";
 import { parseSheet } from "./sheets.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
@@ -49,15 +50,14 @@ const DEFAULTS_DIR = resolve(import.meta.dir, "..", "defaults");
 export function defaultSettings(): Settings {
   return {
     partnerName: "Arlo",
+    // Which profile writes each job. "" means the first profile. (Models and
+    // their settings live in connection profiles; see src/profiles.ts.)
+    rpAssignment: "",
+    oocAssignment: "",
     partnerPrompt: readDefault("partner.md"),
     literaryPrompt: readDefault("literary.md"),
     casualPrompt: readDefault("casual.md"),
     oocPrompt: readDefault("ooc.md"),
-    // Check the model list in the settings panel for the exact ids available
-    // to your account.
-    model: "deepseek-ai/DeepSeek-V3.1-Terminus",
-    temperature: 0.9,
-    maxTokens: 1024,
     historyLimit: 40,
     appTheme: "classic",
   };
@@ -80,8 +80,6 @@ function readDefault(fileName: string): string {
  * (a negative temperature, a 10 MB channel name) before it is saved.
  */
 const LIMITS = {
-  temperature: { min: 0, max: 2 },
-  maxTokens: { min: 16, max: 32000 },
   historyLimit: { min: 1, max: 1000 },
   /** Longest partner prompt, in characters. */
   longText: 100_000,
@@ -106,19 +104,10 @@ export function validateSettings(input: unknown): Partial<Settings> {
     if (raw[key] !== undefined) clean[key] = longText(raw[key], key);
   }
 
-  if (raw.model !== undefined) {
-    if (typeof raw.model !== "string" || raw.model.trim() === "") {
-      throw new ValidationError("model must be a non-empty model id");
-    }
-    clean.model = raw.model.trim();
-  }
-
-  if (raw.temperature !== undefined) {
-    clean.temperature = numberInRange(raw.temperature, "temperature", LIMITS.temperature, false);
-  }
-  if (raw.maxTokens !== undefined) {
-    clean.maxTokens = numberInRange(raw.maxTokens, "maxTokens", LIMITS.maxTokens, true);
-  }
+  // Only the form is checked here; the server checks the profile or
+  // roulette exists.
+  if (raw.rpAssignment !== undefined) clean.rpAssignment = assignment(raw.rpAssignment, "rpAssignment") ?? "";
+  if (raw.oocAssignment !== undefined) clean.oocAssignment = assignment(raw.oocAssignment, "oocAssignment") ?? "";
   if (raw.historyLimit !== undefined) {
     clean.historyLimit = numberInRange(raw.historyLimit, "historyLimit", LIMITS.historyLimit, true);
   }
@@ -126,6 +115,18 @@ export function validateSettings(input: unknown): Partial<Settings> {
   if (raw.appTheme !== undefined) clean.appTheme = themeId(raw.appTheme, "appTheme");
 
   return clean;
+}
+
+/**
+ * A profile or roulette assignment: `"profile:<id>"` or `"roulette:<id>"`.
+ * `null` or `""` means none (returned as `null`).
+ */
+function assignment(value: unknown, field: string): string | null {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string" || !/^(profile|roulette):[\w-]{1,100}$/.test(value)) {
+    throw new ValidationError(`${field} must be "profile:<id>" or "roulette:<id>"`);
+  }
+  return value;
 }
 
 /** A theme id: lowercase letters, digits and dashes. */
@@ -167,7 +168,7 @@ export function validateNewChannel(input: unknown): NewChannel {
  * The channel fields that can be changed after creation. `mode` is the mode
  * you *ask* for; see `Store.updateChannel` for when it takes effect.
  */
-export type ChannelUpdate = Partial<Pick<Channel, "name" | "mode" | "theme">>;
+export type ChannelUpdate = Partial<Pick<Channel, "name" | "mode" | "theme" | "assignment">>;
 
 /** Check a partial channel update. The kind can't be changed, so it's ignored. */
 export function validateChannelUpdate(input: unknown): ChannelUpdate {
@@ -177,6 +178,8 @@ export function validateChannelUpdate(input: unknown): ChannelUpdate {
   if (raw.mode !== undefined) clean.mode = mode(raw.mode);
   // `null` (or "") means "use the app theme".
   if (raw.theme !== undefined) clean.theme = raw.theme === null || raw.theme === "" ? null : themeId(raw.theme, "theme");
+  // `null` (or "") means "use the server-wide profile for this kind of channel".
+  if (raw.assignment !== undefined) clean.assignment = assignment(raw.assignment, "assignment");
   return clean;
 }
 
@@ -233,6 +236,7 @@ interface ChannelRow {
   mode: ChannelMode;
   pending_mode: ChannelMode | null;
   theme: string | null;
+  assignment: string | null;
   position: number;
   created_at: string;
 }
@@ -248,6 +252,7 @@ interface MessageRow {
   created_at: string;
   edited_at: string | null;
   model: string | null;
+  profile: string | null;
   /** A JSON array of character names, built by the query itself. */
   characters: string;
 }
@@ -260,6 +265,7 @@ function toChannel(row: ChannelRow): Channel {
     mode: row.mode,
     pendingMode: row.pending_mode,
     theme: row.theme,
+    assignment: row.assignment,
     position: row.position,
     createdAt: row.created_at,
   };
@@ -279,6 +285,7 @@ function toMessage(row: MessageRow): Message {
     // Only include optional fields when they have a value.
     ...(row.edited_at ? { editedAt: row.edited_at } : {}),
     ...(row.model ? { model: row.model } : {}),
+    ...(row.profile ? { profile: row.profile } : {}),
   };
 }
 
@@ -289,7 +296,7 @@ function toMessage(row: MessageRow): Message {
  * everything about a message.
  */
 const SELECT_MESSAGES = `
-  SELECT m.id, m.channel_id, m.kind, m.mode, m.turn_id, m.author, m.content, m.created_at, m.edited_at, m.model,
+  SELECT m.id, m.channel_id, m.kind, m.mode, m.turn_id, m.author, m.content, m.created_at, m.edited_at, m.model, m.profile,
     (SELECT json_group_array(character_name)
        FROM (SELECT character_name FROM message_characters
               WHERE message_id = m.id ORDER BY position)) AS characters
@@ -304,6 +311,8 @@ export interface NewMessage {
   content: string;
   characters?: string[];
   model?: string;
+  /** The name of the profile that wrote it (partner messages). */
+  profile?: string;
   /** Defaults to "post". Use `addSceneBreak` for scene breaks. */
   kind?: MessageKind;
   /** RP channels: the mode it was written in. Defaults to `null`. */
@@ -316,6 +325,8 @@ export class Store {
   readonly db: Database;
   /** Characters, lore and each channel's cast (see `src/notebook.ts`). */
   readonly notebook: Notebook;
+  /** Connection profiles and roulettes (see `src/profiles.ts`). */
+  readonly profiles: Profiles;
 
   /**
    * Open (or create) the database inside `dataDir`.
@@ -335,6 +346,7 @@ export class Store {
     const isNew = inMemory || !existsSync(path);
     this.db = openDatabase(path);
     this.notebook = new Notebook(this.db);
+    this.profiles = new Profiles(this.db);
 
     if (isNew) {
       const imported = !inMemory && importLegacyChat(this, dataDir);
@@ -458,7 +470,8 @@ export class Store {
     }
     this.db
       .query(
-        `UPDATE channels SET name = $name, mode = $mode, pending_mode = $pendingMode, theme = $theme
+        `UPDATE channels SET name = $name, mode = $mode, pending_mode = $pendingMode, theme = $theme,
+                assignment = $assignment
          WHERE id = $id`,
       )
       .run({
@@ -467,6 +480,7 @@ export class Store {
         mode: merged.mode,
         pendingMode: merged.pendingMode,
         theme: merged.theme,
+        assignment: merged.assignment,
       });
     return this.getChannel(id);
   }
@@ -561,8 +575,8 @@ export class Store {
   addMessage(input: NewMessage & { id?: string; createdAt?: string; editedAt?: string }): Message {
     const id = input.id ?? crypto.randomUUID();
     const insertMessage = this.db.query(
-      `INSERT INTO messages (id, channel_id, kind, mode, turn_id, author, content, created_at, edited_at, model)
-       VALUES ($id, $channelId, $kind, $mode, $turnId, $author, $content, $createdAt, $editedAt, $model)`,
+      `INSERT INTO messages (id, channel_id, kind, mode, turn_id, author, content, created_at, edited_at, model, profile)
+       VALUES ($id, $channelId, $kind, $mode, $turnId, $author, $content, $createdAt, $editedAt, $model, $profile)`,
     );
     const insertCharacter = this.db.query(
       "INSERT OR IGNORE INTO message_characters (message_id, character_name, position) VALUES ($id, $name, $position)",
@@ -581,6 +595,7 @@ export class Store {
         createdAt: input.createdAt ?? new Date().toISOString(),
         editedAt: input.editedAt ?? null,
         model: input.model ?? null,
+        profile: input.profile ?? null,
       });
       (input.characters ?? []).forEach((name, position) => insertCharacter.run({ id, name, position }));
     })();

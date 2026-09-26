@@ -67,14 +67,16 @@ describe("sending a message", () => {
       content: "*Ilse looks up from the lamp.*",
       author: "partner",
       characters: ["Ilse Marrow"],
-      model: app.store.getSettings().model,
+      model: app.store.profiles.list()[0]!.model,
+      profile: app.store.profiles.list()[0]!.name,
     });
     expect(app.store.getMessages(story.id)).toHaveLength(2);
     expect(app.store.getMessages(ooc.id)).toHaveLength(0);
   });
 
-  test("sends the channel's prompt stack and the settings to the API", async () => {
-    app.store.updateSettings({ temperature: 0.7, maxTokens: 321, model: "some/model" });
+  test("sends the channel's prompt stack and the profile's settings to the API", async () => {
+    const [profile] = app.store.profiles.list();
+    app.store.profiles.update(profile!.id, { temperature: 0.7, maxTokens: 321, model: "some/model" });
     await call("POST", `/api/channels/${story.id}/messages`, { content: "Hello" });
 
     const request = fake.requests[0]!;
@@ -354,6 +356,59 @@ describe("scene breaks", () => {
   });
 });
 
+describe("connection profiles", () => {
+  test("a channel can override the server-wide profile", async () => {
+    const glm = app.store.profiles.create({ name: "GLM", model: "zai/glm-5.2", quirkPrompt: "Don't restate the scene." });
+    const { status } = await call("PATCH", `/api/channels/${story.id}`, { assignment: `profile:${glm.id}` });
+    expect(status).toBe(200);
+
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(data.partnerMessages[0]).toMatchObject({ model: "zai/glm-5.2", profile: "GLM" });
+    expect(fake.requests[0]!.model).toBe("zai/glm-5.2");
+    // Its model notes are layer 4 of the prompt.
+    expect(fake.requests[0]!.messages[0]!.content).toContain("## Model notes\n\nDon't restate the scene.");
+
+    // Other channels still use the server-wide one.
+    await call("POST", `/api/channels/${ooc.id}/turn`, {});
+    expect(fake.requests[1]!.model).toBe(app.store.profiles.list()[0]!.model);
+  });
+
+  test("a roulette's pick is recorded on the message", async () => {
+    const [first] = app.store.profiles.list();
+    const roulette = app.store.profiles.createRoulette({ name: "Mix", entries: [{ profileId: first!.id, weight: 1 }] });
+    await call("PUT", "/api/settings", { rpAssignment: `roulette:${roulette.id}` });
+    const { data } = await call("POST", `/api/channels/${story.id}/turn`, {});
+    expect(data.partnerMessages[0].profile).toBe(first!.name);
+  });
+
+  test("regenerate can pin a specific profile", async () => {
+    const glm = app.store.profiles.create({ name: "GLM", model: "zai/glm-5.2" });
+    await call("POST", `/api/channels/${story.id}/turn`, {});
+    const { data } = await call("POST", `/api/channels/${story.id}/regenerate`, { profileId: glm.id });
+    expect(data.partnerMessages[0].profile).toBe("GLM");
+    expect(fake.requests[1]!.model).toBe("zai/glm-5.2");
+  });
+
+  test("profiles and roulettes can be managed through the API", async () => {
+    const made = await call("POST", "/api/profiles", { name: "Kimi", model: "moonshot/kimi-k2.6", supportsTools: false });
+    expect(made.data.profile).toMatchObject({ name: "Kimi", supportsTools: false });
+    const id = made.data.profile.id;
+    expect((await call("PATCH", `/api/profiles/${id}`, { temperature: 0.6 })).data.profile.temperature).toBe(0.6);
+    const roulette = await call("POST", "/api/roulettes", { name: "Mix", entries: [{ profileId: id, weight: 2 }] });
+    expect(roulette.data.roulette.entries).toEqual([{ profileId: id, weight: 2 }]);
+    expect((await call("GET", "/api/profiles")).data.roulettes).toHaveLength(1);
+    expect((await call("DELETE", `/api/profiles/${id}`, {})).status).toBe(200);
+    expect((await call("GET", "/api/profiles")).data.roulettes[0].entries).toEqual([]);
+  });
+
+  test("the prompt preview can show a given profile's model notes", async () => {
+    const glm = app.store.profiles.create({ name: "GLM", model: "zai/glm-5.2", quirkPrompt: "Short sentences." });
+    const { data } = await call("GET", `/api/channels/${story.id}/prompt?profile=${glm.id}`);
+    expect(data.profile.name).toBe("GLM");
+    expect(data.messages[0].content).toContain("Short sentences.");
+  });
+});
+
 describe("casual mode", () => {
   beforeEach(() => {
     app.store.updateChannel(story.id, { mode: "casual" });
@@ -466,13 +521,16 @@ describe("messages and settings", () => {
   });
 
   test("updates settings and rejects invalid ones", async () => {
-    const ok = await call("PUT", "/api/settings", { temperature: 1.2, partnerName: "Sol" });
-    expect(ok.data.settings).toMatchObject({ temperature: 1.2, partnerName: "Sol" });
+    const ok = await call("PUT", "/api/settings", { historyLimit: 12, partnerName: "Sol" });
+    expect(ok.data.settings).toMatchObject({ historyLimit: 12, partnerName: "Sol" });
 
-    const bad = await call("PUT", "/api/settings", { temperature: 99 });
+    const bad = await call("PUT", "/api/settings", { historyLimit: 0 });
     expect(bad.status).toBe(400);
-    expect(bad.data.error).toContain("temperature");
-    expect(app.store.getSettings().temperature).toBe(1.2);
+    expect(bad.data.error).toContain("historyLimit");
+    expect(app.store.getSettings().historyLimit).toBe(12);
+
+    // An assignment must point at a profile or roulette that exists.
+    expect((await call("PUT", "/api/settings", { rpAssignment: "profile:nope" })).status).toBe(404);
   });
 
   test("reports a fingerprint of the app's files, which changes when they change", async () => {
@@ -492,7 +550,8 @@ describe("messages and settings", () => {
   test("returns the server state", async () => {
     const { data } = await call("GET", "/api/state");
     expect(data.channels.map((c: Channel) => c.name)).toEqual(["story", "ooc"]);
-    expect(data.settings.model).toBeString();
+    expect(data.profiles).toHaveLength(1);
+    expect(data.roulettes).toEqual([]);
     expect(data.busyChannels).toEqual([]);
   });
 

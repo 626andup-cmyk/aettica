@@ -58,9 +58,20 @@ export function importLegacyChat(store: Store, dataDir: string): boolean {
   // Everything is imported in one transaction: all of it, or none of it.
   store.db.transaction(() => {
     // Keep only the settings that still exist, and only valid values.
-    // (The character sheet becomes a notebook entry instead.)
-    const { characterSheet: _moved, ...rest } = save.settings ?? {};
+    // (The character sheet becomes a notebook entry instead, and the model
+    // settings go into the first connection profile.)
+    const { characterSheet: _moved, model, temperature, maxTokens, ...rest } = save.settings ?? {};
     store.updateSettings(validateSettingsLeniently(rest));
+    const [profile] = store.profiles.list();
+    for (const [key, value] of Object.entries({ model, temperature, maxTokens })) {
+      if (value === undefined) continue;
+      try {
+        store.profiles.update(profile!.id, { [key]: value });
+        if (key === "model" && typeof value === "string") store.profiles.update(profile!.id, { name: value.split("/").at(-1) || value });
+      } catch {
+        // An invalid old value is skipped, like the other settings.
+      }
+    }
 
     const story = store.createChannel({ name: "story", kind: "rp" });
     store.createChannel({ name: "ooc", kind: "ooc" });
