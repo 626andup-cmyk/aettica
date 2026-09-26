@@ -10,7 +10,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
   - **Roleplay** channels are storylines. Each has its own cast: characters and lore pinned from the notebook.
   - **Out-of-character** channels are for talking with your partner as themselves. They know which storylines exist.
 - **Notebook** (the book button): characters and lore, with labelled fields, notes for your partner, and `[[links]]` between entries.
-  - Each entry is yours, your partner's, or shared. Your partner plays their characters and shared ones; you play yours.
+  - Each entry is yours, your partner's, or shared. Your partner plays their characters, you play yours, and either of you can play shared ones.
   - You choose whether your partner can see each of your entries, and whether they can edit it, only suggest changes, or only read it. Folders pass these settings to the entries in them.
   - Your partner's secrets show as "??? (hidden)" in a cast: they know, you don't (yet).
 - **Scenes**: type `=====` (or `===== Title`) or press ⁂ to start a new scene. Scenes are divided by a titled line.

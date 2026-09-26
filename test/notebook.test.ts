@@ -210,8 +210,26 @@ describe("proxy prefixes", () => {
   test("are only for your characters, and can't be shared between them", () => {
     make({ name: "Kestrel", proxyPrefix: "k" });
     expect(() => make({ name: "Kit", proxyPrefix: "K" })).toThrow(/already uses the prefix/);
-    expect(() => make({ name: "Ilse", owner: "partner", proxyPrefix: "i" })).toThrow(/Only your own characters/);
+    expect(() => make({ name: "Ilse", owner: "partner", proxyPrefix: "i" })).toThrow(/Only characters you play/);
     expect(() => make({ name: "Jun", proxyPrefix: "j j" })).toThrow(/no spaces or colons/);
+  });
+
+  test("work on shared characters too, and you set them directly, not by suggestion", () => {
+    const bo = make({ name: "Bo", owner: "joint", proxyPrefix: "b" });
+    expect(bo.proxyPrefix).toBe("b");
+    expect(notebook.postableCharacters().map((c) => c.name)).toEqual(["Bo"]);
+
+    // Changing only the prefix saves at once...
+    expect(notebook.editEntry("user", bo.id, { proxyPrefix: "bo" })).toMatchObject({ entry: { proxyPrefix: "bo" } });
+    // ...while a change to the rest is still a suggestion.
+    const result = notebook.editEntry("user", bo.id, { name: "Bo Tern", proxyPrefix: "t" });
+    expect(result).toMatchObject({ suggestion: { change: { name: "Bo Tern" } } });
+    expect(notebook.getEntry("user", bo.id)).toMatchObject({ name: "Bo", proxyPrefix: "t" });
+  });
+
+  test("are kept when a character of yours becomes shared", () => {
+    const kestrel = make({ name: "Kestrel", proxyPrefix: "k" });
+    expect(notebook.updateEntrySettings("user", kestrel.id, { owner: "joint" }).proxyPrefix).toBe("k");
   });
 
   test("are dropped when a character is given away", () => {
@@ -224,12 +242,15 @@ describe("the cast", () => {
   test("is the pinned entries, in the order they were pinned, with who plays each", () => {
     const ilse = make({ name: "Ilse", owner: "partner" });
     const kit = make({ name: "Kit" });
+    const bo = make({ name: "Bo", owner: "joint" });
     notebook.pin("user", story, kit.id);
     notebook.pin("user", story, ilse.id);
+    notebook.pin("user", story, bo.id);
     notebook.pin("user", story, kit.id); // already pinned: no change
     expect(notebook.castFor("user", story).map((c) => [c.name, c.playedBy])).toEqual([
       ["Kit", "user"],
       ["Ilse", "partner"],
+      ["Bo", "both"],
     ]);
   });
 

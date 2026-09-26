@@ -54,7 +54,7 @@ Each RP channel has a mode. A mode change takes effect at the next scene break, 
 | You post as | Just your post | A character, via proxy prefix (`k: *waves*`) or picker |
 
 - **Casual replies are split into bubbles** from `Name: text` lines, which the partner is asked to write. Only known names start a bubble, so text like `Note: ...` stays as text, and a reply with no names becomes one bubble.
-- **Your characters** are notebook entries you own, each with an optional proxy prefix. Any of them can be used in any casual channel, and posting as one pins them to that channel's cast. Several tagged lines in one message become several bubbles.
+- **Your characters** are notebook entries you own or share, each with an optional proxy prefix. Any of them can be used in any casual channel, and posting as one pins them to that channel's cast. Several tagged lines in one message become several bubbles.
 - **A literary post voices the characters it mentions** by full or first name. If it names none and the partner has one character in the cast, it's theirs; otherwise it's narration.
 - **In a casual scene, the prompt names your characters** so the partner doesn't write their lines.
 
@@ -88,7 +88,7 @@ Every entry and folder has an owner, and only the owner changes its settings.
 **Decided in stage 4:**
 
 - **Fields are flexible labelled pairs.** A new character starts from a template (Pronouns, Age, Appearance, Personality, Background, Speech) and new lore from Summary and Details, but any field can be renamed, added or removed. Stage 1 to 3.5 character sheets were read into fields line by line (`Label: value`).
-- **Characters are played by their owner:** yours by you, your partner's and shared ones by your partner.
+- **Characters are played by their owner:** yours by you, your partner's by your partner, and shared ones by either of you. You can give a shared character a proxy prefix; it's yours to set without a suggestion, since it only affects your own posts.
 - **Links pull in one step.** Entries linked with `[[Name]]` (or `[[Name|shown text]]`) from a pinned entry join the prompt as "linked notes", but links from those don't, so the prompt stays small.
 - **You can make entries for your partner** (until stage 6 gives them their own tools), including handing over one of yours. Once given away, only the new owner can change its settings. Only the owner picks an entry's visibility and editing, even when making it.
 - **Deleting:** you delete your own entries. Your partner's are unpinned, not deleted, and deleting shared lore is a suggestion, like any other change to it.

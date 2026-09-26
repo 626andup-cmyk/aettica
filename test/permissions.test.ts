@@ -6,11 +6,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   canChangeSettings,
+  canHavePrefix,
   canDelete,
   canSee,
   editAccess,
   effectiveSettings,
   playedBy,
+  plays,
 } from "../src/permissions.ts";
 import type { EffectiveSettings, NotebookEntry, NotebookFolder } from "../src/types.ts";
 
@@ -108,8 +110,20 @@ describe("canChangeSettings and canDelete", () => {
   });
 });
 
-test("your characters are yours to play; everyone else's are your partner's", () => {
-  expect(playedBy({ owner: "user" })).toBe("user");
-  expect(playedBy({ owner: "partner" })).toBe("partner");
-  expect(playedBy({ owner: "joint" })).toBe("partner");
+describe("who plays a character", () => {
+  test("yours are yours, your partner's are theirs, and shared ones are both of yours", () => {
+    expect(playedBy({ owner: "user" })).toBe("user");
+    expect(playedBy({ owner: "partner" })).toBe("partner");
+    expect(playedBy({ owner: "joint" })).toBe("both");
+    expect(plays("user", { owner: "joint" })).toBe(true);
+    expect(plays("partner", { owner: "joint" })).toBe(true);
+    expect(plays("user", { owner: "partner" })).toBe(false);
+  });
+
+  test("only characters you play can have a proxy prefix", () => {
+    expect(canHavePrefix({ kind: "character", owner: "user" })).toBe(true);
+    expect(canHavePrefix({ kind: "character", owner: "joint" })).toBe(true);
+    expect(canHavePrefix({ kind: "character", owner: "partner" })).toBe(false);
+    expect(canHavePrefix({ kind: "lore", owner: "user" })).toBe(false);
+  });
 });

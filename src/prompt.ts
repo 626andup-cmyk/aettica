@@ -36,7 +36,7 @@
 
 import type { PromptEntry } from "./notebook.ts";
 import { playedBy } from "./permissions.ts";
-import type { Channel, ChannelKind, ChannelMode, ChatMessage, Message, NotebookEntry, Settings } from "./types.ts";
+import type { Channel, ChannelKind, ChannelMode, ChatMessage, Message, NotebookEntry, Player, Settings } from "./types.ts";
 
 /**
  * Fixed framing that comes before your partner prompt in RP channels.
@@ -146,8 +146,11 @@ export interface PromptInput {
 export function buildPromptStack({ settings, channel, channels, messages, notebook, overview }: PromptInput): ChatMessage[] {
   const isRp = channel.kind === "rp";
   const pinned = notebook?.pinned ?? [];
-  const yourCharacters = pinned.filter((p) => p.entry.kind === "character" && playedBy(p.entry) === "partner");
-  const userCharacters = pinned.filter((p) => p.entry.kind === "character" && playedBy(p.entry) === "user");
+  const characterNames = (player: Player) =>
+    pinned.filter((p) => p.entry.kind === "character" && playedBy(p.entry) === player).map((p) => p.entry.name);
+  const yourCharacters = characterNames("partner");
+  const sharedCharacters = characterNames("both");
+  const userCharacters = characterNames("user");
 
   const layers: Layer[] = [
     // Layer 1: who is writing. The fixed framing for this kind of channel,
@@ -159,7 +162,7 @@ export function buildPromptStack({ settings, channel, channels, messages, notebo
     // Layer 2: how to write in this scene's mode. RP channels only.
     {
       title: "Style",
-      content: isRp ? modeInstructions(channel.mode, yourCharacters[0]?.entry.name ?? "") : null,
+      content: isRp ? modeInstructions(channel.mode, yourCharacters[0] ?? sharedCharacters[0] ?? "") : null,
     },
     // Layer 3, in RP: the notebook entries pinned to the channel (the cast
     // and any lore), then the entries they link to.
@@ -168,7 +171,7 @@ export function buildPromptStack({ settings, channel, channels, messages, notebo
     { title: "Linked notes", content: isRp ? describeEntries(notebook?.linked ?? []) : null },
     {
       title: "Whose characters are whose",
-      content: isRp ? castRules(yourCharacters.map((p) => p.entry.name), userCharacters.map((p) => p.entry.name)) : null,
+      content: isRp ? castRules(yourCharacters, sharedCharacters, userCharacters) : null,
     },
     // Layer 3, in OOC: an overview of the server and the notebook instead.
     { title: "Channels on your server", content: isRp ? null : describeChannels(channels, channel, overview?.castNames ?? {}) },
@@ -246,10 +249,12 @@ export function describeEntries(entries: PromptEntry[]): string {
     .join("\n\n");
 }
 
-/** " (you play this character)", " (the user plays this character)", or "" for lore. */
+/** " (you play this character)", " (the user plays this character)", and so on, or "" for lore. */
 function entryRole(entry: NotebookEntry): string {
   if (entry.kind !== "character") return "";
-  return playedBy(entry) === "user" ? " (the user plays this character)" : " (you play this character)";
+  const player = playedBy(entry);
+  if (player === "both") return " (shared: either of you can play this character)";
+  return player === "user" ? " (the user plays this character)" : " (you play this character)";
 }
 
 /** `[[Name]]` becomes `Name`, and `[[Name|shown]]` becomes `shown`. */
@@ -257,10 +262,18 @@ export function plainLinks(text: string): string {
   return text.replace(/\[\[([^\]|\n]+)(?:\|([^\]\n]*))?\]\]/g, (_m, name: string, shown?: string) => (shown ?? name).trim());
 }
 
-/** Who plays whom in this channel, so the model never writes for the user's characters. */
-function castRules(yours: string[], theirs: string[]): string | null {
+/**
+ * Who plays whom in this channel, so the model never writes for the user's
+ * characters, and knows shared ones are open to both.
+ */
+function castRules(yours: string[], shared: string[], theirs: string[]): string | null {
   const lines: string[] = [];
   if (yours.length) lines.push(`You play ${yours.join(", ")}.`);
+  if (shared.length) {
+    lines.push(
+      `You and the user share ${shared.join(", ")}: either of you can write for them. Keep to what the user has written for them.`,
+    );
+  }
   if (theirs.length) lines.push(`The user plays ${theirs.join(", ")}. Never write their actions, dialogue or thoughts.`);
   return lines.length ? lines.join(" ") : null;
 }

@@ -165,12 +165,18 @@ export interface Suggestion {
  * hidden from that person, only `hidden: true` and a placeholder name are
  * given away.
  */
+/**
+ * Who plays a character: you, your partner, or either of you (shared
+ * characters).
+ */
+export type Player = Author | "both";
+
 export interface CastMember {
   entryId: string;
   /** The character's name, or "??? (hidden)". */
   name: string;
-  /** Who plays them: your characters are yours; everyone else is your partner's to voice. */
-  playedBy: Author;
+  /** Who plays them (see `playedBy` in src/permissions.ts). */
+  playedBy: Player;
   owner: Owner;
   /** Characters make up the cast; lore can be pinned too, for reference. */
   kind: EntryKind;

@@ -25,6 +25,7 @@ import {
   editAccess,
   effectiveSettings,
   HIDDEN_NAME,
+  canHavePrefix,
   playedBy,
 } from "./permissions.ts";
 import type {
@@ -325,26 +326,31 @@ export class Notebook {
   }
 
   /**
-   * Change an entry's contents (name, fields, system prompt) and, for the
-   * owner of a character of yours, its proxy prefix.
+   * Change an entry's contents (name, fields, system prompt) and, for a
+   * character you can post as (yours or shared), its proxy prefix.
    *
    * If the actor may only *suggest* changes (see `editAccess`), a suggestion
-   * is saved instead, for the owner to review, and returned.
+   * is saved instead, for the owner to review, and returned. The proxy
+   * prefix is the exception: it's only a shortcut for your own posts, so you
+   * set it directly, even on shared characters.
    */
   editEntry(actor: Author, id: string, input: Record<string, unknown>): { entry: EntryView } | { suggestion: Suggestion } {
     const current = this.getEntry(actor, id);
     const change = contentChanges(input);
+    const hasChange = Object.keys(change).length > 0;
+    const setsPrefix = input.proxyPrefix !== undefined && actor === "user" && canHavePrefix(current);
 
-    if (current.access.edit === "none") throw new PermissionError("This entry is locked.");
+    if (current.access.edit === "none" && (hasChange || !setsPrefix)) throw new PermissionError("This entry is locked.");
+    const prefix = setsPrefix
+      ? this.checkPrefix(proxyPrefix(input.proxyPrefix), current.kind, current.owner, id)
+      : current.proxyPrefix;
+
     if (current.access.edit === "suggest") {
-      if (Object.keys(change).length === 0) throw new ValidationError("There's nothing to suggest.");
-      return { suggestion: this.addSuggestion(actor, id, change) };
+      if (!hasChange && !setsPrefix) throw new ValidationError("There's nothing to suggest.");
+      if (setsPrefix) this.applyChange(id, {}, prefix);
+      return hasChange ? { suggestion: this.addSuggestion(actor, id, change) } : { entry: this.getEntry(actor, id) };
     }
 
-    const prefix =
-      input.proxyPrefix === undefined || current.owner !== actor
-        ? current.proxyPrefix
-        : this.checkPrefix(proxyPrefix(input.proxyPrefix), current.kind, current.owner, id);
     this.applyChange(id, change, prefix);
     return { entry: this.getEntry(actor, id) };
   }
@@ -380,8 +386,8 @@ export class Notebook {
         folderId,
         visibility: setting(input.visibility, VISIBILITIES, "visibility", current.visibility),
         editing: setting(input.editing, EDITINGS, "editing", current.editing),
-        // Proxy prefixes are only for your characters.
-        prefix: owner === "user" ? current.proxyPrefix : null,
+        // Proxy prefixes are only for characters you can play.
+        prefix: canHavePrefix({ owner, kind: current.kind }) ? current.proxyPrefix : null,
         now: new Date().toISOString(),
       });
     // After handing it over the actor may no longer see it (if hidden).
@@ -533,9 +539,13 @@ export class Notebook {
       .map((entry) => ({ entry, hiddenFromUser: !canSee("user", this.settingsOf(entry, folders)) }));
   }
 
-  /** Your characters (to post as in casual scenes), by name. */
-  userCharacters(): NotebookEntry[] {
-    return this.allEntries().filter((e) => e.kind === "character" && e.owner === "user");
+  /**
+   * The characters you can post as in casual scenes: yours and shared ones,
+   * by name. (Shared characters hidden from you can't be: every shared
+   * entry is visible.)
+   */
+  postableCharacters(): NotebookEntry[] {
+    return this.allEntries().filter(canHavePrefix);
   }
 
   // ------------------------------------------------------------ helpers
@@ -611,13 +621,16 @@ export class Notebook {
   }
 
   /**
-   * Check a proxy prefix: only your characters have one, and no two of
-   * yours can share one (or a line starting with it would be ambiguous).
+   * Check a proxy prefix: only characters you can play (yours and shared
+   * ones) have one, and no two can share one (or a line starting with it
+   * would be ambiguous).
    */
   private checkPrefix(prefix: string | null, kind: EntryKind, owner: Owner, ownId: string | null): string | null {
     if (prefix === null) return null;
-    if (kind !== "character" || owner !== "user") throw new ValidationError("Only your own characters have a proxy prefix.");
-    const clash = this.userCharacters().find(
+    if (!canHavePrefix({ kind, owner })) {
+      throw new ValidationError("Only characters you play (yours or shared ones) have a proxy prefix.");
+    }
+    const clash = this.postableCharacters().find(
       (e) => e.id !== ownId && e.proxyPrefix?.toLowerCase() === prefix.toLowerCase(),
     );
     if (clash) throw new ValidationError(`${clash.name} already uses the prefix "${prefix}".`);

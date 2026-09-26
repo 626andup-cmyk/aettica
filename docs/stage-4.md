@@ -7,16 +7,16 @@ Stage 4 adds the **notebook**: characters and lore as entries, each with an owne
 - **Open the notebook** with the book button at the bottom of the channel list. It lists every entry you can see, in folders, with badges saying whose each one is and what's special about it (hidden, locked, pinned here).
 - **Make characters and lore.** A new character starts with the fields Pronouns, Age, Appearance, Personality, Background and Speech, and new lore with Summary and Details. You can rename, add and remove fields freely. Each entry also has **notes for your partner**: how to write this character or use this lore, which your partner reads but which never appear in the story.
 - **Link entries** with `[[Name]]`, or `[[Name|shown text]]`, like Obsidian. The editor lists what an entry links to, and crosses out links to names that aren't in the notebook.
-- **Choose who owns each entry**: you, your partner, or both of you (shared). Your partner plays their characters and shared ones; you play yours. Until stage 6 gives your partner their own tools, you can make entries for them, or hand one of yours over.
+- **Choose who owns each entry**: you, your partner, or both of you (shared). Your partner plays their characters, you play yours, and either of you can play shared ones. Until stage 6 gives your partner their own tools, you can make entries for them, or hand one of yours over.
 - **Set who else can see and change your entries**: visible or hidden from your partner, and whether they can edit, only suggest changes, or only read. Folders pass these settings down to the entries in them.
 - **Build a channel's cast** in channel settings → Cast and lore: pin characters and lore from the notebook, make a new one right there, or unpin. The channel header shows who plays whom: "Arlo plays Ilse Marrow · you play Kestrel · Casual".
-- **Your characters for casual scenes** are now notebook entries of yours, with a proxy prefix (`k` for `k: *waves*`). Posting as one pins them to the channel. The old list in Settings is gone; it was moved into the notebook for you.
+- **Your characters for casual scenes** are now notebook entries of yours (or shared ones), with a proxy prefix (`k` for `k: *waves*`). Posting as one pins them to the channel. The old list in Settings is gone; it was moved into the notebook for you.
 
 ## Concept 1: ownership
 
 Every entry and folder has an **owner**: `user` (you), `partner`, or `joint` (shared lore). Ownership answers two questions:
 
-- **Who plays a character?** Its owner: yours are yours to write; your partner's and shared ones are theirs (`playedBy` in `src/permissions.ts`). The prompt tells your partner exactly which characters are theirs, and never to write yours.
+- **Who plays a character?** Its owner: yours are yours to write, your partner's are theirs, and shared ones are either of yours (`playedBy` in `src/permissions.ts`, which answers `"user"`, `"partner"` or `"both"`). The prompt tells your partner exactly which characters are theirs, which are shared ("either of you can write for them; keep to what the user has written for them"), and never to write yours.
 - **Who decides about an entry?** Only its owner changes its settings: owner, visibility, editing and folder. Shared lore's settings are fixed, so nobody can. An owner can hand an entry over to the other person or make it shared, but after that it's out of their hands.
 
 Folders belong to whoever made them. (A shared folder could never be changed, since shared things have fixed settings, so there aren't any. Shared lore can live in anyone's folder.)
@@ -75,7 +75,11 @@ Every channel the server sends to the app comes with its cast, as you see it (`C
 
 - **Casual**: your partner writes `Name: text` lines. The names it can use are the characters it plays in the cast, by full or first name. A line with no name belongs to the first of them.
 - **Literary**: a post voices the characters it mentions by full or first name. If it names none and your partner has only one character in the cast, it's theirs; otherwise it's narration, voicing no one.
-- **Your posts** in casual scenes: your characters' names and prefixes work in every channel. Posting as one pins them to the channel, if they weren't already.
+- **Your posts** in casual scenes: the names and prefixes of your characters and shared ones work in every channel. Posting as one pins them to the channel, if they weren't already.
+
+### Proxy prefixes
+
+Any character you can play has one: yours, and shared ones. No two can use the same prefix. A prefix is only a shortcut for your own posts, so you set it directly even on a shared character, whose other changes are suggestions. Handing a character to your partner drops its prefix; making one of yours shared keeps it.
 
 ## The prompt
 
