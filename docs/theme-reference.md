@@ -158,7 +158,7 @@ A theme can offer sliders in Appearance, each setting a CSS variable its CSS use
 - Give each variable its default in your `:root` block too, so the theme also looks right before the app applies the sliders.
 - The app sets the app theme's variables on `<html>`, and a channel theme's on `.channel-view`, where they win over the theme's own values. Up to 12 sliders per theme.
 
-**Rainy Window** is a worked example of sliders, layers (below) and parallax: its layers drift with the message list's scrolling through a scroll-driven animation (`scroll-timeline` on `.messages`, `timeline-scope` on `body`). The Liquid Glass themes have sliders for their refraction (see Liquid glass below).
+**Rainy Window** is a worked example of sliders, layers (below) and parallax: its layers drift with the message list's scrolling through a scroll-driven animation (`scroll-timeline` on `.messages`, `timeline-scope` on `body`). The Liquid Glass themes and Rainy Window have sliders for their refraction (see Liquid glass below).
 
 ## Layers
 
@@ -200,7 +200,7 @@ Every surface is already positioned, so these layers can use `position: absolute
 
 ## Liquid glass (real refraction)
 
-A blur makes glass look frosted, but flat. Real glass is clear, and its thick, rounded edge works like a lens: what's behind bends as it nears the rim, and splits into a faint rainbow there. `public/glass.js` does that for a theme, in Chrome and other Chromium browsers (including on Android). **Liquid Glass** and **Liquid Glass Dark** use it.
+A blur makes glass look frosted, but flat. Real glass is clear, and its thick, rounded edge works like a lens: what's behind bends as it nears the rim, and splits into a faint rainbow there. `public/glass.js` does that for a theme, in Chrome and other Chromium browsers (including on Android). **Liquid Glass**, **Liquid Glass Dark** and **Rainy Window** use it.
 
 Turn it on in your `:root`, then mark which elements are lensed glass:
 
@@ -223,7 +223,7 @@ Turn it on in your `:root`, then mark which elements are lensed glass:
 - Keep a normal `backdrop-filter` on the same elements (e.g. `blur(10px) saturate(160%)`): it's what other browsers show, and what Lite mode shows, since Lite turns lensing off.
 - Glass inside other glass (a button in the composer) isn't lensed. A panel with a backdrop filter only lets the elements in it see its own fill, not the page behind, so there'd be nothing to bend. It keeps your `backdrop-filter`.
 - Outer shadows are fine: Chrome shifts a lensed element's backdrop by how far its shadows reach, and glass.js makes up for it (and checks again on hover, press and focus, in case they change).
-- **Don't move your theme layers with `transform`** (not even a static one): Chrome doesn't give a lens the full picture of a transformed layer, and cuts part of it off behind the rims. For parallax, animate `background-position` instead. Both Liquid Glass themes do:
+- **Don't move your theme layers with `transform`** (not even a static one): Chrome doesn't give a lens the full picture of a transformed layer, and cuts part of it off behind the rims. For parallax, animate `background-position` instead. Both Liquid Glass themes do. Rainy Window, whose layers also need masks and several backgrounds to move together, animates registered custom properties (`@property --near { syntax: "<length>"; ... }`) and uses them in each `background-position` and `mask-position`:
 
 ```css
 @keyframes drift {

@@ -169,11 +169,13 @@ describe("ThemeLibrary", () => {
     expect(library.info("rainy-window").options.map((o) => [o.id, o.variable])).toEqual([
       ["bubble-transparency", "--bubble-transparency"],
       ["bubble-blur", "--bubble-blur"],
+      ["refraction", "--refraction"],
+      ["dispersion", "--dispersion"],
       ["rain", "--rain"],
       ["parallax", "--parallax"],
     ]);
     const copy = library.create("My Rain", "rainy-window");
-    expect(library.info(copy.id).options).toHaveLength(4);
+    expect(library.info(copy.id).options).toHaveLength(6);
     expect(library.details(copy.id).files).toEqual([
       "city-drops.svg",
       "city.svg",
@@ -184,6 +186,13 @@ describe("ThemeLibrary", () => {
       "rain.svg",
       "runners.svg",
     ]);
+  });
+
+  test("Rainy Window refracts too, and its layers never move with transform (a lens can't see that)", () => {
+    const css = library.details("rainy-window").css;
+    expect(css).toContain("--lensing: on;");
+    expect(css).toContain("--lens-frost: var(--bubble-blur);");
+    expect(css).not.toMatch(/transform:\s*translate/);
   });
 
   test("both Liquid Glass themes turn on real refraction, with sliders for it", () => {
