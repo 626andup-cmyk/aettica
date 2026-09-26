@@ -95,6 +95,10 @@ const $ = (id) => document.getElementById(id);
 const els = {
   app: $("app"),
   channelList: $("channel-list"),
+  channelIndicator: Object.assign(document.createElement("li"), {
+    className: "channel-indicator",
+    ariaHidden: "true",
+  }),
   partnerName: $("partner-name"),
   partnerAvatar: $("partner-avatar"),
   channelView: $("channel-view"),
@@ -766,9 +770,55 @@ function renderSidebar() {
     }),
   );
 
+  // The indicator goes back in after the links, and moves to the open one.
+  els.channelList.append(els.channelIndicator);
+  moveChannelIndicator();
+
   const partnerName = state.settings?.partnerName ?? "Partner";
   els.partnerName.textContent = partnerName;
   els.partnerAvatar.textContent = initial(partnerName);
+}
+
+/**
+ * Move the channel indicator (a pill a theme can show behind the open
+ * channel's link) to the open channel. When it moves, it first stretches
+ * to cover both links, then snaps into place with a little overshoot, like
+ * a drop of liquid flowing from one to the other. Only transforms change,
+ * so it stays smooth, and a liquid glass lens on it doesn't need remaking.
+ */
+function moveChannelIndicator() {
+  const indicator = els.channelIndicator;
+  const link = els.channelList.querySelector('.channel-link[aria-current="page"]');
+  if (!link || getComputedStyle(indicator).display === "none") {
+    delete indicator.dataset.top;
+    return;
+  }
+  // Relative to the channel list, which is positioned.
+  const top = link.offsetTop;
+  const place = (y, stretch) => (indicator.style.transform = `translateY(${y}px) scaleY(${stretch})`);
+  indicator.style.left = `${link.offsetLeft}px`;
+  indicator.style.width = `${link.offsetWidth}px`;
+  indicator.style.height = `${link.offsetHeight}px`;
+
+  const from = Number(indicator.dataset.top);
+  indicator.dataset.top = String(top);
+  clearTimeout(moveChannelIndicator.timer);
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!Number.isFinite(from) || from === top || reduced) {
+    indicator.classList.remove("stretching", "settling");
+    place(top, 1);
+    return;
+  }
+  // Stretch over both links...
+  const span = Math.abs(top - from) + link.offsetHeight;
+  indicator.classList.remove("settling");
+  indicator.classList.add("stretching");
+  place(Math.min(from, top), span / link.offsetHeight);
+  // ...then gather at the new one.
+  moveChannelIndicator.timer = setTimeout(() => {
+    indicator.classList.replace("stretching", "settling");
+    place(top, 1);
+  }, 170);
 }
 
 /** The `#` icon for RP channels, a speech bubble for OOC. */
@@ -1327,7 +1377,14 @@ function setStylesheet(linkId, href) {
   }
   if (current === href) return;
   if (!current) {
-    link.addEventListener("load", scrollToBottom, { once: true });
+    link.addEventListener(
+      "load",
+      () => {
+        scrollToBottom();
+        themeLoaded();
+      },
+      { once: true },
+    );
     link.setAttribute("href", href);
     return;
   }
@@ -1337,6 +1394,7 @@ function setStylesheet(linkId, href) {
   const done = () => {
     link.remove();
     scrollToBottom();
+    themeLoaded();
   };
   next.addEventListener("load", done, { once: true });
   next.addEventListener("error", done, { once: true });
@@ -1368,6 +1426,29 @@ function applyThemes() {
   els.channelView.dataset.channelTheme = channel ?? "";
   writeLocal(LAST_THEME_KEY, appTheme ?? "");
   applyThemeOptions();
+  updateGlass();
+}
+
+/**
+ * Once a theme's stylesheet has loaded: things that depend on how the theme
+ * looks. (The channel indicator is hidden until a theme shows it, and its
+ * size comes from the theme's channel links.)
+ */
+function themeLoaded() {
+  updateGlass();
+  moveChannelIndicator();
+}
+
+/**
+ * Real liquid glass (public/glass.js): on when a theme asks for it (with
+ * `--lensing: on` in its :root), and glass effects aren't Lite. The theme
+ * then marks which elements are glass with `--lens: 1`. Checked again
+ * whenever a theme's stylesheet finishes loading.
+ */
+function updateGlass() {
+  const wants = (element) => getComputedStyle(element).getPropertyValue("--lensing").trim() === "on";
+  Glass.setEnabled(!liteEffects() && (wants(document.documentElement) || wants(els.channelView)));
+  Glass.refresh();
 }
 
 /*
@@ -1403,6 +1484,8 @@ function applyThemeOptions() {
   };
   set(document.documentElement, "root", app);
   set(els.channelView, "channel", channel);
+  // Sliders can change the glass's settings: remake its lenses.
+  Glass.refresh();
 }
 
 async function loadThemes() {
@@ -3623,6 +3706,8 @@ window.addEventListener("hashchange", () => {
 });
 // Tapping the channel you're already in should still close the phone sidebar.
 els.channelList.addEventListener("click", closeSidebar);
+// The channel indicator follows the links' size when the sidebar changes width.
+new ResizeObserver(() => moveChannelIndicator()).observe(els.channelList);
 
 $("menu-button").addEventListener("click", openSidebar);
 $("sidebar-scrim").addEventListener("click", closeSidebar);

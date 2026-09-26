@@ -124,6 +124,7 @@ describe("ThemeLibrary", () => {
       "aero-glass",
       "frutiger-aero",
       "liquid-glass",
+      "liquid-glass-dark",
       "rainy-window",
       "apple",
       "zebra",
@@ -185,6 +186,19 @@ describe("ThemeLibrary", () => {
     ]);
   });
 
+  test("both Liquid Glass themes turn on real refraction, with sliders for it", () => {
+    for (const id of ["liquid-glass", "liquid-glass-dark"]) {
+      const theme = library.details(id);
+      expect(theme.css).toContain("--lensing: on;");
+      expect(theme.css).toContain("--lens-depth: var(--refraction);");
+      expect(theme.hasLite).toBe(true);
+      expect(library.info(id).options.map((o) => o.id)).toEqual(expect.arrayContaining(["tint", "refraction", "dispersion", "frost"]));
+    }
+    expect(library.details("liquid-glass").files).toEqual(["grid.svg", "ribbons.svg", "wash.svg"]);
+    expect(library.details("liquid-glass-dark").files).toEqual(["dust.svg", "neon.svg", "smoke.svg"]);
+    expect(library.info("liquid-glass-dark").options.map((o) => o.id)).toEqual(["tint", "refraction", "dispersion", "frost", "neon", "smoke"]);
+  });
+
   test("your themes' sliders can be changed in the editor", () => {
     const { id } = library.create("Sky");
     const option = { id: "blur", label: "Blur", variable: "--my-blur", min: 0, max: 30, step: 1, default: 12, unit: "px" };
@@ -242,7 +256,7 @@ describe("ThemeLibrary", () => {
     test("outside.css, for the app theme while a channel has its own", async () => {
       const text = await library.serve("liquid-glass", "outside.css")!.text();
       expect(text).toContain("@scope (:root) to (.channel-view)");
-      expect(text).toContain('url("/themes/liquid-glass/blobs.svg")');
+      expect(text).toContain('url("/themes/liquid-glass/ribbons.svg")');
     });
 
     test("images, with safe headers", () => {

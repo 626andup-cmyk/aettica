@@ -9,6 +9,8 @@ Stage 3.5 adds **themes**: an app theme, per-channel themes, built-in glass them
   - **Frutiger Aero**: blue sky, green hills, bubbles, glossy gel buttons.
   - **Aero Glass**: Windows 7 style tinted glass over a glowing blue swirl.
   - **Liquid Glass**: clear, bright-edged glass over vivid colour, with floating panels and capsule buttons.
+
+  Added since: **Rainy Window** (a night city through a rainy window), and **Liquid Glass Dark** (dark glass over neon). Both Liquid Glass themes now refract what's behind them for real, like Apple's; see [Liquid glass](theme-reference.md#liquid-glass-real-refraction) in the theme reference.
 - **Give a channel its own theme** in channel settings → Theme. It changes only that channel (its messages, header, composer and background), never the channel list or dialogs.
 - **Make your own theme**: in Appearance, pick a theme and press **Copy to edit**. The copy opens in the theme editor, where you can change its CSS, add images and fonts, and press **Apply** to see the result. Copying Classic starts you off with every setting and its default value.
 - **Choose glass effects for this device**: Automatic, Full or Lite. Lite turns off the real blur, which is the expensive part, in favour of more solid panels. Automatic starts with Full and switches to Lite on its own if scrolling stutters.

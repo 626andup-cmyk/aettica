@@ -134,7 +134,8 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.comment-float` | The Comment button that appears when you select text in a message |
 | `.thread`, `.thread-picker`, `.thread-quote`, `.thread-comments`, `.thread-comment`, `.thread-comment-author`, `.thread-comment-note`, `.thread-status` | The comments dialog. Each `.thread-comment` has `data-author`. |
 | `.attach-row`, `.attach-chip`, `.message-attachments`, `.attach-list`, `.attach-option`, `.attach-button` | Attached notes: above the text box, under messages, and the picker |
-| `.theme-layers`, `.layer-1` to `.layer-4` | Empty layers for themes to draw on (see Layers above) |
+| `.theme-layers`, `.layer-1` to `.layer-4` | Empty layers for themes to draw on (see Layers below) |
+| `.channel-indicator` | A pill behind the open channel's link, hidden unless a theme shows it (see Liquid glass below). Gets `.stretching`, then `.settling`, as it moves between channels. |
 | `.theme-options`, `.theme-option-group`, `.theme-option`, `.theme-option-label`, `.theme-option-value` | Sliders in Appearance |
 | `.check-option`, `.check-inline`, `.section-title`, `.advanced` | Checkboxes, section headings and "advanced" details in dialogs |
 | `.notice-banner` | Short notices at the top of the channel, e.g. about glass effects |
@@ -157,7 +158,7 @@ A theme can offer sliders in Appearance, each setting a CSS variable its CSS use
 - Give each variable its default in your `:root` block too, so the theme also looks right before the app applies the sliders.
 - The app sets the app theme's variables on `<html>`, and a channel theme's on `.channel-view`, where they win over the theme's own values. Up to 12 sliders per theme.
 
-**Rainy Window** is a worked example of sliders, layers (below) and parallax: its layers drift with the message list's scrolling through a scroll-driven animation (`scroll-timeline` on `.messages`, `timeline-scope` on `body`).
+**Rainy Window** is a worked example of sliders, layers (below) and parallax: its layers drift with the message list's scrolling through a scroll-driven animation (`scroll-timeline` on `.messages`, `timeline-scope` on `body`). The Liquid Glass themes have sliders for their refraction (see Liquid glass below).
 
 ## Layers
 
@@ -196,6 +197,47 @@ Every surface is already positioned, so these layers can use `position: absolute
   z-index: -1;
 }
 ```
+
+## Liquid glass (real refraction)
+
+A blur makes glass look frosted, but flat. Real glass is clear, and its thick, rounded edge works like a lens: what's behind bends as it nears the rim, and splits into a faint rainbow there. `public/glass.js` does that for a theme, in Chrome and other Chromium browsers (including on Android). **Liquid Glass** and **Liquid Glass Dark** use it.
+
+Turn it on in your `:root`, then mark which elements are lensed glass:
+
+```css
+:root {
+  --lensing: on;
+  --lens-depth: 26;        /* how far the rim bends what's behind, in px (default 24) */
+  --lens-bevel: 20;        /* how wide the curved rim is at least, in px (default 18) */
+  --lens-dispersion: 0.4;  /* how much the colours split at the rim, 0 to 1 (default 0.3) */
+  --lens-frost: 1.5;       /* a blur behind the glass, in px (default 0: clear) */
+  --lens-saturate: 1.35;   /* colour boost through the glass (default 1.2) */
+}
+
+.message, .surface, .button, .icon-button { --lens: 1; }
+```
+
+- `--lens` doesn't inherit, so only the elements you name are lensed, not everything inside them. glass.js looks at these classes: `.surface`, `.message`, `.button`, `.icon-button`, `.channel-indicator`, `.theme-card`, `.inbox-card`, `.attach-chip`, `.message-comments`, `.posting-as`, `.composer-input`, `.profile-row`, `.notebook-entry`.
+- The tuning variables can be set anywhere, so a slider can drive them: `--lens-depth: var(--refraction)`.
+- A deeper lens needs a wider rim, so the rim grows with the depth (as far as the element's size allows). The very edge magnifies up to about 3.3 times.
+- Keep a normal `backdrop-filter` on the same elements (e.g. `blur(10px) saturate(160%)`): it's what other browsers show, and what Lite mode shows, since Lite turns lensing off.
+- Glass inside other glass (a button in the composer) isn't lensed. A panel with a backdrop filter only lets the elements in it see its own fill, not the page behind, so there'd be nothing to bend. It keeps your `backdrop-filter`.
+- Outer shadows are fine: Chrome shifts a lensed element's backdrop by how far its shadows reach, and glass.js makes up for it (and checks again on hover, press and focus, in case they change).
+- **Don't move your theme layers with `transform`** (not even a static one): Chrome doesn't give a lens the full picture of a transformed layer, and cuts part of it off behind the rims. For parallax, animate `background-position` instead. Both Liquid Glass themes do:
+
+```css
+@keyframes drift {
+  from { background-position-y: calc(50% + 5vh); }
+  to { background-position-y: calc(50% - 5vh); }
+}
+```
+
+- Lenses are made once per size and settings and shared (most bubbles are the same width), and nothing is recalculated while you scroll.
+
+glass.js also provides two things for liquid themes, in every browser:
+
+- **Goo** (`filter: url(#aettica-goo)`): shapes that touch merge like drops of water. Both Liquid Glass themes use it on `.typing-dots`.
+- **The channel indicator** (`.channel-indicator`, in style.css and app.js): a pill that sits behind the open channel's link and flows to the next one when you switch, stretching over both links (`.stretching`) and then settling with a little overshoot (`.settling`). It's hidden unless a theme gives it `display: block`, a background and a `transition: transform ...`.
 
 ## Hooks for theme authors
 

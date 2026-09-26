@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1600" preserveAspectRatio="xMidYMid slice">
+<!--
+  Liquid Glass's accents: long, glossy ribbons of colour that flow across
+  the whole screen, so every glass edge has something to bend and split.
+  Each ribbon is a thick stroke with a thin bright line along it, like light
+  on a satin fold.
+-->
+<defs>
+  <linearGradient id="spectrum" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#1ea7ff"/>
+    <stop offset="0.35" stop-color="#6a5cff"/>
+    <stop offset="0.7" stop-color="#ff3fb4"/>
+    <stop offset="1" stop-color="#ff8a3d"/>
+  </linearGradient>
+  <linearGradient id="lagoon" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#29e0a0"/>
+    <stop offset="0.5" stop-color="#22c3ff"/>
+    <stop offset="1" stop-color="#5b7bff"/>
+  </linearGradient>
+  <linearGradient id="sunset" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#ffcf4a"/>
+    <stop offset="0.5" stop-color="#ff7a3d"/>
+    <stop offset="1" stop-color="#ff4fa3"/>
+  </linearGradient>
+  <linearGradient id="violet" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#b98cff"/>
+    <stop offset="1" stop-color="#6a5cff"/>
+  </linearGradient>
+  <radialGradient id="pearl" cx="0.35" cy="0.3" r="0.75">
+    <stop offset="0" stop-color="#ffffff"/>
+    <stop offset="0.45" stop-color="#d9e4ff"/>
+    <stop offset="1" stop-color="#9fb4ff"/>
+  </radialGradient>
+  <radialGradient id="sun" cx="0.4" cy="0.35" r="0.7">
+    <stop offset="0" stop-color="#ffe08a"/>
+    <stop offset="1" stop-color="#ff7a2e"/>
+  </radialGradient>
+</defs>
+
+<g fill="none" stroke-linecap="round">
+  <!-- Top: a wide spectrum ribbon. -->
+  <path d="M-120 330 C 260 120, 560 620, 900 430 S 1450 170, 1720 470" stroke="url(#spectrum)" stroke-width="96"/>
+  <path d="M-120 312 C 260 102, 560 602, 900 412 S 1450 152, 1720 452" stroke="#ffffff" stroke-opacity="0.55" stroke-width="10"/>
+
+  <!-- A thin violet ribbon falling down the right. -->
+  <path d="M1290 -120 C 1080 280, 1420 620, 1210 930 S 880 1380, 1010 1720" stroke="url(#violet)" stroke-width="46"/>
+  <path d="M1282 -120 C 1072 280, 1412 620, 1202 930 S 872 1380, 1002 1720" stroke="#ffffff" stroke-opacity="0.5" stroke-width="6"/>
+
+  <!-- Middle: a lagoon ribbon. -->
+  <path d="M-120 1010 C 280 840, 700 1270, 1010 1060 S 1420 800, 1720 960" stroke="url(#lagoon)" stroke-width="76"/>
+  <path d="M-120 995 C 280 825, 700 1255, 1010 1045 S 1420 785, 1720 945" stroke="#ffffff" stroke-opacity="0.5" stroke-width="8"/>
+
+  <!-- Bottom: a sunset ribbon. -->
+  <path d="M160 1720 C 330 1330, 790 1520, 1100 1320 S 1480 1190, 1720 1430" stroke="url(#sunset)" stroke-width="64"/>
+  <path d="M160 1706 C 330 1316, 790 1506, 1100 1306 S 1480 1176, 1720 1416" stroke="#ffffff" stroke-opacity="0.5" stroke-width="7"/>
+
+  <!-- A fine line looping through the middle. -->
+  <path d="M-60 720 C 240 560, 420 900, 720 760 S 1180 540, 1660 700" stroke="#6a5cff" stroke-opacity="0.55" stroke-width="5"/>
+</g>
+
+<!-- Pearls and a sun, for round shapes to warp. -->
+<circle cx="520" cy="820" r="54" fill="url(#pearl)"/>
+<circle cx="1360" cy="1180" r="84" fill="url(#sun)"/>
+<circle cx="300" cy="560" r="26" fill="url(#pearl)"/>
+<circle cx="960" cy="200" r="34" fill="url(#pearl)"/>
+<circle cx="760" cy="1440" r="40" fill="url(#pearl)"/>
+</svg>

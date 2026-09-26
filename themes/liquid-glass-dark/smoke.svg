@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1600" preserveAspectRatio="xMidYMid slice">
+<!--
+  Liquid Glass Dark's background: near-black, with deep coloured haze and
+  soft curls of neon smoke drifting through it.
+-->
+<defs>
+  <filter id="haze" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="120"/></filter>
+  <filter id="wisp" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+  <filter id="fine" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="5"/></filter>
+</defs>
+<rect width="1600" height="1600" fill="#020206"/>
+
+<!-- Haze: deep violet, midnight blue and plum, very soft. -->
+<g filter="url(#haze)">
+  <circle cx="380" cy="320" r="380" fill="#2b0b66" opacity="0.85"/>
+  <circle cx="1320" cy="520" r="420" fill="#071f66" opacity="0.9"/>
+  <circle cx="900" cy="1320" r="400" fill="#4d0a45" opacity="0.8"/>
+  <circle cx="180" cy="1180" r="300" fill="#05305a" opacity="0.7"/>
+  <circle cx="1450" cy="1450" r="260" fill="#300a5c" opacity="0.7"/>
+</g>
+
+<!-- Smoke curls: wide, blurred strokes that roll over on themselves. -->
+<g fill="none" stroke-linecap="round" filter="url(#wisp)">
+  <path d="M-80 640 C 200 520, 380 560, 470 660 C 560 760, 500 880, 400 860 C 300 840, 320 720, 440 700 C 620 670, 820 820, 1060 760" stroke="#7a4dff" stroke-width="46" opacity="0.32"/>
+  <path d="M1680 240 C 1400 300, 1240 200, 1180 120 C 1120 40, 1180 -20, 1250 20 C 1320 60, 1280 150, 1180 170 C 1020 200, 900 120, 760 60" stroke="#2aa8ff" stroke-width="40" opacity="0.28"/>
+  <path d="M300 1680 C 380 1440, 560 1380, 680 1440 C 800 1500, 780 1620, 690 1610 C 600 1600, 610 1500, 720 1470 C 900 1420, 1080 1500, 1260 1420" stroke="#ff4fd8" stroke-width="44" opacity="0.26"/>
+  <path d="M1650 900 C 1450 980, 1320 900, 1300 820 C 1280 740, 1360 700, 1410 750 C 1460 800, 1400 880, 1320 880" stroke="#b36bff" stroke-width="34" opacity="0.3"/>
+</g>
+<g fill="none" stroke-linecap="round" filter="url(#fine)">
+  <path d="M-80 640 C 200 520, 380 560, 470 660 C 560 760, 500 880, 400 860 C 300 840, 320 720, 440 700 C 620 670, 820 820, 1060 760" stroke="#b9a3ff" stroke-width="6" opacity="0.35"/>
+  <path d="M300 1680 C 380 1440, 560 1380, 680 1440 C 800 1500, 780 1620, 690 1610 C 600 1600, 610 1500, 720 1470 C 900 1420, 1080 1500, 1260 1420" stroke="#ffb3ee" stroke-width="5" opacity="0.3"/>
+</g>
+</svg>

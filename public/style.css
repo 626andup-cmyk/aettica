@@ -136,6 +136,17 @@
   box-sizing: border-box;
 }
 
+/*
+ * Liquid glass (public/glass.js): a theme gives an element `--lens: 1` to
+ * make it refracting glass. Registered so it doesn't inherit: a glass
+ * bubble's children aren't glass too.
+ */
+@property --lens {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 html,
 body {
   height: 100%;
@@ -279,11 +290,28 @@ textarea {
 }
 
 .channel-list {
+  /* Positioned, so the channel indicator (below) can sit behind a link. */
+  position: relative;
   flex: 1;
   overflow-y: auto;
   margin: 0;
   padding: 0 8px;
   list-style: none;
+}
+
+/*
+ * A pill that sits behind the open channel's link and moves when you
+ * switch channels, stretching between the two like a drop of liquid (see
+ * moveChannelIndicator in app.js). Hidden unless a theme shows it: themes
+ * that don't use it keep the link's own highlight.
+ */
+.channel-indicator {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  transform-origin: 50% 0;
 }
 
 .channel-link {

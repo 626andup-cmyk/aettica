@@ -28,7 +28,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - **Stop** a reply that's taking too long. Nothing is saved, and the channel is free again.
 - **Regenerate** the partner's last reply (or **Regenerate with…** a particular profile), **edit** or **delete** any message.
 - **Preview prompt**: see exactly what the model receives on the next turn in a channel.
-- **Themes**: pick one in Appearance (the palette button). Classic, Frutiger Aero, Aero Glass, Liquid Glass and Rainy Window (a night city through a window of raindrops that slide down and drift as you scroll, with glossy liquid glass bubbles) are built in. Themes can offer sliders in Appearance, like Rainy Window's bubble transparency. Any channel can have its own theme, and you can copy a theme and edit its CSS and images right in the app. Glass effects can be Full, Lite (easier on the phone) or Automatic. See the [theme reference](docs/theme-reference.md).
+- **Themes**: pick one in Appearance (the palette button). Classic, Frutiger Aero, Aero Glass, Liquid Glass, Liquid Glass Dark and Rainy Window (a night city through a window of raindrops that slide down and drift as you scroll, with glossy liquid glass bubbles) are built in. The Liquid Glass themes are real refracting glass, like Apple's: what's behind bends and splits into rainbows at the edges of each pane (in Chrome, including on Android). Themes can offer sliders in Appearance, like Rainy Window's bubble transparency or Liquid Glass's refraction. Any channel can have its own theme, and you can copy a theme and edit its CSS and images right in the app. Glass effects can be Full, Lite (easier on the phone) or Automatic. See the [theme reference](docs/theme-reference.md).
 - Install it to your home screen as an app (PWA).
 
 If you used stage 1, your chat is moved into the `#story` channel automatically the first time stage 2 starts. Characters from before stage 4 are moved into the notebook automatically.
@@ -115,7 +115,7 @@ src/
   config.ts    Reads settings from .env
   types.ts     The shapes of channels, messages and settings
 public/        The web app (plain HTML, CSS and JavaScript, no build step)
-themes/        Built-in themes (Classic, Frutiger Aero, Aero Glass, Liquid Glass)
+themes/        Built-in themes (Classic, Frutiger Aero, Aero Glass, Liquid Glass, Liquid Glass Dark, Rainy Window)
 defaults/      Starting partner prompts and character sheet
 test/          Tests
 docs/          How things work, stage by stage, and the theme reference
