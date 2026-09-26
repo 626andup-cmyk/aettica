@@ -45,6 +45,8 @@
     <link rel="stylesheet" id="theme-channel" />
     <link rel="stylesheet" id="theme-channel-lite" />
     <!-- `defer` runs the script after the page is parsed, so every element below exists. -->
+    <!-- Real refraction for liquid glass themes (see the top of glass.js). -->
+    <script src="/glass.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -110,6 +112,12 @@
       </symbol>
     </svg>
 
+    <!--
+      Empty layers a theme can draw on (pictures, rain, glows), behind the
+      whole app. Hidden unless a theme shows them. See docs/theme-reference.md.
+    -->
+    <div class="theme-layers" aria-hidden="true"><i class="layer-1"></i><i class="layer-2"></i><i class="layer-3"></i><i class="layer-4"></i></div>
+
     <div class="app" id="app">
       <!-- ============================================================ sidebar -->
       <nav class="sidebar surface" id="sidebar" aria-label="Channels">
@@ -157,6 +165,8 @@
         per-channel themes (stage 3.5) will hook onto.
       -->
       <section class="channel-view" id="channel-view">
+        <!-- The same, for a channel theme: only shown when the channel has its own theme. -->
+        <div class="theme-layers" aria-hidden="true"><i class="layer-1"></i><i class="layer-2"></i><i class="layer-3"></i><i class="layer-4"></i></div>
         <header class="channel-header surface">
           <button id="menu-button" class="icon-button menu-button" type="button" aria-label="Show channels">
             <svg width="22" height="22" aria-hidden="true"><use href="#icon-menu" /></svg>
@@ -776,6 +786,9 @@
         <button type="button" class="button button-danger" id="theme-delete">Delete</button>
       </div>
 
+      <!-- Sliders the app theme (and the open channel's theme) offer, if any. -->
+      <div id="theme-options" class="theme-options" hidden></div>
+
       <fieldset class="kind-picker effects-picker">
         <legend>Glass effects on this device</legend>
         <label class="kind-option">
@@ -831,6 +844,15 @@
             solid, e.g. <code>--sidebar-backdrop: none;</code>
           </p>
           <textarea id="theme-lite-css" name="liteCss" rows="8" spellcheck="false" class="code-input"></textarea>
+        </details>
+
+        <details class="lite-css theme-options-editor">
+          <summary>Sliders (optional)</summary>
+          <p class="hint">
+            Sliders shown in Appearance, each setting a CSS variable your CSS uses. A JSON list, e.g.
+            <code>[{"id": "blur", "label": "Blur", "variable": "--my-blur", "min": 0, "max": 30, "step": 1, "default": 12, "unit": "px"}]</code>
+          </p>
+          <textarea id="theme-options-json" name="options" rows="6" spellcheck="false" class="code-input"></textarea>
         </details>
 
         <label>Images and fonts</label>

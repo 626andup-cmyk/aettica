@@ -95,6 +95,10 @@ const $ = (id) => document.getElementById(id);
 const els = {
   app: $("app"),
   channelList: $("channel-list"),
+  channelIndicator: Object.assign(document.createElement("li"), {
+    className: "channel-indicator",
+    ariaHidden: "true",
+  }),
   partnerName: $("partner-name"),
   partnerAvatar: $("partner-avatar"),
   channelView: $("channel-view"),
@@ -766,9 +770,55 @@ function renderSidebar() {
     }),
   );
 
+  // The indicator goes back in after the links, and moves to the open one.
+  els.channelList.append(els.channelIndicator);
+  moveChannelIndicator();
+
   const partnerName = state.settings?.partnerName ?? "Partner";
   els.partnerName.textContent = partnerName;
   els.partnerAvatar.textContent = initial(partnerName);
+}
+
+/**
+ * Move the channel indicator (a pill a theme can show behind the open
+ * channel's link) to the open channel. When it moves, it first stretches
+ * to cover both links, then snaps into place with a little overshoot, like
+ * a drop of liquid flowing from one to the other. Only transforms change,
+ * so it stays smooth, and a liquid glass lens on it doesn't need remaking.
+ */
+function moveChannelIndicator() {
+  const indicator = els.channelIndicator;
+  const link = els.channelList.querySelector('.channel-link[aria-current="page"]');
+  if (!link || getComputedStyle(indicator).display === "none") {
+    delete indicator.dataset.top;
+    return;
+  }
+  // Relative to the channel list, which is positioned.
+  const top = link.offsetTop;
+  const place = (y, stretch) => (indicator.style.transform = `translateY(${y}px) scaleY(${stretch})`);
+  indicator.style.left = `${link.offsetLeft}px`;
+  indicator.style.width = `${link.offsetWidth}px`;
+  indicator.style.height = `${link.offsetHeight}px`;
+
+  const from = Number(indicator.dataset.top);
+  indicator.dataset.top = String(top);
+  clearTimeout(moveChannelIndicator.timer);
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!Number.isFinite(from) || from === top || reduced) {
+    indicator.classList.remove("stretching", "settling");
+    place(top, 1);
+    return;
+  }
+  // Stretch over both links...
+  const span = Math.abs(top - from) + link.offsetHeight;
+  indicator.classList.remove("settling");
+  indicator.classList.add("stretching");
+  place(Math.min(from, top), span / link.offsetHeight);
+  // ...then gather at the new one.
+  moveChannelIndicator.timer = setTimeout(() => {
+    indicator.classList.replace("stretching", "settling");
+    place(top, 1);
+  }, 170);
 }
 
 /** The `#` icon for RP channels, a speech bubble for OOC. */
@@ -1327,7 +1377,14 @@ function setStylesheet(linkId, href) {
   }
   if (current === href) return;
   if (!current) {
-    link.addEventListener("load", scrollToBottom, { once: true });
+    link.addEventListener(
+      "load",
+      () => {
+        scrollToBottom();
+        themeLoaded();
+      },
+      { once: true },
+    );
     link.setAttribute("href", href);
     return;
   }
@@ -1337,6 +1394,7 @@ function setStylesheet(linkId, href) {
   const done = () => {
     link.remove();
     scrollToBottom();
+    themeLoaded();
   };
   next.addEventListener("load", done, { once: true });
   next.addEventListener("error", done, { once: true });
@@ -1367,6 +1425,67 @@ function applyThemes() {
   // For theme authors: the channel view says which channel theme it has.
   els.channelView.dataset.channelTheme = channel ?? "";
   writeLocal(LAST_THEME_KEY, appTheme ?? "");
+  applyThemeOptions();
+  updateGlass();
+}
+
+/**
+ * Once a theme's stylesheet has loaded: things that depend on how the theme
+ * looks. (The channel indicator is hidden until a theme shows it, and its
+ * size comes from the theme's channel links.)
+ */
+function themeLoaded() {
+  updateGlass();
+  moveChannelIndicator();
+}
+
+/**
+ * Real liquid glass (public/glass.js): on when a theme asks for it (with
+ * `--lensing: on` in its :root), and glass effects aren't Lite. The theme
+ * then marks which elements are glass with `--lens: 1`. Checked again
+ * whenever a theme's stylesheet finishes loading.
+ */
+function updateGlass() {
+  const wants = (element) => getComputedStyle(element).getPropertyValue("--lensing").trim() === "on";
+  Glass.setEnabled(!liteEffects() && (wants(document.documentElement) || wants(els.channelView)));
+  Glass.refresh();
+}
+
+/*
+ * Theme options: sliders a theme declares in its theme.json, each setting a
+ * CSS variable (like --bubble-transparency). The values are set straight on
+ * the page: the app theme's on <html>, and a channel theme's on the channel
+ * view, where they win over the theme's own defaults.
+ */
+
+/** The variables set by the last call, so they can be cleared. */
+const appliedOptions = { root: [], channel: [] };
+
+/** A theme's option values: yours where you've moved a slider, the theme's default elsewhere. */
+function themeOptionValues(themeId) {
+  const saved = state.settings?.themeOptions?.[themeId] ?? {};
+  return (themeInfo(themeId)?.options ?? []).map((option) => {
+    const raw = saved[option.id];
+    const value = typeof raw === "number" ? Math.min(option.max, Math.max(option.min, raw)) : option.default;
+    return { option, value };
+  });
+}
+
+function applyThemeOptions() {
+  const { app, channel } = activeThemes();
+  const set = (element, key, themeId) => {
+    for (const variable of appliedOptions[key]) element.style.removeProperty(variable);
+    appliedOptions[key] = [];
+    if (!themeId) return;
+    for (const { option, value } of themeOptionValues(themeId)) {
+      element.style.setProperty(option.variable, `${value}${option.unit}`);
+      appliedOptions[key].push(option.variable);
+    }
+  };
+  set(document.documentElement, "root", app);
+  set(els.channelView, "channel", channel);
+  // Sliders can change the glass's settings: remake its lenses.
+  Glass.refresh();
 }
 
 async function loadThemes() {
@@ -1432,6 +1551,7 @@ function showNotice(text) {
 
 function openAppearance() {
   renderThemeList();
+  renderThemeOptions();
   for (const radio of document.querySelectorAll('input[name="effects"]')) radio.checked = radio.value === effectsMode();
   hideFormError($("appearance-dialog"));
   $("appearance-dialog").showModal();
@@ -1486,6 +1606,7 @@ async function chooseAppTheme(id) {
     const { settings } = await api("PUT", "/api/settings", { appTheme: id });
     state.settings = settings;
     renderThemeList();
+    renderThemeOptions();
     renderAll();
   } catch (error) {
     showFormError($("appearance-dialog"), error.message);
@@ -1523,6 +1644,92 @@ async function deleteTheme() {
   }
 }
 
+/**
+ * The sliders in Appearance: the app theme's, and the open channel's theme's
+ * if it has its own. Moving one applies at once; letting go saves it.
+ */
+function renderThemeOptions() {
+  const { app, channel } = activeThemes();
+  const groups = [];
+  const add = (themeId, title) => {
+    const values = themeOptionValues(themeId);
+    if (values.length === 0 || groups.some((g) => g.themeId === themeId)) return;
+    groups.push({ themeId, title, values });
+  };
+  add(app, themeInfo(app)?.name ?? "App theme");
+  if (channel) add(channel, `#${currentChannel()?.name}: ${themeInfo(channel)?.name ?? channel}`);
+
+  const box = $("theme-options");
+  box.hidden = groups.length === 0;
+  box.replaceChildren(
+    ...groups.map(({ themeId, title, values }) => {
+      const section = document.createElement("fieldset");
+      section.className = "theme-option-group";
+      const legend = document.createElement("legend");
+      legend.textContent = title;
+      section.append(legend);
+      for (const { option, value } of values) {
+        const row = document.createElement("label");
+        row.className = "theme-option";
+        const name = document.createElement("span");
+        name.className = "theme-option-label";
+        name.textContent = option.label;
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = option.min;
+        slider.max = option.max;
+        slider.step = option.step;
+        slider.value = value;
+        const shown = document.createElement("output");
+        shown.className = "theme-option-value";
+        const show = (v) => (shown.textContent = formatOption(option, v));
+        show(value);
+        slider.addEventListener("input", () => {
+          setThemeOption(themeId, option.id, Number(slider.value));
+          show(Number(slider.value));
+        });
+        slider.addEventListener("change", saveThemeOptions);
+        row.append(name, slider, shown);
+        section.append(row);
+      }
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.className = "link-button";
+      reset.textContent = "Reset to the theme's defaults";
+      reset.addEventListener("click", () => {
+        delete state.settings.themeOptions[themeId];
+        applyThemeOptions();
+        renderThemeOptions();
+        saveThemeOptions();
+      });
+      section.append(reset);
+      return section;
+    }),
+  );
+}
+
+/** "55%" for fractions of 1, "14px", or the plain number. */
+function formatOption(option, value) {
+  if (!option.unit && option.min >= 0 && option.max <= 1) return `${Math.round(value * 100)}%`;
+  return `${Math.round(value * 100) / 100}${option.unit}`;
+}
+
+/** Change one slider's value locally, and show it straight away. */
+function setThemeOption(themeId, optionId, value) {
+  const all = (state.settings.themeOptions ??= {});
+  all[themeId] = { ...all[themeId], [optionId]: value };
+  applyThemeOptions();
+}
+
+async function saveThemeOptions() {
+  try {
+    const { settings } = await api("PUT", "/api/settings", { themeOptions: state.settings.themeOptions ?? {} });
+    state.settings = settings;
+  } catch (error) {
+    showFormError($("appearance-dialog"), error.message);
+  }
+}
+
 function chooseEffects(mode) {
   writeLocal(EFFECTS_KEY, mode);
   if (mode === "auto") {
@@ -1544,6 +1751,7 @@ async function openThemeEditor(id) {
     form.description.value = theme.description;
     form.css.value = theme.css;
     form.liteCss.value = theme.liteCss;
+    form.options.value = theme.options.length ? JSON.stringify(theme.options, null, 2) : "";
     renderThemeFiles(theme.files);
     hideFormError($("theme-editor-form"));
     $("theme-editor").showModal();
@@ -1556,15 +1764,23 @@ async function openThemeEditor(id) {
 async function saveTheme(close) {
   const form = $("theme-editor-form").elements;
   try {
+    let options;
+    try {
+      options = form.options.value.trim() ? JSON.parse(form.options.value) : [];
+    } catch {
+      throw new Error("The sliders must be valid JSON: a list like [{\"id\": ...}].");
+    }
     await api("PATCH", `/api/themes/${encodeURIComponent(state.editingTheme.id)}`, {
       name: form.name.value,
       description: form.description.value,
       css: form.css.value,
       liteCss: form.liteCss.value,
+      options,
     });
     state.themeVersion++;
     await loadThemes();
     renderThemeList();
+    renderThemeOptions();
     renderAll();
     if (close) $("theme-editor").close();
   } catch (error) {
@@ -3490,6 +3706,8 @@ window.addEventListener("hashchange", () => {
 });
 // Tapping the channel you're already in should still close the phone sidebar.
 els.channelList.addEventListener("click", closeSidebar);
+// The channel indicator follows the links' size when the sidebar changes width.
+new ResizeObserver(() => moveChannelIndicator()).observe(els.channelList);
 
 $("menu-button").addEventListener("click", openSidebar);
 $("sidebar-scrim").addEventListener("click", closeSidebar);

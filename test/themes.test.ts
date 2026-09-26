@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { NotFoundError, ValidationError } from "../src/store.ts";
 import {
   extractRootTokens,
+  parseThemeOptions,
   rewriteUrls,
   scopeOutsideChannel,
   scopeToChannel,
@@ -118,7 +119,16 @@ describe("ThemeLibrary", () => {
     library.create("Zebra");
     library.create("Apple");
     const themes = library.list();
-    expect(themes.map((t) => t.id)).toEqual(["classic", "aero-glass", "frutiger-aero", "liquid-glass", "apple", "zebra"]);
+    expect(themes.map((t) => t.id)).toEqual([
+      "classic",
+      "aero-glass",
+      "frutiger-aero",
+      "liquid-glass",
+      "liquid-glass-dark",
+      "rainy-window",
+      "apple",
+      "zebra",
+    ]);
     expect(themes[1]).toMatchObject({ name: "Aero Glass", builtIn: true, hasLite: true });
     expect(themes.at(-1)).toMatchObject({ name: "Zebra", builtIn: false });
   });
@@ -153,6 +163,48 @@ describe("ThemeLibrary", () => {
     library.remove(id);
     expect(library.exists(id)).toBe(false);
     expect(() => library.details(id)).toThrow(NotFoundError);
+  });
+
+  test("Rainy Window offers sliders, and a copy keeps them", () => {
+    expect(library.info("rainy-window").options.map((o) => [o.id, o.variable])).toEqual([
+      ["bubble-transparency", "--bubble-transparency"],
+      ["bubble-blur", "--bubble-blur"],
+      ["rain", "--rain"],
+      ["parallax", "--parallax"],
+    ]);
+    const copy = library.create("My Rain", "rainy-window");
+    expect(library.info(copy.id).options).toHaveLength(4);
+    expect(library.details(copy.id).files).toEqual([
+      "city-drops.svg",
+      "city.svg",
+      "drops-mask.svg",
+      "drops-small-mask.svg",
+      "drops-small.svg",
+      "drops.svg",
+      "rain.svg",
+      "runners.svg",
+    ]);
+  });
+
+  test("both Liquid Glass themes turn on real refraction, with sliders for it", () => {
+    for (const id of ["liquid-glass", "liquid-glass-dark"]) {
+      const theme = library.details(id);
+      expect(theme.css).toContain("--lensing: on;");
+      expect(theme.css).toContain("--lens-depth: var(--refraction);");
+      expect(theme.hasLite).toBe(true);
+      expect(library.info(id).options.map((o) => o.id)).toEqual(expect.arrayContaining(["tint", "refraction", "dispersion", "frost"]));
+    }
+    expect(library.details("liquid-glass").files).toEqual(["grid.svg", "ribbons.svg", "wash.svg"]);
+    expect(library.details("liquid-glass-dark").files).toEqual(["dust.svg", "neon.svg", "smoke.svg"]);
+    expect(library.info("liquid-glass-dark").options.map((o) => o.id)).toEqual(["tint", "refraction", "dispersion", "frost", "neon", "smoke"]);
+  });
+
+  test("your themes' sliders can be changed in the editor", () => {
+    const { id } = library.create("Sky");
+    const option = { id: "blur", label: "Blur", variable: "--my-blur", min: 0, max: 30, step: 1, default: 12, unit: "px" };
+    expect(library.update(id, { options: [option] }).options).toEqual([option]);
+    expect(() => library.update(id, { options: [{ ...option, variable: "blur" }] })).toThrow(/CSS variable/);
+    expect(library.update(id, { options: [] }).options).toEqual([]);
   });
 
   test("built-in themes can't be changed or deleted", () => {
@@ -204,7 +256,7 @@ describe("ThemeLibrary", () => {
     test("outside.css, for the app theme while a channel has its own", async () => {
       const text = await library.serve("liquid-glass", "outside.css")!.text();
       expect(text).toContain("@scope (:root) to (.channel-view)");
-      expect(text).toContain('url("/themes/liquid-glass/blobs.svg")');
+      expect(text).toContain('url("/themes/liquid-glass/ribbons.svg")');
     });
 
     test("images, with safe headers", () => {
@@ -226,5 +278,33 @@ describe("ThemeLibrary", () => {
   test("your themes live in the data folder", () => {
     const { id } = library.create("Sky");
     expect(existsSync(join(dir.path, "themes", id, "theme.css"))).toBe(true);
+  });
+});
+
+describe("parseThemeOptions", () => {
+  const good = { id: "glow", label: "Glow", variable: "--glow", min: 0, max: 1, default: 0.5 };
+
+  test("fills in the step and unit", () => {
+    expect(parseThemeOptions([good], true)).toEqual([{ ...good, step: 1, unit: "" }]);
+  });
+
+  test.each([
+    [{ ...good, id: "Glow!" }, /id must be/],
+    [{ ...good, variable: "glow" }, /CSS variable/],
+    [{ ...good, min: 2 }, /min must be less than max/],
+    [{ ...good, default: 5 }, /default must be between/],
+    [{ ...good, unit: "vw" }, /unit must be/],
+    [{ ...good, step: 0 }, /step must be a positive/],
+  ])("refuses %j when saving", (option, error) => {
+    expect(() => parseThemeOptions([option], true)).toThrow(error);
+  });
+
+  test("skips bad options in theme.json instead of failing", () => {
+    expect(parseThemeOptions([good, { ...good, id: "x", min: 5 }], false).map((o) => o.id)).toEqual(["glow"]);
+    expect(parseThemeOptions("nope", false)).toEqual([]);
+  });
+
+  test("ids must be unique", () => {
+    expect(() => parseThemeOptions([good, good], true)).toThrow(/its own id/);
   });
 });

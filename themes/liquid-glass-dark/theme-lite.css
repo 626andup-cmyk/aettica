@@ -1,0 +1,13 @@
+/*
+ * Liquid Glass Dark, Lite: for phones where glass effects stutter. No
+ * refraction and no blur (glass.js turns itself off in Lite mode), so the
+ * glass is darker to keep text readable over the neon. The rims, the
+ * shadows and the liquid motion stay: they're cheap.
+ */
+
+:root {
+  --glass-fill: rgb(14 12 28 / calc(var(--glass-tint) + 0.5));
+  --glass-blur: none;
+  --dialog-backdrop: none;
+  --dialog-bg: rgb(16 14 30 / 0.96);
+}

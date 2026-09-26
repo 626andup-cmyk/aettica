@@ -136,6 +136,17 @@
   box-sizing: border-box;
 }
 
+/*
+ * Liquid glass (public/glass.js): a theme gives an element `--lens: 1` to
+ * make it refracting glass. Registered so it doesn't inherit: a glass
+ * bubble's children aren't glass too.
+ */
+@property --lens {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 html,
 body {
   height: 100%;
@@ -168,6 +179,27 @@ textarea {
 .app {
   display: flex;
   height: 100%;
+}
+
+/*
+ * Empty layers for themes to draw on: four behind the whole app (children
+ * of <body>) and four in the channel view, for a channel theme. Hidden
+ * unless a theme shows them. The channel view's are only for a channel
+ * theme, so the app theme's never appear twice.
+ */
+.theme-layers {
+  display: none;
+  pointer-events: none;
+}
+
+.theme-layers > * {
+  display: block;
+  pointer-events: none;
+}
+
+.channel-view:not([data-channel-theme]) > .theme-layers,
+.channel-view[data-channel-theme=""] > .theme-layers {
+  display: none !important;
 }
 
 /*
@@ -258,11 +290,28 @@ textarea {
 }
 
 .channel-list {
+  /* Positioned, so the channel indicator (below) can sit behind a link. */
+  position: relative;
   flex: 1;
   overflow-y: auto;
   margin: 0;
   padding: 0 8px;
   list-style: none;
+}
+
+/*
+ * A pill that sits behind the open channel's link and moves when you
+ * switch channels, stretching between the two like a drop of liquid (see
+ * moveChannelIndicator in app.js). Hidden unless a theme shows it: themes
+ * that don't use it keep the link's own highlight.
+ */
+.channel-indicator {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  transform-origin: 50% 0;
 }
 
 .channel-link {
@@ -1854,4 +1903,53 @@ button.attach-chip {
 
 .attach-option input {
   accent-color: var(--accent);
+}
+
+/* ======================================================= theme options */
+
+/* Sliders a theme offers, in Appearance. */
+.theme-options {
+  margin-top: 14px;
+}
+
+.theme-option-group {
+  margin: 0 0 10px;
+  padding: 6px 12px 10px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+}
+
+.theme-option-group legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dialog label.theme-option {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) 2fr 48px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+}
+
+.theme-option input[type="range"] {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--accent);
+}
+
+.theme-option-value {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: right;
 }

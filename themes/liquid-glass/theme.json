@@ -1,5 +1,12 @@
 {
   "name": "Liquid Glass",
-  "description": "Clear, bright-edged glass floating over vivid colour, with rounded capsule controls.",
-  "swatch": ["linear-gradient(135deg, #ff5f9e, #7a5cff, #1ec8c8)", "rgba(255,255,255,0.18)", "rgba(130,180,255,0.6)", "#ffb86b"]
+  "description": "Clear, thick glass that bends and splits the light behind it, over soft iridescent colour, with controls that move like liquid.",
+  "swatch": ["linear-gradient(135deg, #7fe3ff, #b8a6ff 45%, #ff9ad9)", "rgba(255,255,255,0.55)", "linear-gradient(90deg, #1ea7ff, #6a5cff, #ff3fb4)", "#5cf08a"],
+  "options": [
+    { "id": "tint", "label": "Glass tint", "variable": "--glass-tint", "min": 0, "max": 0.7, "step": 0.02, "default": 0.24 },
+    { "id": "refraction", "label": "Refraction", "variable": "--refraction", "min": 0, "max": 60, "step": 1, "default": 26 },
+    { "id": "dispersion", "label": "Rainbow edges", "variable": "--dispersion", "min": 0, "max": 1, "step": 0.05, "default": 0.4 },
+    { "id": "frost", "label": "Frost", "variable": "--frost", "min": 0, "max": 20, "step": 0.5, "default": 1.5 },
+    { "id": "grid", "label": "Grid", "variable": "--grid", "min": 0, "max": 1, "step": 0.05, "default": 1 }
+  ]
 }

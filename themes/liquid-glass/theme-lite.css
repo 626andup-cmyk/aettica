@@ -1,13 +1,13 @@
 /*
- * Liquid Glass, Lite: for phones where the blur stutters. No real blur;
- * panels get a deep tint instead, so text stays readable over the colour.
- * The shapes, edges and sheen stay.
+ * Liquid Glass, Lite: for phones where glass effects stutter. No
+ * refraction and no blur (glass.js turns itself off in Lite mode), so the
+ * glass is whiter to keep text readable over the colours and grid. The
+ * rims, the shadows and the liquid motion stay: they're cheap.
  */
 
 :root {
-  --glass: rgb(35 25 65 / 0.82);
+  --glass-fill: rgb(255 255 255 / calc(var(--glass-tint) + 0.5));
   --glass-blur: none;
   --dialog-backdrop: none;
-  --dialog-bg: rgb(40 30 75 / 0.95);
-  --channel-background: rgb(10 5 30 / 0.55);
+  --dialog-bg: rgb(250 251 255 / 0.96);
 }

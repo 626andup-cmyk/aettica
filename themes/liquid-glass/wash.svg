@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1600" preserveAspectRatio="xMidYMid slice">
+<!-- Liquid Glass's background: soft, iridescent colour on pale grey. -->
+<defs><filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="110"/></filter></defs>
+<rect width="1600" height="1600" fill="#eceef4"/>
+<g filter="url(#soft)">
+<circle cx="381" cy="871" r="309" fill="#7fe3ff" opacity="0.50"/>
+<circle cx="1001" cy="105" r="223" fill="#ff9ad9" opacity="0.56"/>
+<circle cx="415" cy="375" r="459" fill="#b8a6ff" opacity="0.47"/>
+<circle cx="1338" cy="762" r="373" fill="#8ff5c8" opacity="0.39"/>
+<circle cx="1016" cy="1389" r="346" fill="#ffd59a" opacity="0.54"/>
+<circle cx="1074" cy="102" r="402" fill="#9ec5ff" opacity="0.50"/>
+<circle cx="482" cy="50" r="428" fill="#ffb3c7" opacity="0.47"/>
+<circle cx="1150" cy="1406" r="391" fill="#7fe3ff" opacity="0.58"/>
+<circle cx="632" cy="1281" r="327" fill="#ff9ad9" opacity="0.58"/>
+<circle cx="1406" cy="156" r="253" fill="#b8a6ff" opacity="0.40"/>
+<circle cx="1545" cy="698" r="370" fill="#8ff5c8" opacity="0.43"/>
+</g>
+</svg>

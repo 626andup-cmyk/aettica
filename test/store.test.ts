@@ -352,6 +352,8 @@ describe("validation", () => {
     [{ partnerName: "  " }, /partnerName must be non-empty/],
     [{ partnerPrompt: 42 }, /partnerPrompt must be text/],
     [{ rpAssignment: "gpt" }, /rpAssignment must be/],
+    [{ themeOptions: { "rainy-window": { "bubble-blur": "lots" } } }, /must be numbers/],
+    [{ themeOptions: { "Not A Theme": {} } }, /themeOptions must be a theme id/],
     [{ oocPrompt: 42 }, /oocPrompt must be text/],
     [[], /must be a JSON object/],
   ])("rejects settings %j", (input, error) => {

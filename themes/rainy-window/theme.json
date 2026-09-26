@@ -1,0 +1,11 @@
+{
+  "name": "Rainy Window",
+  "description": "A night city through a rain-streaked window, drifting as you scroll, with liquid glass bubbles. Adjust the bubbles and the rain in Appearance.",
+  "swatch": ["linear-gradient(180deg, #070b18, #211c33 70%, #ff9a4d)", "rgba(20,30,48,0.45)", "#8ec5ff", "#ffd27f"],
+  "options": [
+    { "id": "bubble-transparency", "label": "Bubble transparency", "variable": "--bubble-transparency", "min": 0, "max": 0.95, "step": 0.05, "default": 0.55 },
+    { "id": "bubble-blur", "label": "Bubble blur", "variable": "--bubble-blur", "min": 0, "max": 30, "step": 1, "default": 14, "unit": "px" },
+    { "id": "rain", "label": "Raindrops", "variable": "--rain", "min": 0, "max": 1, "step": 0.05, "default": 0.9 },
+    { "id": "parallax", "label": "Parallax", "variable": "--parallax", "min": 0, "max": 2, "step": 0.1, "default": 1 }
+  ]
+}

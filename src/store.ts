@@ -55,6 +55,7 @@ export function defaultSettings(): Settings {
     // their settings live in connection profiles; see src/profiles.ts.)
     rpAssignment: "",
     oocAssignment: "",
+    themeOptions: {},
     partnerPrompt: readDefault("partner.md"),
     literaryPrompt: readDefault("literary.md"),
     casualPrompt: readDefault("casual.md"),
@@ -114,6 +115,7 @@ export function validateSettings(input: unknown): Partial<Settings> {
   }
   // Only the id's form is checked here; the server checks the theme exists.
   if (raw.appTheme !== undefined) clean.appTheme = themeId(raw.appTheme, "appTheme");
+  if (raw.themeOptions !== undefined) clean.themeOptions = themeOptions(raw.themeOptions);
 
   return clean;
 }
@@ -128,6 +130,29 @@ function assignment(value: unknown, field: string): string | null {
     throw new ValidationError(`${field} must be "profile:<id>" or "roulette:<id>"`);
   }
   return value;
+}
+
+/**
+ * Slider values for themes: `{ "rainy-window": { "bubble-transparency": 0.6 } }`.
+ * Only the shape is checked; each theme's own ranges are applied by the app.
+ */
+function themeOptions(value: unknown): Settings["themeOptions"] {
+  const themes = requireObject(value, "themeOptions");
+  const entries = Object.entries(themes);
+  if (entries.length > 100) throw new ValidationError("themeOptions has too many themes");
+  return Object.fromEntries(
+    entries.map(([id, options]) => {
+      themeId(id, "themeOptions");
+      const values = Object.entries(requireObject(options, "themeOptions"));
+      if (values.length > 20) throw new ValidationError("themeOptions has too many options for one theme");
+      for (const [key, number] of values) {
+        if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(key) || typeof number !== "number" || !Number.isFinite(number)) {
+          throw new ValidationError("themeOptions values must be numbers, by option id");
+        }
+      }
+      return [id, Object.fromEntries(values) as Record<string, number>];
+    }),
+  );
 }
 
 /** A theme id: lowercase letters, digits and dashes. */
@@ -505,7 +530,12 @@ export class Store {
    */
   forgetTheme(themeId: string): void {
     this.db.transaction(() => {
-      if (this.getSettings().appTheme === themeId) this.updateSettings({ appTheme: "classic" });
+      const settings = this.getSettings();
+      if (settings.appTheme === themeId) this.updateSettings({ appTheme: "classic" });
+      if (settings.themeOptions[themeId]) {
+        const { [themeId]: _gone, ...rest } = settings.themeOptions;
+        this.updateSettings({ themeOptions: rest });
+      }
       this.db.query("UPDATE channels SET theme = NULL WHERE theme = $themeId").run({ themeId });
     })();
   }

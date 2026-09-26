@@ -1,0 +1,31 @@
+/*
+ * Rainy Window, Lite: for phones where blur stutters. Nothing blurs, so
+ * panels and bubbles get a deeper tint to keep text readable, and the
+ * sliding drops (redrawn every frame) are left out. The window, the rain
+ * outside, the drops and the parallax stay: they're cheap to draw. The
+ * transparency slider still works, from a more solid starting point.
+ */
+
+:root {
+  --glass: linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0) 35%), rgb(14 20 36 / 0.86);
+  --glass-blur: none;
+  --dialog-backdrop: none;
+  --dialog-bg: rgb(14 20 36 / 0.95);
+}
+
+.layer-4 {
+  display: none;
+}
+
+.message {
+  backdrop-filter: none;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0) 30%, rgb(0 0 0 / 0.08)),
+    rgb(18 28 48 / calc(0.35 + var(--bubble-alpha) * 0.6));
+}
+
+.message[data-author="user"] {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0) 30%, rgb(0 0 0 / 0.08)),
+    rgb(58 44 62 / calc(0.35 + var(--bubble-alpha) * 0.6));
+}
