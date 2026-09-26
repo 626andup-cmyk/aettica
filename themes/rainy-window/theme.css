@@ -2,11 +2,16 @@
  * Rainy Window: a night city, out of focus, seen through a window covered
  * in raindrops. The city and the drops are two layers that drift at
  * different speeds as you scroll the messages (parallax), and messages are
- * liquid glass bubbles.
+ * liquid glass bubbles: their edges work as lenses, bending the city and
+ * the drops behind them and splitting the lights into rainbows (real
+ * refraction, from public/glass.js, in Chrome and other Chromium browsers;
+ * elsewhere, and in Lite mode, they just blur).
  *
  * Sliders in Appearance (declared in theme.json) set these variables:
  *   --bubble-transparency  0 (solid) to 0.95 (almost clear)
  *   --bubble-blur          how much the bubbles blur what's behind them
+ *   --refraction           how strongly the bubbles' edges bend what's behind (px)
+ *   --dispersion           how much the lights split into rainbows at the edges
  *   --rain                 how visible the raindrops are
  *   --parallax             how far the layers drift (0 turns it off)
  *
@@ -16,6 +21,11 @@
  * channel theme, `body` becomes the channel view and the layers are the
  * channel's own, so the same rules work there too.
  *
+ * Nothing on the layers moves with `transform`: Chrome's refraction (an
+ * SVG backdrop filter) doesn't see a transformed layer properly, and would
+ * cut part of it off behind each bubble's rim. So the rain, the drift and
+ * the parallax all move the layers' backgrounds instead.
+ *
  * Lite version: theme-lite.css (no blur, more solid bubbles).
  */
 
@@ -24,10 +34,20 @@
 
   /* The sliders' defaults (the same as in theme.json). */
   --bubble-transparency: 0.55;
-  --bubble-blur: 14px;
+  --bubble-blur: 6px;
+  --refraction: 22;
+  --dispersion: 0.35;
   --rain: 0.9;
   --parallax: 1;
   --bubble-alpha: calc(1 - var(--bubble-transparency));
+
+  /* Real refraction (public/glass.js), with the sliders' settings. */
+  --lensing: on;
+  --lens-depth: var(--refraction);
+  --lens-bevel: 18;
+  --lens-dispersion: var(--dispersion);
+  --lens-frost: var(--bubble-blur);
+  --lens-saturate: 1.4;
 
   --font-body: -apple-system, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
   --font-heading: -apple-system, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
@@ -124,6 +144,29 @@
 /* ------------------------------------------------------------ the window */
 
 /*
+ * How far the far layer (the city) and the near layers (the drops) have
+ * drifted, and how far the rain outside has fallen. Registered, so they can
+ * be animated smoothly; the layers use them in their background positions.
+ */
+@property --far {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --near {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --fall {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+/*
  * The page holds the picture layers behind everything. `isolation` keeps
  * them inside it (z-index -1 puts them behind the content but in front of
  * its background), and `timeline-scope` lets them follow the message
@@ -148,16 +191,19 @@ body {
   position: absolute;
 }
 
-/* 1. The city, far away and out of focus. A little taller than the screen, so it can drift. */
+/*
+ * 1. The city, far away and out of focus. A little taller than the screen,
+ * so it can drift without showing its edge.
+ */
 .layer-1 {
   inset: -8% -2%;
-  background: url(city.svg) center / cover no-repeat, #0b1020;
+  background: url(city.svg) center calc(50% + var(--far)) / cover no-repeat, #0b1020;
 }
 
 /* 2. Rain falling outside, past the lights: a faint tile that loops downward. */
 .layer-2 {
-  inset: -400px -10% 0;
-  background: url(rain.svg) 0 0 / 300px 400px;
+  inset: 0;
+  background: url(rain.svg) 0 var(--fall) / 300px 400px;
   opacity: calc(var(--rain) * 0.7);
   animation: rainy-window-fall 0.8s linear infinite;
 }
@@ -169,30 +215,30 @@ body {
  * so the pattern doesn't show.
  */
 .layer-3 {
-  inset: -12% 0;
+  inset: 0;
   background:
-    url(drops.svg) 0 0 / 460px 460px,
-    url(drops-small.svg) 137px 91px / 250px 250px,
-    url(city-drops.svg) 50% 50% / 520px 520px;
+    url(drops.svg) 0 var(--near) / 460px 460px,
+    url(drops-small.svg) 137px calc(91px + var(--near)) / 250px 250px,
+    url(city-drops.svg) 50% calc(50% + var(--near)) / 520px 520px;
   -webkit-mask:
-    url(drops-mask.svg) 0 0 / 460px 460px,
-    url(drops-small-mask.svg) 137px 91px / 250px 250px;
+    url(drops-mask.svg) 0 var(--near) / 460px 460px,
+    url(drops-small-mask.svg) 137px calc(91px + var(--near)) / 250px 250px;
   mask:
-    url(drops-mask.svg) 0 0 / 460px 460px,
-    url(drops-small-mask.svg) 137px 91px / 250px 250px;
+    url(drops-mask.svg) 0 var(--near) / 460px 460px,
+    url(drops-small-mask.svg) 137px calc(91px + var(--near)) / 250px 250px;
   opacity: var(--rain);
 }
 
 /* 4. Drops sliding down in fits and starts, leaving trails (animated in runners.svg). */
 .layer-4 {
-  inset: -12% 0;
-  background: url(runners.svg) 0 0 / 460px 1100px;
+  inset: 0;
+  background: url(runners.svg) 0 var(--near) / 460px 1100px;
   opacity: var(--rain);
 }
 
 @keyframes rainy-window-fall {
   to {
-    transform: translateY(400px);
+    --fall: 400px;
   }
 }
 
@@ -222,19 +268,19 @@ body {
 
 @keyframes rainy-window-far {
   from {
-    transform: translateY(calc(var(--parallax) * 2.5%));
+    --far: calc(var(--parallax) * 2.5vh);
   }
   to {
-    transform: translateY(calc(var(--parallax) * -2.5%));
+    --far: calc(var(--parallax) * -2.5vh);
   }
 }
 
 @keyframes rainy-window-near {
   from {
-    transform: translateY(calc(var(--parallax) * 6%));
+    --near: calc(var(--parallax) * 6vh);
   }
   to {
-    transform: translateY(calc(var(--parallax) * -6%));
+    --near: calc(var(--parallax) * -6vh);
   }
 }
 
@@ -280,6 +326,21 @@ body {
     inset 0 12px 20px -14px rgb(255 255 255 / 0.2),
     0 12px 28px -8px rgb(0 0 0 / calc(0.25 + var(--bubble-alpha) * 0.35));
   backdrop-filter: blur(var(--bubble-blur)) saturate(170%) brightness(1.08);
+}
+
+/*
+ * Glass that refracts (glass.js): the bubbles and panels. Buttons inside
+ * the panels keep their gel look; the gloss and glint (below) sit on top of
+ * the lens.
+ */
+.message,
+.surface {
+  --lens: 1;
+}
+
+/* Dialogs hold a lot of text, so their glass stays heavily frosted. */
+.dialog {
+  --lens-frost: 28;
 }
 
 /* The gloss: a curved highlight across the top, like light on a lens. */
