@@ -32,6 +32,7 @@ const settings: Settings = {
   oocAssignment: "",
   historyLimit: 40,
   appTheme: "classic",
+  themeOptions: {},
 };
 
 function channel(overrides: Partial<Channel>): Channel {

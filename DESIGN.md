@@ -188,7 +188,8 @@ The whole look of Aettica is themeable, including glassy, skeuomorphic styles li
 - **Themes layer.** The app theme applies everywhere. A channel theme overrides it inside that channel only: its messages, header, composer and background. The sidebar and settings keep the app theme, so switching channels never changes the whole app.
 - **Channel themes are scoped.** Aettica wraps a channel theme's CSS so it only reaches that channel's view and can't break the rest of the app.
 - **A channel theme fully replaces the app theme inside its channel.** Its tokens start from the defaults rather than the app theme's, and the app theme is scoped to stop at the channel, so a channel looks the same whatever the app theme is.
-- **Built-in themes** ship with the app as starting points to copy and edit: Classic (the default dark look), Frutiger Aero, Aero Glass and Liquid Glass.
+- **Built-in themes** ship with the app as starting points to copy and edit: Classic (the default dark look), Frutiger Aero, Aero Glass, Liquid Glass, and Rainy Window (a blurred night city behind raindrops on glass, the two layers drifting at different speeds as you scroll, with liquid glass message bubbles).
+- **Themes can offer sliders.** A theme declares options in its theme.json (a label, a range, and the CSS variable each sets), and Appearance shows them for the app theme and the open channel's theme. The values are saved server-wide, per theme. Rainy Window uses them for bubble transparency and blur, raindrop strength and parallax.
 - **Glass has a cheap fallback.** Real backdrop blur is demanding on phones. A theme can provide a Lite version (no blur, more solid panels), used when you choose it or when the real one stutters. Glass effects are set per device: Automatic (Full, switching to Lite if scrolling stutters), Full, or Lite.
 
 **Theme-ready from stage 2.** Until the theme stage, the app is built so themes will be easy to add:

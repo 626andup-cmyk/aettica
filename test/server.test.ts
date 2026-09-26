@@ -605,11 +605,13 @@ describe("themes", () => {
   test("deleting a theme puts everything that used it back to the default", async () => {
     const { data } = await call("POST", "/api/themes", { name: "Short-lived" });
     const id = data.theme.id;
-    await call("PUT", "/api/settings", { appTheme: id });
+    await call("PUT", "/api/settings", { appTheme: id, themeOptions: { [id]: { glow: 1 }, "rainy-window": { rain: 0.3 } } });
     await call("PATCH", `/api/channels/${story.id}`, { theme: id });
 
     const deleted = await call("DELETE", `/api/themes/${id}`, {});
     expect(deleted.data.settings.appTheme).toBe("classic");
+    // Its slider values go too; other themes' stay.
+    expect(deleted.data.settings.themeOptions).toEqual({ "rainy-window": { rain: 0.3 } });
     expect(deleted.data.channels.find((c: Channel) => c.id === story.id).theme).toBeNull();
   });
 

@@ -1855,3 +1855,52 @@ button.attach-chip {
 .attach-option input {
   accent-color: var(--accent);
 }
+
+/* ======================================================= theme options */
+
+/* Sliders a theme offers, in Appearance. */
+.theme-options {
+  margin-top: 14px;
+}
+
+.theme-option-group {
+  margin: 0 0 10px;
+  padding: 6px 12px 10px;
+  border: var(--input-border);
+  border-radius: var(--radius-md);
+}
+
+.theme-option-group legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dialog label.theme-option {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) 2fr 48px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+}
+
+.theme-option input[type="range"] {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--accent);
+}
+
+.theme-option-value {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: right;
+}

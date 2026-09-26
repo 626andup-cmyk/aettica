@@ -776,6 +776,9 @@
         <button type="button" class="button button-danger" id="theme-delete">Delete</button>
       </div>
 
+      <!-- Sliders the app theme (and the open channel's theme) offer, if any. -->
+      <div id="theme-options" class="theme-options" hidden></div>
+
       <fieldset class="kind-picker effects-picker">
         <legend>Glass effects on this device</legend>
         <label class="kind-option">
@@ -831,6 +834,15 @@
             solid, e.g. <code>--sidebar-backdrop: none;</code>
           </p>
           <textarea id="theme-lite-css" name="liteCss" rows="8" spellcheck="false" class="code-input"></textarea>
+        </details>
+
+        <details class="lite-css theme-options-editor">
+          <summary>Sliders (optional)</summary>
+          <p class="hint">
+            Sliders shown in Appearance, each setting a CSS variable your CSS uses. A JSON list, e.g.
+            <code>[{"id": "blur", "label": "Blur", "variable": "--my-blur", "min": 0, "max": 30, "step": 1, "default": 12, "unit": "px"}]</code>
+          </p>
+          <textarea id="theme-options-json" name="options" rows="6" spellcheck="false" class="code-input"></textarea>
         </details>
 
         <label>Images and fonts</label>

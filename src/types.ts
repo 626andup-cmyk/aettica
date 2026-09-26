@@ -303,6 +303,12 @@ export interface Settings {
   /** The app theme's id (see `src/themes.ts`). "classic" is the default look. */
   appTheme: string;
   /**
+   * Where you've moved a theme's sliders (see `ThemeOption` in
+   * src/themes.ts), by theme id, then option id. Options you haven't moved
+   * use the theme's defaults.
+   */
+  themeOptions: Record<string, Record<string, number>>;
+  /**
    * How many of the most recent messages in a channel are sent to the model.
    * Older messages are left out until stage 7 adds scene summaries.
    */

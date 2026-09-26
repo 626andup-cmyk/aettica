@@ -46,6 +46,30 @@ export interface ThemeInfo {
   hasLite: boolean;
   /** A few CSS colours or gradients for the theme's preview swatch. */
   swatch: string[];
+  /** Sliders the theme offers in Appearance (see `ThemeOption`). */
+  options: ThemeOption[];
+}
+
+/**
+ * A slider a theme offers in Appearance, like "Bubble transparency".
+ * Declared in the theme's theme.json; each sets one CSS variable, which the
+ * theme's CSS uses. Your chosen values are kept in the `themeOptions`
+ * setting, and the app sets the variable on the page.
+ */
+export interface ThemeOption {
+  /** Short id, e.g. "bubble-transparency". */
+  id: string;
+  /** Shown next to the slider. */
+  label: string;
+  /** The CSS variable it sets, e.g. "--bubble-transparency". */
+  variable: string;
+  min: number;
+  max: number;
+  step: number;
+  /** The value until you move the slider. */
+  default: number;
+  /** Added after the number, e.g. "px" for `14px`. Empty for plain numbers. */
+  unit: string;
 }
 
 /** Everything the theme editor needs. */
@@ -290,6 +314,67 @@ interface Manifest {
   name?: unknown;
   description?: unknown;
   swatch?: unknown;
+  options?: unknown;
+}
+
+const OPTION_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const CSS_VARIABLE = /^--[A-Za-z0-9_-]{1,60}$/;
+const UNITS = ["", "px", "em", "rem", "%", "deg", "s", "ms"];
+const MAX_OPTIONS = 12;
+
+/**
+ * Check a theme's options (from theme.json, or the theme editor).
+ *
+ * @param strict  Throw on a problem (when you save them). When reading
+ *                theme.json, bad options are skipped instead.
+ */
+export function parseThemeOptions(value: unknown, strict: boolean): ThemeOption[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    if (strict) throw new ValidationError("Options must be a list.");
+    return [];
+  }
+  const options: ThemeOption[] = [];
+  for (const raw of value.slice(0, strict ? undefined : MAX_OPTIONS)) {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    const problem = optionProblem(o);
+    if (problem) {
+      if (strict) throw new ValidationError(`Option ${JSON.stringify(o.id ?? "?")}: ${problem}`);
+      continue;
+    }
+    options.push({
+      id: o.id as string,
+      label: (o.label as string).trim(),
+      variable: o.variable as string,
+      min: o.min as number,
+      max: o.max as number,
+      step: (o.step as number | undefined) ?? 1,
+      default: o.default as number,
+      unit: (o.unit as string | undefined) ?? "",
+    });
+  }
+  if (strict && options.length > MAX_OPTIONS) throw new ValidationError(`A theme can have ${MAX_OPTIONS} options at most.`);
+  if (strict && new Set(options.map((o) => o.id)).size !== options.length) {
+    throw new ValidationError("Each option needs its own id.");
+  }
+  return options;
+}
+
+/** What's wrong with one option, or null. */
+function optionProblem(o: Record<string, unknown>): string | null {
+  if (typeof o.id !== "string" || !OPTION_ID.test(o.id)) return "id must be lowercase letters, digits and dashes";
+  if (typeof o.label !== "string" || !o.label.trim() || o.label.length > 60) return "label must be short text";
+  if (typeof o.variable !== "string" || !CSS_VARIABLE.test(o.variable)) return 'variable must be a CSS variable, like "--glass-blur"';
+  for (const key of ["min", "max", "default"]) {
+    if (typeof o[key] !== "number" || !Number.isFinite(o[key])) return `${key} must be a number`;
+  }
+  if (o.step !== undefined && (typeof o.step !== "number" || !(o.step > 0))) return "step must be a positive number";
+  if ((o.min as number) >= (o.max as number)) return "min must be less than max";
+  if ((o.default as number) < (o.min as number) || (o.default as number) > (o.max as number)) {
+    return "default must be between min and max";
+  }
+  if (o.unit !== undefined && !UNITS.includes(o.unit as string)) return `unit must be one of: ${UNITS.filter(Boolean).join(", ")}, or none`;
+  return null;
 }
 
 /** Reads, writes and serves themes from the built-in and your theme folders. */
@@ -340,6 +425,7 @@ export class ThemeLibrary {
       builtIn: this.isBuiltIn(id),
       hasLite: existsSync(join(folder, "theme-lite.css")),
       swatch: Array.isArray(manifest.swatch) ? manifest.swatch.filter((s) => typeof s === "string").slice(0, 4) : [],
+      options: parseThemeOptions(manifest.options, false),
     };
   }
 
@@ -380,7 +466,10 @@ export class ThemeLibrary {
   }
 
   /** Change one of your themes. Built-in themes can't be changed. */
-  update(id: string, changes: { name?: unknown; description?: unknown; css?: unknown; liteCss?: unknown }): ThemeDetails {
+  update(
+    id: string,
+    changes: { name?: unknown; description?: unknown; css?: unknown; liteCss?: unknown; options?: unknown },
+  ): ThemeDetails {
     const folder = this.requireEditable(id);
     const manifest = this.readManifest(folder);
     if (changes.name !== undefined) manifest.name = validateName(changes.name);
@@ -390,6 +479,7 @@ export class ThemeLibrary {
       }
       manifest.description = changes.description;
     }
+    if (changes.options !== undefined) manifest.options = parseThemeOptions(changes.options, true);
     if (changes.css !== undefined) writeFileSync(join(folder, "theme.css"), validateCss(changes.css, "css"));
     if (changes.liteCss !== undefined) {
       const lite = validateCss(changes.liteCss, "liteCss");

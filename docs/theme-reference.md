@@ -137,6 +137,26 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.check-option`, `.check-inline`, `.section-title`, `.advanced` | Checkboxes, section headings and "advanced" details in dialogs |
 | `.notice-banner` | Short notices at the top of the channel, e.g. about glass effects |
 
+## Sliders (theme options)
+
+A theme can offer sliders in Appearance, each setting a CSS variable its CSS uses. Declare them in the theme's `theme.json`, or in the theme editor under **Sliders**:
+
+```json
+"options": [
+  { "id": "bubble-transparency", "label": "Bubble transparency", "variable": "--bubble-transparency",
+    "min": 0, "max": 0.95, "step": 0.05, "default": 0.55 },
+  { "id": "bubble-blur", "label": "Bubble blur", "variable": "--bubble-blur",
+    "min": 0, "max": 30, "step": 1, "default": 14, "unit": "px" }
+]
+```
+
+- `id`: lowercase letters, digits and dashes. `variable`: the CSS variable, starting with `--`.
+- `unit` (optional): `px`, `em`, `rem`, `%`, `deg`, `s` or `ms`, added after the number. Without one, the variable is a plain number, which works inside `calc()`: `rgb(0 0 0 / calc(1 - var(--bubble-transparency)))`.
+- Give each variable its default in your `:root` block too, so the theme also looks right before the app applies the sliders.
+- The app sets the app theme's variables on `<html>`, and a channel theme's on `.channel-view`, where they win over the theme's own values. Up to 12 sliders per theme.
+
+**Rainy Window** is a worked example: its two picture layers are `body::before` and `body::after` (which also work as a channel theme, where `body` becomes the channel view), and they drift with the message list's scrolling through a scroll-driven animation (`scroll-timeline` on `.messages`, `timeline-scope` on `body`).
+
 ## Free layers for glass effects
 
 Glass themes usually stack several layers on a panel: the blurred backdrop, a glossy highlight across the top, and a soft glow at the edges. The backdrop comes from the `*-backdrop` variables. For the other two, **elements with the `surface` class never use `::before` or `::after` in the base stylesheet**, so a theme can add them freely:
