@@ -171,6 +171,27 @@ textarea {
 }
 
 /*
+ * Empty layers for themes to draw on: four behind the whole app (children
+ * of <body>) and four in the channel view, for a channel theme. Hidden
+ * unless a theme shows them. The channel view's are only for a channel
+ * theme, so the app theme's never appear twice.
+ */
+.theme-layers {
+  display: none;
+  pointer-events: none;
+}
+
+.theme-layers > * {
+  display: block;
+  pointer-events: none;
+}
+
+.channel-view:not([data-channel-theme]) > .theme-layers,
+.channel-view[data-channel-theme=""] > .theme-layers {
+  display: none !important;
+}
+
+/*
  * Every .surface is "positioned" (relative, fixed, or a modal dialog), so a
  * theme's ::before/::after layers can be placed inside it with
  * position: absolute without the theme changing layout. `isolation: isolate`

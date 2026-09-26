@@ -173,7 +173,16 @@ describe("ThemeLibrary", () => {
     ]);
     const copy = library.create("My Rain", "rainy-window");
     expect(library.info(copy.id).options).toHaveLength(4);
-    expect(library.details(copy.id).files).toEqual(["city.svg", "drops-small.svg", "drops.svg"]);
+    expect(library.details(copy.id).files).toEqual([
+      "city-drops.svg",
+      "city.svg",
+      "drops-mask.svg",
+      "drops-small-mask.svg",
+      "drops-small.svg",
+      "drops.svg",
+      "rain.svg",
+      "runners.svg",
+    ]);
   });
 
   test("your themes' sliders can be changed in the editor", () => {

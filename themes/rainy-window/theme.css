@@ -10,9 +10,11 @@
  *   --rain                 how visible the raindrops are
  *   --parallax             how far the layers drift (0 turns it off)
  *
- * The layers are body::before (the city) and body::after (the drops). As a
- * channel theme, `body` becomes the channel view, so the same rules work
- * there too.
+ * It draws on the app's four empty theme layers (.theme-layers), from the
+ * back: the city, rain falling outside, drops on the glass (each showing
+ * the city upside down, as real drops do), and drops sliding down. As a
+ * channel theme, `body` becomes the channel view and the layers are the
+ * channel's own, so the same rules work there too.
  *
  * Lite version: theme-lite.css (no blur, more solid bubbles).
  */
@@ -58,11 +60,21 @@
   --app-background: #0b1020;
   --channel-background: transparent;
 
-  /* Glass panels: cool and clear, with a bright top edge. */
-  --glass: rgb(16 24 42 / 0.35);
-  --glass-edge: 1px solid rgb(200 220 255 / 0.22);
-  --glass-blur: blur(20px) saturate(150%);
-  --glass-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3), 0 10px 30px rgb(0 0 0 / 0.35);
+  /*
+   * Glass panels: cool and clear, with the light of a thick pane: a bright
+   * top rim, fainter side and bottom rims, a glow caught in the bottom
+   * edge, and a soft shadow underneath.
+   */
+  --glass: linear-gradient(180deg, rgb(255 255 255 / 0.08), rgb(255 255 255 / 0) 35%), rgb(16 24 42 / 0.32);
+  --glass-edge: 1px solid rgb(210 228 255 / 0.2);
+  --glass-blur: blur(22px) saturate(170%) brightness(1.08);
+  --glass-shadow:
+    inset 0 1.5px 0 rgb(255 255 255 / 0.5),
+    inset 0 -1px 0 rgb(255 255 255 / 0.12),
+    inset 1px 0 0 rgb(255 255 255 / 0.08),
+    inset -1px 0 0 rgb(255 255 255 / 0.05),
+    inset 0 -16px 26px -14px rgb(150 200 255 / 0.25),
+    0 12px 32px -8px rgb(0 0 0 / 0.55);
 
   --sidebar-bg: var(--glass);
   --sidebar-border: var(--glass-edge);
@@ -84,20 +96,21 @@
   --composer-border: var(--glass-edge);
   --composer-backdrop: var(--glass-blur);
 
-  --input-bg: rgb(255 255 255 / 0.08);
-  --input-border: 1px solid rgb(200 220 255 / 0.2);
-  --input-focus-border: 1px solid rgb(200 220 255 / 0.55);
-  --button-bg: rgb(255 255 255 / 0.1);
-  --button-hover-bg: rgb(255 255 255 / 0.2);
+  --input-bg: rgb(0 6 20 / 0.28);
+  --input-border: 1px solid rgb(200 220 255 / 0.18);
+  --input-focus-border: 1px solid rgb(200 225 255 / 0.6);
+  /* Gel buttons: a glossy upper half, a deeper lower half, a bright rim. */
+  --button-bg: linear-gradient(180deg, rgb(255 255 255 / 0.3), rgb(255 255 255 / 0.1) 48%, rgb(255 255 255 / 0.03) 52%, rgb(255 255 255 / 0.12));
+  --button-hover-bg: linear-gradient(180deg, rgb(255 255 255 / 0.4), rgb(255 255 255 / 0.16) 48%, rgb(255 255 255 / 0.07) 52%, rgb(255 255 255 / 0.2));
   --button-text: #ffffff;
-  --button-border: 1px solid rgb(200 220 255 / 0.25);
-  --button-shadow: inset 0 1px 0 rgb(255 255 255 / 0.3);
-  --button-primary-bg: rgb(120 170 240 / 0.55);
-  --button-primary-hover-bg: rgb(140 185 250 / 0.7);
+  --button-border: 1px solid rgb(210 228 255 / 0.3);
+  --button-shadow: inset 0 1px 0 rgb(255 255 255 / 0.65), inset 0 -1px 0 rgb(255 255 255 / 0.15), 0 3px 8px rgb(0 0 0 / 0.4);
+  --button-primary-bg: linear-gradient(180deg, rgb(185 215 255 / 0.95), rgb(110 160 240 / 0.8) 48%, rgb(70 120 215 / 0.85) 52%, rgb(110 170 255 / 0.9));
+  --button-primary-hover-bg: linear-gradient(180deg, rgb(205 228 255), rgb(130 178 250 / 0.9) 48%, rgb(85 135 230 / 0.92) 52%, rgb(125 185 255));
   --button-primary-text: #ffffff;
   --icon-button-hover-bg: rgb(255 255 255 / 0.12);
 
-  --dialog-bg: rgb(14 20 36 / 0.55);
+  --dialog-bg: linear-gradient(180deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0) 30%), rgb(14 20 36 / 0.55);
   --dialog-border: var(--glass-edge);
   --dialog-shadow: var(--glass-shadow);
   --dialog-backdrop: blur(28px) saturate(150%);
@@ -111,10 +124,10 @@
 /* ------------------------------------------------------------ the window */
 
 /*
- * The page holds the two picture layers behind everything. `isolation`
- * keeps them inside it (z-index -1 puts them behind the content but in
- * front of its background), and `timeline-scope` lets them follow the
- * message list's scrolling (below).
+ * The page holds the picture layers behind everything. `isolation` keeps
+ * them inside it (z-index -1 puts them behind the content but in front of
+ * its background), and `timeline-scope` lets them follow the message
+ * list's scrolling (below).
  */
 body {
   position: relative;
@@ -123,32 +136,69 @@ body {
   timeline-scope: --chat;
 }
 
-/* The far layer: the city, out of focus. A little taller than the screen, so it can drift. */
-body::before {
-  content: "";
+.theme-layers {
+  display: block;
   position: absolute;
-  inset: -8% -2%;
+  inset: 0;
   z-index: -1;
-  background: url(city.svg) center / cover no-repeat, #0b1020;
-  pointer-events: none;
+  overflow: hidden;
 }
 
-/* The near layer: raindrops on the glass, two tiles of different sizes so the pattern doesn't show. */
-body::after {
-  content: "";
+.theme-layers > * {
   position: absolute;
+}
+
+/* 1. The city, far away and out of focus. A little taller than the screen, so it can drift. */
+.layer-1 {
+  inset: -8% -2%;
+  background: url(city.svg) center / cover no-repeat, #0b1020;
+}
+
+/* 2. Rain falling outside, past the lights: a faint tile that loops downward. */
+.layer-2 {
+  inset: -400px -10% 0;
+  background: url(rain.svg) 0 0 / 300px 400px;
+  opacity: calc(var(--rain) * 0.7);
+  animation: rainy-window-fall 0.8s linear infinite;
+}
+
+/*
+ * 3. Drops on the glass. Each drop is a little lens: it shows the city
+ * upside down and sharper (city-drops.svg), cut to the drops' shapes by a
+ * mask, with shading and highlights on top. Two tiles of different sizes,
+ * so the pattern doesn't show.
+ */
+.layer-3 {
   inset: -12% 0;
-  z-index: -1;
   background:
     url(drops.svg) 0 0 / 460px 460px,
-    url(drops-small.svg) 137px 91px / 250px 250px;
+    url(drops-small.svg) 137px 91px / 250px 250px,
+    url(city-drops.svg) 50% 50% / 520px 520px;
+  -webkit-mask:
+    url(drops-mask.svg) 0 0 / 460px 460px,
+    url(drops-small-mask.svg) 137px 91px / 250px 250px;
+  mask:
+    url(drops-mask.svg) 0 0 / 460px 460px,
+    url(drops-small-mask.svg) 137px 91px / 250px 250px;
   opacity: var(--rain);
-  pointer-events: none;
+}
+
+/* 4. Drops sliding down in fits and starts, leaving trails (animated in runners.svg). */
+.layer-4 {
+  inset: -12% 0;
+  background: url(runners.svg) 0 0 / 460px 1100px;
+  opacity: var(--rain);
+}
+
+@keyframes rainy-window-fall {
+  to {
+    transform: translateY(400px);
+  }
 }
 
 /*
  * Parallax: scrolling the messages drives the layers. The message list
- * names its scroll position `--chat`, and each layer's animation runs along
+ * names its scroll position `--chat`, and the layers' animations run along
  * it instead of along time: from the top of the history to the bottom, the
  * city drifts a little and the drops, nearer, drift more. Browsers without
  * scroll-driven animations just show still layers.
@@ -158,12 +208,13 @@ body::after {
 }
 
 @supports (animation-timeline: scroll()) {
-  body::before {
+  .layer-1 {
     animation: rainy-window-far linear both;
     animation-timeline: --chat;
   }
 
-  body::after {
+  .layer-3,
+  .layer-4 {
     animation: rainy-window-near linear both;
     animation-timeline: --chat;
   }
@@ -188,9 +239,13 @@ body::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body::before,
-  body::after {
-    animation: none;
+  .theme-layers > * {
+    animation: none !important;
+  }
+
+  .layer-2,
+  .layer-4 {
+    display: none;
   }
 }
 
@@ -201,47 +256,83 @@ body::after {
 }
 
 /*
- * Every message is a pane of liquid glass: tinted as clear as the
- * transparency slider says, blurring the window behind it, with a bright
- * top edge and a sheen.
+ * Every message is a pane of liquid glass, as clear as the transparency
+ * slider says, blurring the window behind it. It's lit like a thick piece
+ * of glass: a bright rim along the top, fainter rims on the sides and
+ * bottom, a glow caught in its lower edge, a curved gloss across the top
+ * (::before) and a sharp glint on the top edge (::after).
  */
 .message {
   position: relative;
   isolation: isolate;
-  margin: 6px 0;
-  border: 1px solid rgb(200 220 255 / calc(0.08 + var(--bubble-alpha) * 0.18));
-  border-radius: 20px;
-  background: rgb(18 28 48 / var(--bubble-alpha));
+  margin: 8px 0;
+  border: 1px solid rgb(210 228 255 / calc(0.1 + var(--bubble-alpha) * 0.14));
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0) 30%, rgb(0 0 0 / 0.08)),
+    rgb(18 28 48 / var(--bubble-alpha));
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.2),
-    0 6px 18px rgb(0 0 0 / calc(0.1 + var(--bubble-alpha) * 0.25));
-  backdrop-filter: blur(var(--bubble-blur)) saturate(140%);
+    inset 0 1.5px 0 rgb(255 255 255 / 0.55),
+    inset 0 -1px 0 rgb(255 255 255 / 0.14),
+    inset 1px 0 0 rgb(255 255 255 / 0.1),
+    inset -1px 0 0 rgb(255 255 255 / 0.06),
+    inset 0 -16px 26px -14px rgb(150 200 255 / 0.3),
+    inset 0 12px 20px -14px rgb(255 255 255 / 0.2),
+    0 12px 28px -8px rgb(0 0 0 / calc(0.25 + var(--bubble-alpha) * 0.35));
+  backdrop-filter: blur(var(--bubble-blur)) saturate(170%) brightness(1.08);
 }
 
-/* A soft sheen across the top of each bubble. */
-.message::before {
+/* The gloss: a curved highlight across the top, like light on a lens. */
+.message::before,
+.surface::before {
   content: "";
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(170deg, rgb(255 255 255 / 0.12), rgb(255 255 255 / 0) 40%);
+  top: 1px;
+  left: 1px;
+  right: 1px;
+  height: min(44px, 48%);
+  border-radius: 21px 21px 50% 50% / 21px 21px 22px 22px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.2), rgb(255 255 255 / 0.05) 70%, rgb(255 255 255 / 0));
   pointer-events: none;
   z-index: -1;
 }
 
+/* The glint: a sharp, bright line along the top edge, brightest in the middle. */
+.message::after,
+.surface::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 1px;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0), rgb(255 255 255 / 0.95), rgb(255 255 255 / 0));
+  pointer-events: none;
+}
+
 /* Your messages are a warmer glass. */
 .message[data-author="user"] {
-  background: rgb(58 44 62 / var(--bubble-alpha));
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0) 30%, rgb(0 0 0 / 0.08)),
+    rgb(58 44 62 / var(--bubble-alpha));
+  box-shadow:
+    inset 0 1.5px 0 rgb(255 255 255 / 0.55),
+    inset 0 -1px 0 rgb(255 255 255 / 0.14),
+    inset 1px 0 0 rgb(255 255 255 / 0.1),
+    inset -1px 0 0 rgb(255 255 255 / 0.06),
+    inset 0 -16px 26px -14px rgb(255 190 150 / 0.25),
+    inset 0 12px 20px -14px rgb(255 255 255 / 0.2),
+    0 12px 28px -8px rgb(0 0 0 / calc(0.25 + var(--bubble-alpha) * 0.35));
 }
 
 .message:hover,
 .message:focus-within {
-  border-color: rgb(200 220 255 / calc(0.2 + var(--bubble-alpha) * 0.2));
+  border-color: rgb(210 228 255 / calc(0.22 + var(--bubble-alpha) * 0.2));
 }
 
 /* A run of casual bubbles from one voice sits closer together. */
 .message.continued {
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 /* Text on glass over a busy picture needs a little help. */
@@ -250,8 +341,10 @@ body::after {
 .activity-summary,
 .channel-title,
 .empty {
-  text-shadow: 0 1px 3px rgb(0 0 0 / 0.55);
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
 }
+
+/* --------------------------------------------------------- the panels */
 
 /* Floating panels, like the other glass themes. */
 .channel-header {
@@ -276,17 +369,33 @@ body::after {
   }
 }
 
+/* The header is a capsule: its gloss follows the round ends. */
+.channel-header::before {
+  border-radius: 999px 999px 40% 40% / 999px 999px 20px 20px;
+}
+
+/* Text boxes are set into the glass: shaded inside, lit along the bottom. */
+textarea,
+input:not([type="radio"], [type="checkbox"], [type="range"]),
+.posting-as,
+.dialog select {
+  box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.35), inset 0 -1px 0 rgb(255 255 255 / 0.1), 0 1px 0 rgb(255 255 255 / 0.08);
+}
+
+/* Gel buttons: capsules, with text pressed into them. */
 .button,
 .posting-as {
   border-radius: 999px;
 }
 
-.surface::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(170deg, rgb(255 255 255 / 0.1), rgb(255 255 255 / 0) 45%);
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: -1;
+.button {
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.45);
+}
+
+.button:active {
+  box-shadow: inset 0 2px 5px rgb(0 0 0 / 0.4), inset 0 -1px 0 rgb(255 255 255 / 0.2);
+}
+
+.avatar {
+  box-shadow: inset 0 1.5px 0 rgb(255 255 255 / 0.6), inset 0 -6px 10px rgb(0 0 0 / 0.25), 0 3px 8px rgb(0 0 0 / 0.45);
 }

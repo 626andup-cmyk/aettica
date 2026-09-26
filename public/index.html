@@ -110,6 +110,12 @@
       </symbol>
     </svg>
 
+    <!--
+      Empty layers a theme can draw on (pictures, rain, glows), behind the
+      whole app. Hidden unless a theme shows them. See docs/theme-reference.md.
+    -->
+    <div class="theme-layers" aria-hidden="true"><i class="layer-1"></i><i class="layer-2"></i><i class="layer-3"></i><i class="layer-4"></i></div>
+
     <div class="app" id="app">
       <!-- ============================================================ sidebar -->
       <nav class="sidebar surface" id="sidebar" aria-label="Channels">
@@ -157,6 +163,8 @@
         per-channel themes (stage 3.5) will hook onto.
       -->
       <section class="channel-view" id="channel-view">
+        <!-- The same, for a channel theme: only shown when the channel has its own theme. -->
+        <div class="theme-layers" aria-hidden="true"><i class="layer-1"></i><i class="layer-2"></i><i class="layer-3"></i><i class="layer-4"></i></div>
         <header class="channel-header surface">
           <button id="menu-button" class="icon-button menu-button" type="button" aria-label="Show channels">
             <svg width="22" height="22" aria-hidden="true"><use href="#icon-menu" /></svg>

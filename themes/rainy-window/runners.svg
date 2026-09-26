@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 1100" width="460" height="1100">
+<!-- Rainy Window's sliding drops: each runs down in fits and starts, leaving a trail. -->
+<defs>
+  <linearGradient id="trail" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#e6eeff" stop-opacity="0"/>
+    <stop offset="1" stop-color="#e6eeff" stop-opacity="0.22"/>
+  </linearGradient>
+  <linearGradient id="tear" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#000814" stop-opacity="0.28"/>
+    <stop offset="0.5" stop-color="#6d88b8" stop-opacity="0.18"/>
+    <stop offset="1" stop-color="#f0f5ff" stop-opacity="0.55"/>
+  </linearGradient>
+  <radialGradient id="spec" cx="0.5" cy="0.5" r="0.5">
+    <stop offset="0" stop-color="#ffffff" stop-opacity="0.95"/>
+    <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+  </radialGradient>
+</defs>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;0.03;0.88;0.94;1" dur="20.6s" begin="-19.3s" repeatCount="indefinite"/>
+  <polyline points="141.8,147.2 142.4,208.5 144.2,269.8 142.5,331.1 142.4,392.4 141.2,453.7 141.4,515.0 141.8,576.3 139.6,637.6 138.4,698.9 137.4,760.2 139.2,821.5 140.4,882.8 138.9,944.1 140.2,1005.4" fill="none" stroke="url(#trail)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="858.4 868.4" stroke-dashoffset="858.4">
+    <animate attributeName="stroke-dashoffset" values="858.4;858.4;613.1;613.1;551.8;551.8;429.2;429.2;306.6;306.6;183.9;183.9;61.3;61.3;0.0;0.0;0.0" keyTimes="0.0000;0.0267;0.1215;0.1396;0.1670;0.1986;0.3131;0.3493;0.4338;0.4945;0.5469;0.6259;0.7488;0.8231;0.8800;0.9400;1.0000" calcMode="linear" dur="20.6s" begin="-19.3s" repeatCount="indefinite"/>
+  </polyline>
+  <g>
+    <animateTransform attributeName="transform" type="translate" values="141.8 147.2;141.8 147.2;142.4 392.4;142.4 392.4;141.2 453.7;141.2 453.7;141.8 576.3;141.8 576.3;138.4 698.9;138.4 698.9;139.2 821.5;139.2 821.5;138.9 944.1;138.9 944.1;140.2 1005.4;140.2 1005.4;140.2 1005.4" keyTimes="0.0000;0.0267;0.1215;0.1396;0.1670;0.1986;0.3131;0.3493;0.4338;0.4945;0.5469;0.6259;0.7488;0.8231;0.8800;0.9400;1.0000" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1" dur="20.6s" begin="-19.3s" repeatCount="indefinite"/>
+    <path d="M0,-7.7 C2.4,-4.8 4.8,-1.0 4.8,1.7 C4.8,5.0 2.4,6.2 0,6.2 C-2.4,6.2 -4.8,5.0 -4.8,1.7 C-4.8,-1.0 -2.4,-4.8 0,-7.7Z" fill="url(#tear)"/>
+    <path d="M0,-7.7 C2.4,-4.8 4.8,-1.0 4.8,1.7 C4.8,5.0 2.4,6.2 0,6.2 C-2.4,6.2 -4.8,5.0 -4.8,1.7 C-4.8,-1.0 -2.4,-4.8 0,-7.7Z" fill="none" stroke="#02050c" stroke-opacity="0.35" stroke-width="0.7"/>
+    <ellipse cx="0" cy="4.8" rx="2.6" ry="0.9" fill="#f2f6ff" opacity="0.4"/>
+    <ellipse cx="-1.7" cy="-1.2" rx="1.4" ry="1.1" fill="url(#spec)"/>
+  </g>
+</g>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;0.03;0.88;0.94;1" dur="15.7s" begin="-11.8s" repeatCount="indefinite"/>
+  <polyline points="179.9,303.7 180.3,355.2 181.2,406.7 179.3,458.2 178.7,509.6 177.8,561.1 178.7,612.6 177.3,664.1 177.2,715.6 175.7,767.0 174.7,818.5 176.6,870.0 178.6,921.5 178.0,972.9 177.5,1024.4" fill="none" stroke="url(#trail)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="720.9 730.9" stroke-dashoffset="720.9">
+    <animate attributeName="stroke-dashoffset" values="720.9;720.9;514.9;514.9;463.4;463.4;360.4;360.4;154.5;154.5;0.0;0.0;0.0" keyTimes="0.0000;0.0610;0.2208;0.2839;0.3284;0.4010;0.4551;0.4939;0.6493;0.6960;0.8800;0.9400;1.0000" calcMode="linear" dur="15.7s" begin="-11.8s" repeatCount="indefinite"/>
+  </polyline>
+  <g>
+    <animateTransform attributeName="transform" type="translate" values="179.9 303.7;179.9 303.7;178.7 509.6;178.7 509.6;177.8 561.1;177.8 561.1;177.3 664.1;177.3 664.1;176.6 870.0;176.6 870.0;177.5 1024.4;177.5 1024.4;177.5 1024.4" keyTimes="0.0000;0.0610;0.2208;0.2839;0.3284;0.4010;0.4551;0.4939;0.6493;0.6960;0.8800;0.9400;1.0000" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1" dur="15.7s" begin="-11.8s" repeatCount="indefinite"/>
+    <path d="M0,-10.2 C3.2,-6.4 6.4,-1.3 6.4,2.2 C6.4,6.7 3.2,8.3 0,8.3 C-3.2,8.3 -6.4,6.7 -6.4,2.2 C-6.4,-1.3 -3.2,-6.4 0,-10.2Z" fill="url(#tear)"/>
+    <path d="M0,-10.2 C3.2,-6.4 6.4,-1.3 6.4,2.2 C6.4,6.7 3.2,8.3 0,8.3 C-3.2,8.3 -6.4,6.7 -6.4,2.2 C-6.4,-1.3 -3.2,-6.4 0,-10.2Z" fill="none" stroke="#02050c" stroke-opacity="0.35" stroke-width="0.7"/>
+    <ellipse cx="0" cy="6.4" rx="3.5" ry="1.2" fill="#f2f6ff" opacity="0.4"/>
+    <ellipse cx="-2.2" cy="-1.6" rx="1.9" ry="1.4" fill="url(#spec)"/>
+  </g>
+</g>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;0.03;0.88;0.94;1" dur="25.7s" begin="-24.4s" repeatCount="indefinite"/>
+  <polyline points="284.8,-43.7 283.0,17.7 282.3,79.0 282.8,140.4 284.7,201.8 283.9,263.1 285.8,324.5 286.0,385.9 285.2,447.2 284.4,508.6 283.0,570.0 281.1,631.3 279.6,692.7 280.4,754.1 282.6,815.4" fill="none" stroke="url(#trail)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="859.3 869.3" stroke-dashoffset="859.3">
+    <animate attributeName="stroke-dashoffset" values="859.3;859.3;798.0;798.0;552.4;552.4;368.3;368.3;122.8;122.8;61.4;61.4;0.0;0.0;0.0" keyTimes="0.0000;0.0318;0.0563;0.1193;0.2071;0.2802;0.4672;0.5199;0.6309;0.7209;0.7819;0.8261;0.8800;0.9400;1.0000" calcMode="linear" dur="25.7s" begin="-24.4s" repeatCount="indefinite"/>
+  </polyline>
+  <g>
+    <animateTransform attributeName="transform" type="translate" values="284.8 -43.7;284.8 -43.7;283.0 17.7;283.0 17.7;283.9 263.1;283.9 263.1;285.2 447.2;285.2 447.2;279.6 692.7;279.6 692.7;280.4 754.1;280.4 754.1;282.6 815.4;282.6 815.4;282.6 815.4" keyTimes="0.0000;0.0318;0.0563;0.1193;0.2071;0.2802;0.4672;0.5199;0.6309;0.7209;0.7819;0.8261;0.8800;0.9400;1.0000" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1" dur="25.7s" begin="-24.4s" repeatCount="indefinite"/>
+    <path d="M0,-9.4 C2.9,-5.9 5.9,-1.2 5.9,2.1 C5.9,6.2 2.9,7.7 0,7.7 C-2.9,7.7 -5.9,6.2 -5.9,2.1 C-5.9,-1.2 -2.9,-5.9 0,-9.4Z" fill="url(#tear)"/>
+    <path d="M0,-9.4 C2.9,-5.9 5.9,-1.2 5.9,2.1 C5.9,6.2 2.9,7.7 0,7.7 C-2.9,7.7 -5.9,6.2 -5.9,2.1 C-5.9,-1.2 -2.9,-5.9 0,-9.4Z" fill="none" stroke="#02050c" stroke-opacity="0.35" stroke-width="0.7"/>
+    <ellipse cx="0" cy="5.9" rx="3.2" ry="1.1" fill="#f2f6ff" opacity="0.4"/>
+    <ellipse cx="-2.1" cy="-1.5" rx="1.8" ry="1.3" fill="url(#spec)"/>
+  </g>
+</g>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;0.03;0.88;0.94;1" dur="25.3s" begin="-7.1s" repeatCount="indefinite"/>
+  <polyline points="313.7,-12.5 312.2,34.8 313.7,82.1 312.8,129.4 312.6,176.7 314.8,224.0 316.3,271.3 318.4,318.6 318.2,365.9 318.2,413.2 319.2,460.5 319.1,507.8 318.2,555.1 317.8,602.4 316.2,649.8" fill="none" stroke="url(#trail)" stroke-width="3.0" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="662.5 672.5" stroke-dashoffset="662.5">
+    <animate attributeName="stroke-dashoffset" values="662.5;662.5;567.9;567.9;425.9;425.9;283.9;283.9;142.0;142.0;0.0;0.0;0.0" keyTimes="0.0000;0.0488;0.1570;0.2148;0.3064;0.3638;0.4369;0.5166;0.6894;0.7594;0.8800;0.9400;1.0000" calcMode="linear" dur="25.3s" begin="-7.1s" repeatCount="indefinite"/>
+  </polyline>
+  <g>
+    <animateTransform attributeName="transform" type="translate" values="313.7 -12.5;313.7 -12.5;313.7 82.1;313.7 82.1;314.8 224.0;314.8 224.0;318.2 365.9;318.2 365.9;319.1 507.8;319.1 507.8;316.2 649.8;316.2 649.8;316.2 649.8" keyTimes="0.0000;0.0488;0.1570;0.2148;0.3064;0.3638;0.4369;0.5166;0.6894;0.7594;0.8800;0.9400;1.0000" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1" dur="25.3s" begin="-7.1s" repeatCount="indefinite"/>
+    <path d="M0,-8.7 C2.7,-5.5 5.5,-1.1 5.5,1.9 C5.5,5.7 2.7,7.1 0,7.1 C-2.7,7.1 -5.5,5.7 -5.5,1.9 C-5.5,-1.1 -2.7,-5.5 0,-8.7Z" fill="url(#tear)"/>
+    <path d="M0,-8.7 C2.7,-5.5 5.5,-1.1 5.5,1.9 C5.5,5.7 2.7,7.1 0,7.1 C-2.7,7.1 -5.5,5.7 -5.5,1.9 C-5.5,-1.1 -2.7,-5.5 0,-8.7Z" fill="none" stroke="#02050c" stroke-opacity="0.35" stroke-width="0.7"/>
+    <ellipse cx="0" cy="5.5" rx="3.0" ry="1.0" fill="#f2f6ff" opacity="0.4"/>
+    <ellipse cx="-1.9" cy="-1.4" rx="1.6" ry="1.2" fill="url(#spec)"/>
+  </g>
+</g>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;0.03;0.88;0.94;1" dur="29.0s" begin="-15.0s" repeatCount="indefinite"/>
+  <polyline points="374.6,247.4 376.6,290.9 377.2,334.3 377.6,377.8 375.4,421.2 375.6,464.6 374.6,508.1 375.3,551.5 375.1,594.9 376.5,638.4 377.2,681.8 378.5,725.3 377.8,768.7 378.5,812.1 379.5,855.6" fill="none" stroke="url(#trail)" stroke-width="3.7" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="608.3 618.3" stroke-dashoffset="608.3">
+    <animate attributeName="stroke-dashoffset" values="608.3;608.3;478.0;478.0;304.1;304.1;217.2;217.2;86.9;86.9;43.5;43.5;0.0;0.0;0.0" keyTimes="0.0000;0.0537;0.1903;0.2124;0.4019;0.4618;0.5258;0.5475;0.6857;0.7225;0.7610;0.8100;0.8800;0.9400;1.0000" calcMode="linear" dur="29.0s" begin="-15.0s" repeatCount="indefinite"/>
+  </polyline>
+  <g>
+    <animateTransform attributeName="transform" type="translate" values="374.6 247.4;374.6 247.4;377.6 377.8;377.6 377.8;375.3 551.5;375.3 551.5;376.5 638.4;376.5 638.4;377.8 768.7;377.8 768.7;378.5 812.1;378.5 812.1;379.5 855.6;379.5 855.6;379.5 855.6" keyTimes="0.0000;0.0537;0.1903;0.2124;0.4019;0.4618;0.5258;0.5475;0.6857;0.7225;0.7610;0.8100;0.8800;0.9400;1.0000" calcMode="spline" keySplines="0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1;0.4 0 0.6 1" dur="29.0s" begin="-15.0s" repeatCount="indefinite"/>
+    <path d="M0,-10.9 C3.4,-6.8 6.8,-1.4 6.8,2.4 C6.8,7.1 3.4,8.9 0,8.9 C-3.4,8.9 -6.8,7.1 -6.8,2.4 C-6.8,-1.4 -3.4,-6.8 0,-10.9Z" fill="url(#tear)"/>
+    <path d="M0,-10.9 C3.4,-6.8 6.8,-1.4 6.8,2.4 C6.8,7.1 3.4,8.9 0,8.9 C-3.4,8.9 -6.8,7.1 -6.8,2.4 C-6.8,-1.4 -3.4,-6.8 0,-10.9Z" fill="none" stroke="#02050c" stroke-opacity="0.35" stroke-width="0.7"/>
+    <ellipse cx="0" cy="6.8" rx="3.7" ry="1.2" fill="#f2f6ff" opacity="0.4"/>
+    <ellipse cx="-2.4" cy="-1.7" rx="2.0" ry="1.5" fill="url(#spec)"/>
+  </g>
+</g>
+</svg>

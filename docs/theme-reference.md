@@ -134,6 +134,8 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.comment-float` | The Comment button that appears when you select text in a message |
 | `.thread`, `.thread-picker`, `.thread-quote`, `.thread-comments`, `.thread-comment`, `.thread-comment-author`, `.thread-comment-note`, `.thread-status` | The comments dialog. Each `.thread-comment` has `data-author`. |
 | `.attach-row`, `.attach-chip`, `.message-attachments`, `.attach-list`, `.attach-option`, `.attach-button` | Attached notes: above the text box, under messages, and the picker |
+| `.theme-layers`, `.layer-1` to `.layer-4` | Empty layers for themes to draw on (see Layers above) |
+| `.theme-options`, `.theme-option-group`, `.theme-option`, `.theme-option-label`, `.theme-option-value` | Sliders in Appearance |
 | `.check-option`, `.check-inline`, `.section-title`, `.advanced` | Checkboxes, section headings and "advanced" details in dialogs |
 | `.notice-banner` | Short notices at the top of the channel, e.g. about glass effects |
 
@@ -155,7 +157,26 @@ A theme can offer sliders in Appearance, each setting a CSS variable its CSS use
 - Give each variable its default in your `:root` block too, so the theme also looks right before the app applies the sliders.
 - The app sets the app theme's variables on `<html>`, and a channel theme's on `.channel-view`, where they win over the theme's own values. Up to 12 sliders per theme.
 
-**Rainy Window** is a worked example: its two picture layers are `body::before` and `body::after` (which also work as a channel theme, where `body` becomes the channel view), and they drift with the message list's scrolling through a scroll-driven animation (`scroll-timeline` on `.messages`, `timeline-scope` on `body`).
+**Rainy Window** is a worked example of sliders, layers (below) and parallax: its layers drift with the message list's scrolling through a scroll-driven animation (`scroll-timeline` on `.messages`, `timeline-scope` on `body`).
+
+## Layers
+
+For backgrounds with depth (a picture, rain, drifting fog), the page has empty elements for themes to draw on:
+
+```html
+<div class="theme-layers"><i class="layer-1"></i><i class="layer-2"></i><i class="layer-3"></i><i class="layer-4"></i></div>
+```
+
+One set is behind the whole app (a child of `<body>`), and one is in the channel view, for a channel theme. They're hidden until a theme shows them, and the channel view's only appear when the channel has its own theme. A typical start:
+
+```css
+body { position: relative; isolation: isolate; overflow: hidden; }
+.theme-layers { display: block; position: absolute; inset: 0; z-index: -1; overflow: hidden; }
+.theme-layers > * { position: absolute; inset: 0; }
+.layer-1 { background: url(far.svg) center / cover; }
+```
+
+`isolation` keeps the layers behind the app's content but in front of the page's background. As a channel theme, `body` becomes the channel view, so the same CSS works there. Rainy Window uses all four: the city, rain falling outside, drops on the glass (each showing the city upside down, cut out with a `mask`), and drops sliding down (an animated SVG).
 
 ## Free layers for glass effects
 
