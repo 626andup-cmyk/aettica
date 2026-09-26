@@ -120,7 +120,7 @@ Every `*-bg` can be a colour, gradient or image. Every `*-backdrop` is a [`backd
 | `.entry-editor`, `.entry-access`, `.entry-fields`, `.entry-field`, `.entry-field-label`, `.entry-field-value`, `.entry-field-remove`, `.add-field` | The entry editor and its fields |
 | `.entry-links`, `.entry-links-label`, `.entry-link` | The entry's `[[links]]`. A link to a name that isn't in the notebook also has `.missing`. |
 | `.entry-settings` | The entry's settings (owner, visibility, editing, folder) |
-| `.cast-list`, `.cast-member`, `.cast-member-name`, `.cast-unpin`, `.cast-add` | The cast in channel settings. Each `.cast-member` has `data-played-by` and `data-kind`, and `.hidden-entry` for "??? (hidden)". |
+| `.cast-list`, `.cast-member`, `.cast-member-name`, `.cast-unpin`, `.cast-add` | The cast in channel settings. Each `.cast-member` has `data-played-by` (`user`, `partner` or `both`) and `data-kind`, and `.hidden-entry` for "??? (hidden)". |
 | `.notice-banner` | Short notices at the top of the channel, e.g. about glass effects |
 
 ## Free layers for glass effects

@@ -157,6 +157,15 @@ describe("buildPromptStack in an RP channel", () => {
     );
   });
 
+  test("says shared characters are open to both of you", () => {
+    const bo = entry("Bo", { owner: "joint" });
+    const [system] = build({ notebook: { pinned: [ilse, bo, kestrel], linked: [] } });
+    expect(system!.content).toContain("### Bo (shared: either of you can play this character)");
+    expect(system!.content).toContain(
+      "You play Ilse Marrow. You and the user share Bo: either of you can write for them. Keep to what the user has written for them. The user plays Kestrel.",
+    );
+  });
+
   test("marks entries hidden from the user as secrets", () => {
     const secret = entry("The Drowned Man", {}, true);
     const [system] = build({ notebook: { pinned: [ilse, secret], linked: [] } });

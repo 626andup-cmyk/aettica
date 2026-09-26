@@ -24,6 +24,7 @@ const state = {
    * Every channel, in sidebar order: {id, name, kind, mode, pendingMode,
    * theme, position, cast}. `cast` is the entries pinned to it, as you see
    * them: {entryId, name, playedBy, owner, kind, hidden, proxyPrefix}.
+   * `playedBy` is "user", "partner" or "both" (shared characters).
    */
   channels: [],
   /** Id of the open channel, or null if there are no channels. */
@@ -667,7 +668,10 @@ function renderSidebar() {
       link.href = `#/channel/${channel.id}`;
       link.dataset.kind = channel.kind;
       if (channel.id === state.channelId) link.setAttribute("aria-current", "page");
-      link.title = channel.kind === "ooc" ? "Out of character" : castNames(channel, "partner").join(", ") || "Roleplay";
+      link.title =
+        channel.kind === "ooc"
+          ? "Out of character"
+          : [...castNames(channel, "partner"), ...castNames(channel, "both")].join(", ") || "Roleplay";
 
       const name = document.createElement("span");
       name.className = "channel-link-name";
@@ -719,7 +723,8 @@ function renderChannelHeader() {
 
 /**
  * The line next to the channel name, e.g.
- * "Arlo plays Ilse Marrow, ??? (hidden) · you play Kestrel · Literary (casual from the next scene)".
+ * "Arlo plays Ilse Marrow, ??? (hidden) · you play Kestrel · you both play Bo ·
+ * Literary (casual from the next scene)".
  */
 function channelTopic(channel) {
   const partnerName = state.settings.partnerName;
@@ -728,7 +733,9 @@ function channelTopic(channel) {
   const theirs = castNames(channel, "partner");
   const yours = castNames(channel, "user");
   if (theirs.length) parts.push(`${partnerName} plays ${theirs.join(", ")}`);
+  const shared = castNames(channel, "both");
   if (yours.length) parts.push(`you play ${yours.join(", ")}`);
+  if (shared.length) parts.push(`you both play ${shared.join(", ")}`);
   let mode = MODE_NAMES[channel.mode];
   if (channel.pendingMode) mode += ` (${MODE_NAMES[channel.pendingMode].toLowerCase()} from the next scene)`;
   parts.push(mode);
@@ -737,7 +744,7 @@ function channelTopic(channel) {
 
 const MODE_NAMES = { literary: "Literary", casual: "Casual" };
 
-/** Names of the characters in a channel's cast played by `who` ("user" or "partner"). */
+/** Names of the characters in a channel's cast played by `who` ("user", "partner" or "both"). */
 function castNames(channel, who) {
   return (channel.cast ?? []).filter((c) => c.kind === "character" && c.playedBy === who).map((c) => c.name);
 }
@@ -1030,9 +1037,14 @@ function renderComposer() {
   }
 }
 
-/** Your characters in the notebook: the ones you can post as. */
+/** The characters you can post as: yours and shared ones. */
 function yourCharacters() {
-  return state.notebook.entries.filter((e) => e.kind === "character" && e.owner === "user");
+  return state.notebook.entries.filter((e) => canHavePrefix(e.kind, e.owner));
+}
+
+/** Whether a character can have a proxy prefix: one you play (yours, or shared). */
+function canHavePrefix(kind, owner) {
+  return kind === "character" && (owner === "user" || owner === "joint");
 }
 
 /**
@@ -1702,6 +1714,8 @@ function entryBadges(entry) {
     if (entry.settings.editing === "suggest") badges.push(`${partner} suggests`);
     if (entry.settings.editing === "locked") badges.push("locked");
     if (entry.proxyPrefix) badges.push(`${entry.proxyPrefix}:`);
+  } else if (entry.owner === "joint") {
+    if (entry.proxyPrefix) badges.push(`${entry.proxyPrefix}:`);
   } else if (entry.owner === "partner") {
     if (entry.access.edit === "suggest") badges.push("you suggest");
     if (entry.access.edit === "none") badges.push("read only");
@@ -1964,7 +1978,8 @@ function accessNote(entry, isNew) {
   const partner = state.settings.partnerName;
   if (isNew) return `Pick who owns it below: you, ${partner}, or both of you (shared).`;
   if (entry.owner === "joint") {
-    return "Shared by both of you. Changes are suggestions, for the other one to accept.";
+    const play = entry.kind === "character" ? " Either of you can play them, and the proxy prefix is yours to set." : "";
+    return `Shared by both of you. Changes are suggestions, for the other one to accept.${play}`;
   }
   if (entry.owner === "user") {
     return entry.kind === "character" ? "Your character: you play them." : "Your lore.";
@@ -2080,7 +2095,7 @@ function updateEntryForm() {
   const owner = fields.owner.value;
   const fixed = owner === "joint" || (entry.isNew && owner === "partner");
   fields.visibility.disabled = fields.editing.disabled = fixed;
-  $("entry-prefix-row").hidden = !(entry.kind === "character" && owner === "user");
+  $("entry-prefix-row").hidden = !canHavePrefix(entry.kind, owner);
 }
 
 /** The pin button: pin to, or unpin from, the open roleplay channel. */
@@ -2158,7 +2173,7 @@ async function saveEntry(event) {
     fields: readEntryFields(),
     systemPrompt: fields.systemPrompt.value,
   };
-  const prefix = entry.kind === "character" && owner === "user" ? fields.proxyPrefix.value.trim() || null : null;
+  const prefix = canHavePrefix(entry.kind, owner) ? fields.proxyPrefix.value.trim() || null : null;
   // Shared lore's settings are fixed, and only an entry's owner picks them.
   const settings = {
     owner,
@@ -2182,7 +2197,7 @@ async function saveEntry(event) {
       if (contents.name !== entry.name) changes.name = contents.name;
       if (JSON.stringify(contents.fields) !== JSON.stringify(entry.fields)) changes.fields = contents.fields;
       if (contents.systemPrompt !== entry.systemPrompt) changes.systemPrompt = contents.systemPrompt;
-      if (entry.owner === "user" && prefix !== entry.proxyPrefix) changes.proxyPrefix = prefix;
+      if (canHavePrefix(entry.kind, entry.owner) && prefix !== entry.proxyPrefix) changes.proxyPrefix = prefix;
       if (Object.keys(changes).length > 0 && entry.access.edit !== "none") {
         await api("PATCH", `/api/notebook/entries/${encodeURIComponent(entry.id)}`, changes);
       }
@@ -2294,8 +2309,8 @@ function renderCastEditor() {
         });
       }
 
-      const role =
-        member.kind === "lore" ? "lore" : member.playedBy === "user" ? "you play" : `${partner} plays`;
+      const roles = { user: "you play", partner: `${partner} plays`, both: "you both play" };
+      const role = member.kind === "lore" ? "lore" : roles[member.playedBy];
       const unpin = document.createElement("button");
       unpin.type = "button";
       unpin.className = "link-button cast-unpin";

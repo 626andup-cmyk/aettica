@@ -18,7 +18,7 @@
  * folder's setting applies.
  */
 
-import type { Author, EffectiveSettings, NotebookEntry, NotebookFolder } from "./types.ts";
+import type { Author, EffectiveSettings, NotebookEntry, NotebookFolder, Player } from "./types.ts";
 
 /**
  * The settings that actually apply to an entry.
@@ -93,11 +93,28 @@ export function canDelete(actor: Author, settings: EffectiveSettings): boolean {
 }
 
 /**
- * Who voices a character: your characters are yours to play; your
- * partner's, and shared ones, are your partner's to play.
+ * Who voices a character: your characters are yours to play, your
+ * partner's are theirs, and shared ones are either of yours.
  */
-export function playedBy(entry: Pick<NotebookEntry, "owner">): Author {
-  return entry.owner === "user" ? "user" : "partner";
+export function playedBy(entry: Pick<NotebookEntry, "owner">): Player {
+  if (entry.owner === "joint") return "both";
+  return entry.owner;
+}
+
+/** Whether someone can write for a character (it's theirs, or shared). */
+export function plays(actor: Author, entry: Pick<NotebookEntry, "owner">): boolean {
+  const player = playedBy(entry);
+  return player === actor || player === "both";
+}
+
+/**
+ * Whether an entry can have a proxy prefix: a character you can play (yours
+ * or shared). The prefix is only a shortcut for your own posts, so it's
+ * yours to set even on shared characters, whose other changes are
+ * suggestions.
+ */
+export function canHavePrefix(entry: Pick<NotebookEntry, "owner" | "kind">): boolean {
+  return entry.kind === "character" && plays("user", entry);
 }
 
 /** What an entry is called for someone who can't see it. */

@@ -379,6 +379,16 @@ describe("casual mode", () => {
     ]);
   });
 
+  test("either of you can play a shared character", async () => {
+    app.store.notebook.createEntry("user", { kind: "character", name: "Bo Tern", owner: "joint", proxyPrefix: "b" });
+    fake.replies.push({ content: "Bo: Aye.\nIlse: Hm." });
+    const { data } = await call("POST", `/api/channels/${story.id}/messages`, { content: "b: *ties off the rope*" });
+
+    expect(data.userMessages.map((m: any) => m.characters)).toEqual([["Bo Tern"]]);
+    expect(data.partnerMessages.map((m: any) => m.characters)).toEqual([["Bo Tern"], ["Ilse Marrow"]]);
+    expect(data.channel.cast.find((c: any) => c.name === "Bo Tern").playedBy).toBe("both");
+  });
+
   test("posting as someone who isn't one of your characters is refused", async () => {
     const { status } = await call("POST", `/api/channels/${story.id}/messages`, { content: "hi", postingAs: "Ilse" });
     expect(status).toBe(400);

@@ -306,7 +306,7 @@ export function createApp(config: Config): App {
         const sceneTitle = channel.kind === "rp" ? parseSceneBreak(content) : null;
         if (sceneTitle !== null) return json(sceneBreakResult(store.addSceneBreak(id!, "user", sceneTitle)));
 
-        const yourCharacters = store.notebook.userCharacters();
+        const yourCharacters = store.notebook.postableCharacters();
         const postingAs = readPostingAs(body, yourCharacters);
         const messages = postToMessages(channel, content, yourCharacters, postingAs);
         if (messages.length === 0) throw new HttpError(400, "There's nothing to send after the character tags.");
