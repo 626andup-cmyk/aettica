@@ -111,6 +111,59 @@ export function confidentChoice(answer: Answer | undefined, threshold: number): 
 
 const EPSILON = 1e-9;
 
+// ---------------------------------------------------------------- series
+
+/**
+ * One decision asked several ways at once: a **series**. Jev can be wrong,
+ * and a question can be misread through one wording that another avoids.
+ * Asking two or three phrasings of the same thing in one call, and only
+ * acting when every one of them agrees, trades a little recall for a lot
+ * fewer mistakes (and costs nothing extra: it's still one request).
+ */
+export interface SeriesQuestion {
+  id: string;
+  /** Different wordings of the same yes/no question. */
+  phrasings: string[];
+}
+
+/** What a series came to, and each phrasing's p(yes). */
+export interface SeriesVerdict {
+  verdict: Tier;
+  yes: number[];
+}
+
+/** The questions sent for a series: `id~0`, `id~1`... */
+export function seriesQuestions(series: SeriesQuestion[]): Question[] {
+  return series.flatMap((s) => s.phrasings.map((question, i) => ({ id: `${s.id}~${i}`, kind: "yesno" as const, question })));
+}
+
+/**
+ * Combine a series' answers: **yes** only if every phrasing is a confident
+ * yes, **no** only if every one is a confident no, and unsure otherwise
+ * (including any missing answer): the safe path.
+ */
+export function agree(answers: (Answer | undefined)[], threshold: number): Tier {
+  const tiers = answers.map((a) => tier(a, threshold));
+  if (tiers.length > 0 && tiers.every((t) => t === "yes")) return "yes";
+  if (tiers.length > 0 && tiers.every((t) => t === "no")) return "no";
+  return "unsure";
+}
+
+/** Read a series' verdicts from the answers to `seriesQuestions(series)`. */
+export function seriesVerdicts(series: SeriesQuestion[], answers: Answers, threshold: number): Map<string, SeriesVerdict> {
+  return new Map(
+    series.map((s) => {
+      const each = s.phrasings.map((_, i) => answers.get(`${s.id}~${i}`));
+      return [s.id, { verdict: agree(each, threshold), yes: each.map((a) => probabilityOf(a, "yes")) }];
+    }),
+  );
+}
+
+/** "yes (94%, 91%)", for logs. */
+export function describeVerdict(v: SeriesVerdict): string {
+  return `${v.verdict} (${v.yes.map(percent).join(", ")})`;
+}
+
 /** "92%", for logs. */
 export function percent(p: number): string {
   return `${Math.round(p * 100)}%`;
@@ -419,6 +472,16 @@ export class Decider {
         }
       }
     }
+  }
+
+  /**
+   * Ask several series at once (see `SeriesQuestion`), in one call.
+   *
+   * @throws like `ask`.
+   */
+  async askSeries(state: string, series: SeriesQuestion[], threshold: number, options: AskOptions = {}): Promise<Map<string, SeriesVerdict>> {
+    const answers = await this.ask(state, seriesQuestions(series), options);
+    return seriesVerdicts(series, answers, threshold);
   }
 
   private async answer(

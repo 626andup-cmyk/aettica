@@ -110,6 +110,7 @@ import { Summarizer } from "./summarizer.ts";
 import { Decider, testJev } from "./jev.ts";
 import { JEV_LOG_HOURS } from "./jevlog.ts";
 import { FRESH_SCENE_MINUTES, Wakeups } from "./wakeups.ts";
+import { Keeper } from "./keeper.ts";
 import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
 import { ENTRY_TEMPLATES } from "./notebook.ts";
 import type { CastMember, Channel, Message } from "./types.ts";
@@ -155,6 +156,8 @@ export interface App {
   decider: Decider;
   /** Decides whether your partner wakes up, and wakes them (stage 8). */
   wakeups: Wakeups;
+  /** Notes what the story establishes in the notebook, between turns. */
+  keeper: Keeper;
 }
 
 /**
@@ -246,6 +249,7 @@ export function createApp(config: Config): App {
     (call) => store.jevLog.add(call, new Date()),
   );
   const wakeups = new Wakeups(store, partner, decider, Boolean(config.apiKey));
+  const keeper = new Keeper(store, api, decider, config.keeperDelayMs);
   const autoWake = config.autoWake ?? true;
 
   /**
@@ -1046,7 +1050,7 @@ export function createApp(config: Config): App {
     }
   }
 
-  return { fetch, store, partner, themes, summarizer, decider, wakeups };
+  return { fetch, store, partner, themes, summarizer, decider, wakeups, keeper };
 }
 
 /**

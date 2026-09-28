@@ -40,6 +40,8 @@ const settings: Settings = {
   wakeups: "normal",
   awayHours: 4,
   wakeCooldownMinutes: 60,
+  notebookKeeper: true,
+  keeperEvery: 6,
   quietStart: -1,
   quietEnd: 8,
   appTheme: "classic",

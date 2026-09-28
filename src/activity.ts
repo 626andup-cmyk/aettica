@@ -32,7 +32,7 @@ interface ToolCallRow {
   result: string;
   status: "ok" | "error";
   summary: string;
-  source: "native" | "text";
+  source: "native" | "text" | "keeper";
   profile: string | null;
   created_at: string;
 }

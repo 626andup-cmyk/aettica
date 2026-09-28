@@ -132,6 +132,8 @@ export function testConfig(dataDir: string, apiBaseUrl: string, overrides: Parti
     summaryDelayMs: -1,
     // Likewise wake-ups: only when a test asks (app.wakeups.event).
     autoWake: false,
+    // And the notebook keeper: only when a test asks (app.keeper.catchUp).
+    keeperDelayMs: -1,
     ...overrides,
   };
 }

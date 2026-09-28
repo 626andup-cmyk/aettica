@@ -435,6 +435,19 @@
         </div>
         <p class="hint" id="test-jev-result" role="status"></p>
 
+        <label class="check-option">
+          <input type="checkbox" name="notebookKeeper" />
+          <span
+            ><strong>Notebook keeper</strong><br /><span class="hint"
+              >Every few posts in a roleplay channel, Jev checks whether the story named someone new or established
+              something lasting. If so, your partner notes it in the notebook: new entries are shared, and notes on
+              yours may come to you as suggestions. Every note is checked against the messages first.</span
+            ></span
+          >
+        </label>
+        <label for="setting-keeper-every">Check every (posts)</label>
+        <input id="setting-keeper-every" name="keeperEvery" type="number" min="2" max="100" step="1" />
+
         <p class="form-error" role="alert" hidden></p>
 
         <div class="dialog-buttons">
