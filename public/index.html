@@ -407,9 +407,37 @@
             </select>
           </div>
         </div>
+        <div class="wakeups-only">
+          <label for="setting-heartbeat">Heartbeat</label>
+          <p class="hint">
+            Now and then, even with the app closed, your partner comes up with a few ideas (a story, a character, a
+            twist, a thought). Jev grades them, and your partner texts you the best, if it's really good and it's a good
+            moment. The rest go in their idea drawer, to bring up another time. Set quiet hours above so it never
+            wakes you.
+          </p>
+          <select id="setting-heartbeat" name="heartbeatHours">
+            <option value="0">Off</option>
+            <option value="2">About every 2 hours</option>
+            <option value="4">About every 4 hours</option>
+            <option value="6">About every 6 hours</option>
+            <option value="8">About every 8 hours</option>
+            <option value="12">About every 12 hours</option>
+            <option value="24">About once a day</option>
+          </select>
+          <p class="hint" id="heartbeat-status"></p>
+        </div>
         <details class="wake-log wakeups-only" id="wake-log">
           <summary>Recent wake-ups</summary>
           <ul id="wake-log-list" class="wake-log-list"></ul>
+        </details>
+        <details class="wake-log wakeups-only" id="idea-drawer">
+          <summary>Idea drawer</summary>
+          <p class="hint">Ideas your partner had on a heartbeat: shared, saved for later, or dropped.</p>
+          <ul id="idea-list" class="wake-log-list"></ul>
+          <div class="memory-buttons">
+            <button type="button" class="button" id="beat-now">Beat now</button>
+          </div>
+          <p class="hint" id="beat-result" role="status"></p>
         </details>
 
         <h3 class="section-title">Decisions (Jev)</h3>

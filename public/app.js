@@ -181,6 +181,8 @@ async function loadState() {
     writeLocal(SEEN_KEY, JSON.stringify(Object.fromEntries(Object.entries(state.activity).map(([id, a]) => [id, a?.lastId ?? null]))));
   }
   state.emojis = data.emojis ?? [];
+  state.notifications = data.notifications ?? false;
+  state.heartbeatNext = data.heartbeatNext ?? null;
   state.appVersion ??= data.appVersion;
   checkForUpdate(data.appVersion);
 }
@@ -231,7 +233,9 @@ function isUnread(channel) {
 
 /** Check for messages the app didn't ask for, and show them. */
 async function checkLive() {
-  if (document.visibilityState !== "visible" || state.busy.size > 0) return;
+  if (document.visibilityState !== "visible") return;
+  sendPresence();
+  if (state.busy.size > 0) return;
   let data;
   try {
     data = await api("GET", "/api/state");
@@ -239,6 +243,7 @@ async function checkLive() {
     return; // the server's away for a moment
   }
   checkForUpdate(data.appVersion);
+  state.heartbeatNext = data.heartbeatNext ?? null;
   if (data.revision === state.revision) return;
   state.revision = data.revision;
   state.activity = data.activity ?? {};
@@ -2163,6 +2168,14 @@ function openSettings() {
   fillFallbackSelect(form.decisionFallback, s.decisionFallback);
   form.notebookKeeper.checked = s.notebookKeeper;
   form.jevChecks.checked = s.jevChecks;
+  form.heartbeatHours.value = String(s.heartbeatHours);
+  // A custom value (set some other way) still shows.
+  if (form.heartbeatHours.value !== String(s.heartbeatHours)) {
+    form.heartbeatHours.append(new Option(`About every ${s.heartbeatHours} hours`, String(s.heartbeatHours)));
+    form.heartbeatHours.value = String(s.heartbeatHours);
+  }
+  renderHeartbeatStatus();
+  loadIdeas();
   form.keeperEvery.value = s.keeperEvery;
   $("test-jev-result").textContent = "";
   updateWakeupsOnly();
@@ -2197,6 +2210,7 @@ async function saveSettings(event) {
       decisionFallback: form.decisionFallback.value,
       notebookKeeper: form.notebookKeeper.checked,
       jevChecks: form.jevChecks.checked,
+      heartbeatHours: Number(form.heartbeatHours.value),
       keeperEvery: Number(form.keeperEvery.value),
     });
     state.settings = data.settings;
@@ -2230,6 +2244,90 @@ const WAKE_REASONS = {
 const WAKE_OUTCOMES = { posted: "wrote to you", quiet: "didn't write", declined: "not the moment", failed: "failed" };
 
 /** Settings → Your partner reaching out → Recent wake-ups. */
+/** Whether phone notifications work here, and when the next heartbeat is. */
+function renderHeartbeatStatus() {
+  const parts = [
+    state.notifications
+      ? "Phone notifications are on (Termux): you'll get one when your partner writes and the app isn't open."
+      : "Phone notifications need Termux:API (on Android); here, messages wait in the app.",
+  ];
+  if (state.heartbeatNext) parts.push(`Next heartbeat around ${formatTime(state.heartbeatNext)}.`);
+  $("heartbeat-status").textContent = parts.join(" ");
+}
+
+const IDEA_STATUS = { drawer: "saved", shared: "shared", dropped: "dropped" };
+
+/** The idea drawer, newest first. */
+async function loadIdeas() {
+  const list = $("idea-list");
+  try {
+    const { ideas } = await api("GET", "/api/ideas");
+    renderIdeas(ideas);
+  } catch {
+    list.replaceChildren();
+  }
+}
+
+function renderIdeas(ideas) {
+  const list = $("idea-list");
+  if (ideas.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "hint";
+    empty.textContent = "No ideas yet.";
+    list.replaceChildren(empty);
+    return;
+  }
+  list.replaceChildren(
+    ...ideas.map((idea) => {
+      const item = document.createElement("li");
+      item.dataset.outcome = idea.status === "shared" ? "posted" : idea.status === "dropped" ? "declined" : "quiet";
+      const head = document.createElement("div");
+      head.append(badge(IDEA_STATUS[idea.status]), badge(idea.kind), badge(`${Math.round(idea.grade * 100)}%`));
+      const text = document.createElement("div");
+      text.textContent = idea.content;
+      const note = document.createElement("div");
+      note.className = "hint";
+      note.textContent = idea.note;
+      const forget = document.createElement("button");
+      forget.type = "button";
+      forget.className = "link-button";
+      forget.textContent = "Forget";
+      forget.addEventListener("click", async () => {
+        const data = await api("DELETE", `/api/ideas/${encodeURIComponent(idea.id)}`, {});
+        renderIdeas(data.ideas);
+      });
+      item.append(head, text, note, forget);
+      return item;
+    }),
+  );
+}
+
+/** Settings → "Beat now": a heartbeat straight away. */
+async function beatNow() {
+  const result = $("beat-result");
+  const button = $("beat-now");
+  button.disabled = true;
+  result.textContent = "Thinking of ideas…";
+  try {
+    const { beat, ideas } = await api("POST", "/api/heartbeat", {});
+    result.textContent = beat.detail;
+    renderIdeas(ideas);
+    loadWakeLog();
+    checkLive();
+  } catch (error) {
+    result.textContent = `✗ ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("beat-now").addEventListener("click", beatNow);
+
+/** Tell the server whether the app is on screen (no notifications while it is). */
+function sendPresence() {
+  api("POST", "/api/presence", { visible: document.visibilityState === "visible" }).catch(() => {});
+}
+
 async function loadWakeLog() {
   const list = $("wake-log-list");
   try {
@@ -4405,6 +4503,7 @@ let hiddenAt = null;
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") {
     hiddenAt = Date.now();
+    sendPresence();
     return;
   }
   checkServerVersion();

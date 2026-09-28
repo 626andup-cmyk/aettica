@@ -29,6 +29,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - **Reactions**: react to messages with emojis, and your partner reacts too. Upload **custom emojis** and use them as `:name:`. See [reactions](docs/reactions.md).
 - **Comments**: select text in a message to comment on it; your partner replies in the thread.
 - **Inbox** (the tray at the top of the channel list): your partner's proposals and suggested changes, to approve or reject.
+- **Heartbeat** (off by default): now and then, even with the app closed, your partner comes up with ideas, Jev grades them, and they text you the best one, with a phone notification. The rest wait in their **idea drawer** for a better moment. See [the heartbeat](docs/heartbeat.md).
 - **Your partner reaches out**: when you come back after a while, when a scene ends, or when a suggestion is waiting for them, your partner may write to you in OOC first. Jev, a small decision model, checks it's the moment first, and chattiness, quiet hours and a cooldown keep it from being too much (Settings → Your partner reaching out, with a log of every wake-up). A dot marks channels with messages you haven't seen.
 - **Partner's turn**: let your partner write without a new message from you, including opening an empty channel.
 - **Stop** a reply that's taking too long. Nothing is saved, and the channel is free again.
@@ -68,6 +69,8 @@ The server is designed to run in [Termux](https://termux.dev) on the phone you c
 3. Open <http://127.0.0.1:4747> in Chrome, then choose **menu → Add to Home screen** (or **Install app**). Aettica now opens like an app.
 
 The app only works while the server is running. If it says it can't connect, start the server in Termux again.
+
+**Notifications and the heartbeat.** For phone notifications when your partner writes on their own, install the **Termux:API** app and run `pkg install termux-api` in Termux. With the heartbeat on (Settings → Your partner reaching out), the server takes a wake lock so the phone doesn't pause it; also turn off battery optimization for Termux (Android Settings → Apps → Termux → Battery → Unrestricted).
 
 ### Settings in `.env`
 
@@ -114,6 +117,9 @@ src/
   jev.ts       Asking Jev, the decision model, yes-or-no questions (and series of them)
   keeper.ts    The notebook keeper: noting what the story establishes
   judge.ts     Jev's double-checks on the guesses Aettica makes
+  heartbeat.ts The heartbeat: ideas, graded, and shared at the right moment
+  ideas.ts     The idea drawer
+  notify.ts    Phone notifications (Termux)
   jevlog.ts    The Jev log: every call from the last 36 hours
   json.ts      Finding JSON in a model's reply
   reactions.ts Emoji reactions and custom emojis

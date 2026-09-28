@@ -362,6 +362,11 @@ export interface Settings {
   notebookKeeper: boolean;
   /** How many new posts in a roleplay channel before the keeper looks at them (a scene ending always counts). */
   keeperEvery: number;
+  /**
+   * How often the heartbeat looks for a reason to reach out, in hours
+   * (roughly: each gap varies by ±20%). 0 turns it off. See src/heartbeat.ts.
+   */
+  heartbeatHours: number;
   /** Whether Jev double-checks guesses: comment replies, deleting entries, summaries, channel mentions (src/judge.ts). */
   jevChecks: boolean;
 }

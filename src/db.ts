@@ -539,6 +539,28 @@ export const MIGRATIONS: Migration[] = [
     created_at TEXT NOT NULL
   );
   `,
+
+  // --------------------------------------------------------------- 12
+  // The heartbeat's idea drawer (src/ideas.ts, src/heartbeat.ts), and a few
+  // values kept between runs.
+  `
+  CREATE TABLE ideas (
+    id         TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('story', 'character', 'twist', 'thought')),
+    content    TEXT NOT NULL,
+    -- How much Jev liked it (0 to 1).
+    grade      REAL NOT NULL,
+    status     TEXT NOT NULL CHECK (status IN ('drawer', 'shared', 'dropped')),
+    note       TEXT NOT NULL DEFAULT '',
+    shared_at  TEXT
+  );
+
+  CREATE TABLE app_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
 ];
 
 /**

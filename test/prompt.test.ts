@@ -43,6 +43,7 @@ const settings: Settings = {
   notebookKeeper: true,
   keeperEvery: 6,
   jevChecks: true,
+  heartbeatHours: 0,
   quietStart: -1,
   quietEnd: 8,
   appTheme: "classic",

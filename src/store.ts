@@ -26,6 +26,7 @@ import { WakeLog } from "./wakeups.ts";
 import { Library } from "./library.ts";
 import { KeeperState } from "./keeper.ts";
 import { Reactions } from "./reactions.ts";
+import { AppState, Ideas } from "./ideas.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
   Author,
@@ -85,6 +86,7 @@ export function defaultSettings(): Settings {
     notebookKeeper: true,
     keeperEvery: 6,
     jevChecks: true,
+    heartbeatHours: 0,
     appTheme: "classic",
   };
 }
@@ -113,6 +115,7 @@ const LIMITS = {
   wakeCooldownMinutes: { min: 1, max: 10_080 },
   hour: { min: -1, max: 23 },
   keeperEvery: { min: 2, max: 100 },
+  heartbeatHours: { min: 0, max: 168 },
   /** Longest partner prompt, in characters. */
   longText: 100_000,
   /** Longest name (channel, partner), in characters. */
@@ -175,6 +178,10 @@ export function validateSettings(input: unknown): Partial<Settings> {
   }
   for (const key of ["quietStart", "quietEnd"] as const) {
     if (raw[key] !== undefined) clean[key] = numberInRange(raw[key], key, LIMITS.hour, true);
+  }
+  if (raw.heartbeatHours !== undefined) {
+    clean.heartbeatHours = numberInRange(raw.heartbeatHours, "heartbeatHours", LIMITS.heartbeatHours, false);
+    if (clean.heartbeatHours > 0 && clean.heartbeatHours < 1) throw new ValidationError("heartbeatHours must be 0 (off) or at least 1");
   }
   if (raw.jevChecks !== undefined) {
     if (typeof raw.jevChecks !== "boolean") throw new ValidationError("jevChecks must be true or false");
@@ -454,6 +461,10 @@ export class Store {
   readonly keeper: KeeperState;
   /** Emoji reactions on messages, and custom emojis. */
   readonly reactions: Reactions;
+  /** The heartbeat's idea drawer. */
+  readonly ideas: Ideas;
+  /** Small values kept between runs. */
+  readonly appState: AppState;
   /** Your partner's recent wake-ups, and what came of them (see `src/wakeups.ts`). */
   readonly wakeLog: WakeLog;
   /**
@@ -507,6 +518,8 @@ export class Store {
     // In memory (tests), custom emoji files go to a throwaway folder.
     this.reactions = new Reactions(this.db, inMemory ? join(tmpdir(), `aettica-emojis-${crypto.randomUUID()}`) : dataDir, () => this.revision++);
     this.wakeLog = new WakeLog(this.db);
+    this.ideas = new Ideas(this.db);
+    this.appState = new AppState(this.db);
 
     if (isNew) {
       const imported = !inMemory && importLegacyChat(this, dataDir);

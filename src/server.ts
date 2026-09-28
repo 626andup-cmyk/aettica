@@ -15,6 +15,10 @@
  *
  *   POST   /api/wake                           You opened the app: your partner may wake up (stage 8)
  *   GET    /api/wakeups                        Recent wake-ups, and what came of them
+ *   POST   /api/presence                       The app is (or isn't) on screen: {visible}
+ *   POST   /api/heartbeat                      Beat now: ideas, graded, and maybe a message
+ *   GET    /api/ideas                          The idea drawer
+ *   DELETE /api/ideas/:id                      Forget an idea
  *   POST   /api/jev/test                       Ask Jev one tiny question, to see if it's reachable and understood
  *   GET    /api/jev/log                        Every Jev call from the last 36 hours, exactly as sent and received
  *
@@ -118,6 +122,8 @@ import { JEV_LOG_HOURS } from "./jevlog.ts";
 import { FRESH_SCENE_MINUTES, Wakeups } from "./wakeups.ts";
 import { Keeper } from "./keeper.ts";
 import { Judge } from "./judge.ts";
+import { Heartbeat } from "./heartbeat.ts";
+import { keepAwake, Presence, TermuxNotifier, type Notifier } from "./notify.ts";
 import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
 import { ENTRY_TEMPLATES } from "./notebook.ts";
 import type { CastMember, Channel, Message } from "./types.ts";
@@ -167,6 +173,11 @@ export interface App {
   keeper: Keeper;
   /** Jev's double-checks on the guesses Aettica makes (src/judge.ts). */
   judge: Judge;
+  /** Your partner reaching out out of nowhere, with ideas (src/heartbeat.ts). */
+  heartbeat: Heartbeat;
+  /** Whether the app is on screen, as it last said (for notifications). */
+  presence: Presence;
+  notifier: Notifier;
 }
 
 /**
@@ -260,6 +271,16 @@ export function createApp(config: Config): App {
   const wakeups = new Wakeups(store, partner, decider, Boolean(config.apiKey));
   const keeper = new Keeper(store, api, decider, config.keeperDelayMs);
   const judge = new Judge(store, decider);
+  const heartbeat = new Heartbeat(store, api, decider, wakeups);
+  const presence = new Presence();
+  const notifier = config.notifier ?? new TermuxNotifier(`http://127.0.0.1:${config.port}`);
+  // A wake-up (or heartbeat) wrote to you while the app isn't on screen: a
+  // phone notification (src/notify.ts).
+  wakeups.onPosted = (channel, messages) => {
+    if (presence.isVisible() || !notifier.available()) return;
+    const text = messages.map((m) => m.content).join("\n");
+    notifier.notify({ title: `${store.getSettings().partnerName} in #${channel.name}`, text, channelId: channel.id });
+  };
   partner.judge = judge;
   summarizer.judge = judge;
   const autoWake = config.autoWake ?? true;
@@ -386,6 +407,9 @@ export function createApp(config: Config): App {
           busyChannels: partner.busyChannels(),
           appVersion: version,
           emojis: store.reactions.listEmojis(),
+          // Whether phone notifications work here (Termux), and the next heartbeat.
+          notifications: notifier.available(),
+          heartbeatNext: heartbeat.nextAt()?.toISOString() ?? null,
           // For noticing messages the app didn't ask for (a wake-up): a
           // number that changes with any message, and each channel's newest.
           revision: store.revision,
@@ -453,6 +477,35 @@ export function createApp(config: Config): App {
       },
     },
     {
+      // The app is (or isn't) on screen: no notifications while it is.
+      method: "POST",
+      pattern: "/api/presence",
+      handler: async (request) => {
+        const body = await readObject(request);
+        presence.set(body.visible === true);
+        return json({ ok: true });
+      },
+    },
+    {
+      // Settings → "Beat now": a heartbeat straight away, whatever the time.
+      method: "POST",
+      pattern: "/api/heartbeat",
+      handler: async () => json({ beat: await heartbeat.tick(true), ideas: store.ideas.list() }),
+    },
+    {
+      method: "GET",
+      pattern: "/api/ideas",
+      handler: () => json({ ideas: store.ideas.list() }),
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/ideas/:id",
+      handler: (_request, { id }) => {
+        store.ideas.remove(id!);
+        return json({ ideas: store.ideas.list() });
+      },
+    },
+    {
       method: "GET",
       pattern: "/api/wakeups",
       handler: () => json({ wakeups: store.wakeLog.recent() }),
@@ -484,6 +537,11 @@ export function createApp(config: Config): App {
         const settings = store.updateSettings(update);
         // Turning summaries on, or changing when they're written: catch up.
         if (update.summaries || update.summaryEvery || update.historyLimit) summarizer.scheduleAll();
+        // The heartbeat's pace changed: start counting again from now.
+        if (update.heartbeatHours !== undefined) {
+          store.appState.set("heartbeat.next", null);
+          if (update.heartbeatHours > 0) keepAwake();
+        }
         return json({ settings });
       },
     },
@@ -1109,7 +1167,7 @@ export function createApp(config: Config): App {
     }
   }
 
-  return { fetch, store, partner, themes, summarizer, decider, wakeups, keeper, judge };
+  return { fetch, store, partner, themes, summarizer, decider, wakeups, keeper, judge, heartbeat, presence, notifier };
 }
 
 /**
@@ -1261,6 +1319,10 @@ function main(): void {
 
   // Catch up on any summaries that were due when the server last stopped.
   app.summarizer.scheduleAll(15_000);
+  // The heartbeat checks every 10 minutes whether a beat is due, and keeps
+  // the phone from putting the server to sleep while it's on.
+  app.heartbeat.start();
+  if (app.store.getSettings().heartbeatHours > 0) keepAwake();
 
   console.log(`Aettica is running at http://${server.hostname}:${server.port}`);
   console.log(`Saving your data in ${config.dataDir}`);
