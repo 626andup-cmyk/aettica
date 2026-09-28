@@ -485,6 +485,39 @@ export const MIGRATIONS: Migration[] = [
     tokenize = 'porter unicode61'
   );
   `,
+
+  // --------------------------------------------------------------- 10
+  // The notebook keeper (src/keeper.ts): how far it has read in each
+  // channel, and its actions in the tool log (source 'keeper'). SQLite
+  // can't change a CHECK, so tool_calls is rebuilt with the new source.
+  `
+  CREATE TABLE keeper_state (
+    channel_id  TEXT PRIMARY KEY REFERENCES channels (id) ON DELETE CASCADE,
+    -- The newest message (by seq) the keeper has looked at.
+    through_seq INTEGER NOT NULL
+  );
+
+  CREATE TABLE tool_calls_new (
+    id         TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+    turn_id    TEXT NOT NULL,
+    round      INTEGER NOT NULL,
+    name       TEXT NOT NULL,
+    arguments  TEXT NOT NULL,
+    result     TEXT NOT NULL,
+    status     TEXT NOT NULL CHECK (status IN ('ok', 'error')),
+    summary    TEXT NOT NULL DEFAULT '',
+    -- 'native' or 'text' (see migration 6), or 'keeper' for the notebook
+    -- keeper's changes, made as your partner between turns.
+    source     TEXT NOT NULL CHECK (source IN ('native', 'text', 'keeper')),
+    profile    TEXT,
+    created_at TEXT NOT NULL
+  );
+  INSERT INTO tool_calls_new SELECT id, channel_id, turn_id, round, name, arguments, result, status, summary, source, profile, created_at FROM tool_calls ORDER BY rowid;
+  DROP TABLE tool_calls;
+  ALTER TABLE tool_calls_new RENAME TO tool_calls;
+  CREATE INDEX tool_calls_by_channel ON tool_calls (channel_id, created_at);
+  `,
 ];
 
 /**

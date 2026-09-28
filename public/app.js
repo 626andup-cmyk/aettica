@@ -2146,6 +2146,8 @@ function openSettings() {
   form.decisionModel.value = s.decisionModel;
   form.decisionConfidence.value = s.decisionConfidence;
   fillFallbackSelect(form.decisionFallback, s.decisionFallback);
+  form.notebookKeeper.checked = s.notebookKeeper;
+  form.keeperEvery.value = s.keeperEvery;
   $("test-jev-result").textContent = "";
   updateWakeupsOnly();
   loadWakeLog();
@@ -2177,6 +2179,8 @@ async function saveSettings(event) {
       decisionModel: form.decisionModel.value,
       decisionConfidence: Number(form.decisionConfidence.value),
       decisionFallback: form.decisionFallback.value,
+      notebookKeeper: form.notebookKeeper.checked,
+      keeperEvery: Number(form.keeperEvery.value),
     });
     state.settings = data.settings;
     els.settingsDialog.close();
@@ -3676,6 +3680,7 @@ function renderToolCall(call) {
   name.textContent = call.name;
   head.append(name, badge(call.status === "ok" ? "ok" : "error"));
   if (call.source === "text") head.append(badge("written as text"));
+  if (call.source === "keeper") head.append(badge("notebook keeper"));
   head.append(badge(`round ${call.round + 1}`));
   if (call.profile) head.append(badge(call.profile));
   const time = document.createElement("time");

@@ -38,6 +38,8 @@ export interface Config {
    * tests turn it off and call `app.wakeups.event` themselves.
    */
   autoWake?: boolean;
+  /** How long after a change the notebook keeper looks (ms); negative: only when asked (tests). */
+  keeperDelayMs?: number;
 }
 
 /**

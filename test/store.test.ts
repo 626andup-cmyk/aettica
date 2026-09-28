@@ -92,6 +92,30 @@ describe("the database layout", () => {
     db.close();
   });
 
+  test("migration 10 rebuilds the tool log, keeping every call in order", () => {
+    const path = join(dir.path, "stage9.db");
+    const old = new Database(path);
+    old.exec("PRAGMA foreign_keys = ON");
+    for (const step of MIGRATIONS.slice(0, 9)) typeof step === "string" ? old.exec(step) : step(old);
+    old.exec("PRAGMA user_version = 9");
+    old.exec(`INSERT INTO channels (id, name, kind, mode, position, created_at) VALUES ('rp', 'story', 'rp', 'literary', 0, 'then')`);
+    for (const id of ["b", "a", "c"]) {
+      old.exec(`INSERT INTO tool_calls (id, channel_id, turn_id, round, name, arguments, result, status, summary, source, profile, created_at)
+                VALUES ('${id}', 'rp', 't', 0, 'pin', '{}', '{}', 'ok', 'pinned ${id}', 'native', NULL, 'then')`);
+    }
+    old.close();
+
+    const db = openDatabase(path);
+    expect(db.query("SELECT id FROM tool_calls ORDER BY rowid").all()).toEqual([{ id: "b" }, { id: "a" }, { id: "c" }]);
+    // The keeper's source is allowed now.
+    db.exec(`INSERT INTO tool_calls (id, channel_id, turn_id, round, name, arguments, result, status, summary, source, profile, created_at)
+             VALUES ('k', 'rp', 't2', 0, 'notebook_keeper', '{}', '{}', 'ok', 'added X', 'keeper', NULL, 'now')`);
+    // And deleting the channel still takes its calls with it.
+    db.exec("DELETE FROM channels WHERE id = 'rp'");
+    expect(db.query("SELECT COUNT(*) AS n FROM tool_calls").get()).toEqual({ n: 0 });
+    db.close();
+  });
+
   test("moves stage 3.5's characters into the notebook", () => {
     // A database as stage 3.5 left it: three migrations, a character in
     // each RP channel (two identical), and your casual characters in settings.

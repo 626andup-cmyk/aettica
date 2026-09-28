@@ -23,6 +23,7 @@ import { Summaries } from "./summaries.ts";
 import { JevLog } from "./jevlog.ts";
 import { WakeLog } from "./wakeups.ts";
 import { Library } from "./library.ts";
+import { KeeperState } from "./keeper.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
   Author,
@@ -79,6 +80,8 @@ export function defaultSettings(): Settings {
     wakeCooldownMinutes: 60,
     quietStart: -1,
     quietEnd: 8,
+    notebookKeeper: true,
+    keeperEvery: 6,
     appTheme: "classic",
   };
 }
@@ -106,6 +109,7 @@ const LIMITS = {
   awayHours: { min: 0.25, max: 720 },
   wakeCooldownMinutes: { min: 1, max: 10_080 },
   hour: { min: -1, max: 23 },
+  keeperEvery: { min: 2, max: 100 },
   /** Longest partner prompt, in characters. */
   longText: 100_000,
   /** Longest name (channel, partner), in characters. */
@@ -169,6 +173,11 @@ export function validateSettings(input: unknown): Partial<Settings> {
   for (const key of ["quietStart", "quietEnd"] as const) {
     if (raw[key] !== undefined) clean[key] = numberInRange(raw[key], key, LIMITS.hour, true);
   }
+  if (raw.notebookKeeper !== undefined) {
+    if (typeof raw.notebookKeeper !== "boolean") throw new ValidationError("notebookKeeper must be true or false");
+    clean.notebookKeeper = raw.notebookKeeper;
+  }
+  if (raw.keeperEvery !== undefined) clean.keeperEvery = numberInRange(raw.keeperEvery, "keeperEvery", LIMITS.keeperEvery, true);
   if (raw.summaries !== undefined) {
     if (typeof raw.summaries !== "boolean") throw new ValidationError("summaries must be true or false");
     clean.summaries = raw.summaries;
@@ -429,6 +438,8 @@ export class Store {
   readonly jevLog: JevLog;
   /** The reference library: long texts your partner can search. */
   readonly library: Library;
+  /** How far the notebook keeper has read in each channel. */
+  readonly keeper: KeeperState;
   /** Your partner's recent wake-ups, and what came of them (see `src/wakeups.ts`). */
   readonly wakeLog: WakeLog;
   /**
@@ -478,6 +489,7 @@ export class Store {
     this.summaries = new Summaries(this.db);
     this.jevLog = new JevLog(this.db);
     this.library = new Library(this.db, (id) => this.hasChannel(id));
+    this.keeper = new KeeperState(this.db);
     this.wakeLog = new WakeLog(this.db);
 
     if (isNew) {

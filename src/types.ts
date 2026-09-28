@@ -353,6 +353,13 @@ export interface Settings {
   quietStart: number;
   /** ...to this hour (0–23). */
   quietEnd: number;
+
+  // The notebook keeper (src/keeper.ts).
+
+  /** Whether the notebook keeper notes new characters, places and lasting facts from roleplay. */
+  notebookKeeper: boolean;
+  /** How many new posts in a roleplay channel before the keeper looks at them (a scene ending always counts). */
+  keeperEvery: number;
 }
 
 /** How readily your partner reaches out on their own (see `Settings.wakeups`). */
@@ -448,8 +455,11 @@ export interface ToolCallRecord {
   status: "ok" | "error";
   /** For people: "pinned Tamsin to #story". For errors, what went wrong. */
   summary: string;
-  /** `native` if the API returned it as a tool call; `text` if it was written out in the reply. */
-  source: "native" | "text";
+  /**
+   * `native` if the API returned it as a tool call; `text` if it was written
+   * out in the reply; `keeper` for the notebook keeper's changes (src/keeper.ts).
+   */
+  source: "native" | "text" | "keeper";
   profile: string | null;
   createdAt: string;
 }
