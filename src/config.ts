@@ -33,6 +33,8 @@ export interface Config {
    * in milliseconds (default 4000). Negative: only when asked (for tests).
    */
   summaryDelayMs?: number;
+  /** Something that posts phone notifications (default: Termux's, if installed). Tests pass a fake. */
+  notifier?: import("./notify.ts").Notifier;
   /**
    * Whether events wake your partner on their own (stage 8). Default true;
    * tests turn it off and call `app.wakeups.event` themselves.

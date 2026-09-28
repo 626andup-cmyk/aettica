@@ -46,6 +46,7 @@ import type { Database } from "bun:sqlite";
 import { confidentChoice, percent, probabilityOf, tier, type Decider, type Question } from "./jev.ts";
 import { BusyError, pickProfile, type Partner } from "./partner.ts";
 import type { WakeContext, WakeReason } from "./prompt.ts";
+import type { Idea } from "./ideas.ts";
 import type { Store } from "./store.ts";
 import { splitScenes } from "./summaries.ts";
 import type { Channel, Message } from "./types.ts";
@@ -165,6 +166,8 @@ const COUNTS: Record<string, WakeReason[]> = {
 /** Decides whether your partner wakes up, and runs the turn if so. */
 export class Wakeups {
   private running = false;
+  /** Told when a wake-up writes to you (for phone notifications, src/notify.ts). */
+  onPosted: ((channel: Channel, messages: Message[]) => void) | null = null;
 
   constructor(
     private readonly store: Store,
@@ -196,14 +199,22 @@ export class Wakeups {
     }
   }
 
-  private async decide(
-    event: WakeEvent,
-    detail: { channelId?: string; breakId?: string; idea?: string; ideas?: string[] },
-    skip: (why: string) => WakeResult,
-  ): Promise<WakeResult> {
+  /**
+   * Whether an event would be stopped by the rules alone (no model call):
+   * the reason why, or `null` if it would go ahead to Jev. For the
+   * heartbeat, which checks before spending anything on ideas.
+   */
+  blocked(event: WakeEvent): string | null {
+    const checked = this.rules(event);
+    return "skip" in checked ? checked.skip : null;
+  }
+
+  /** The rules that aren't up to anyone, and where your partner would write. */
+  private rules(event: WakeEvent): { skip: string } | { reason: WakeReason; channel: Channel; channels: Channel[]; sinceMs: number | null } {
     const { store } = this;
     const settings = store.getSettings();
     const now = this.now();
+    const skip = (why: string) => ({ skip: why });
     if (!this.hasApiKey) return skip("There's no API key yet.");
 
     // Where your partner is, and how long since you wrote.
@@ -216,7 +227,6 @@ export class Wakeups {
     const reason: WakeReason =
       event === "opened" ? (sinceMs !== null && sinceMs >= settings.awayHours * 3_600_000 ? "away" : "opened") : event;
 
-    // The rules that aren't up to anyone.
     if (!COUNTS[settings.wakeups]!.includes(reason)) return skip(`"${reason}" doesn't wake your partner at this chattiness.`);
     if (reason !== "review" && inQuietHours(now, settings.quietStart, settings.quietEnd)) return skip("It's quiet hours.");
     const cooldown = reason === "review" ? REVIEW_COOLDOWN_MINUTES : settings.wakeCooldownMinutes;
@@ -228,19 +238,38 @@ export class Wakeups {
         return skip("Your partner already reached out, and is waiting for you to write.");
       }
     }
-    if (reason === "opened" && all.at(-1) && now.getTime() - new Date(all.at(-1)!.createdAt).getTime() < 30 * 60_000) {
+    // Opening the app, or the heartbeat, in the middle of a conversation.
+    if ((reason === "opened" || reason === "heartbeat") && all.at(-1) && now.getTime() - new Date(all.at(-1)!.createdAt).getTime() < 30 * 60_000) {
       return skip("You were talking just now: that's a conversation, not a wake-up.");
     }
 
-    let channel = homeChannel(store, channels);
+    const channel = homeChannel(store, channels);
     if (!channel) return skip("There's no OOC channel for your partner to write in.");
     if (this.partner.isBusy(channel.id)) return skip("Your partner is writing there already.");
     if (reason === "review" && !pickProfile(store, channel).supportsTools) {
       return skip("The profile that writes OOC can't use tools, so it couldn't review anything.");
     }
+    return { reason, channel, channels, sinceMs };
+  }
+
+  private async decide(
+    event: WakeEvent,
+    detail: { channelId?: string; breakId?: string; idea?: string; ideas?: string[] },
+    skip: (why: string) => WakeResult,
+  ): Promise<WakeResult> {
+    const { store } = this;
+    const settings = store.getSettings();
+    const now = this.now();
+    const checked = this.rules(event);
+    if ("skip" in checked) return skip(checked.skip);
+    const { reason, channels, sinceMs } = checked;
+    let channel = checked.channel;
 
     // What they're told about why they're up.
     const context = wakeContext(store, reason, sinceMs, detail);
+    // Ideas from the drawer (src/ideas.ts), to bring up if they fit now.
+    const offered = reason !== "review" && !detail.idea && !detail.ideas ? store.ideas.drawer(3) : [];
+    if (offered.length) context.ideas = offered.map((i) => i.content);
 
     // Jev: is it the moment? (Not for reviews: those are work.)
     if (reason !== "review" && this.decider.enabled()) {
@@ -278,10 +307,42 @@ export class Wakeups {
       const wrote = result.messages.length > 0;
       const acted = result.toolCalls.filter((c) => c.status === "ok").map((c) => c.summary);
       const why = wrote ? "They wrote to you." : acted.length ? `They acted (${acted.join("; ")}) and didn't write.` : "They chose not to write.";
-      return { ...this.log(reason, wrote ? "posted" : "quiet", channel, why), messages: result.messages };
+      const logged = { ...this.log(reason, wrote ? "posted" : "quiet", channel, why), messages: result.messages };
+      if (wrote) {
+        try {
+          this.onPosted?.(channel, result.messages);
+        } catch (error) {
+          console.warn("[wake] couldn't pass on a message", error);
+        }
+        if (offered.length) await this.markShared(offered, result.messages);
+      }
+      return logged;
     } catch (error) {
       if (error instanceof BusyError) return skip("Your partner is writing there already.");
       return this.log(reason, "failed", channel, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** Which drawer ideas did the message bring up? Those are shared now (Jev; unsure stays in the drawer). */
+  private async markShared(offered: Idea[], messages: Message[]): Promise<void> {
+    if (!this.decider.enabled()) return;
+    const name = this.store.getSettings().partnerName;
+    const text = messages.map((m) => m.content).join("\n");
+    try {
+      const verdicts = await this.decider.askSeries(
+        `${name}'s message:\n${text}`,
+        offered.map((idea, i) => ({
+          id: `r${i}`,
+          phrasings: [`Does ${name}'s message bring up this idea: "${idea.content}"?`, `Is this idea part of what ${name} said: "${idea.content}"?`],
+        })),
+        this.store.getSettings().decisionConfidence,
+        { purpose: "Ideas: which were shared?" },
+      );
+      offered.forEach((idea, i) => {
+        if (verdicts.get(`r${i}`)?.verdict === "yes") this.store.ideas.setStatus(idea.id, "shared", "Brought up on a wake-up.");
+      });
+    } catch (error) {
+      console.warn(`[wake] couldn't check which ideas were shared: ${error instanceof Error ? error.message : error}`);
     }
   }
 

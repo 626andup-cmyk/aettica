@@ -250,9 +250,9 @@ Each stage adds one new concept, so there's only ever one new thing to learn. St
 
 These are parked until the core works.
 
-- **Heartbeat:** a timer wakes the partner even with the app closed, so they can text you out of nowhere. Needs Termux wake lock and Termux notifications.
-- **Generate-and-grade:** on a heartbeat, the partner generates an idea (new RP, character, twist), reviews it, and only sends it if still excited about it.
-- **Idea drawer:** ideas that fail review are kept privately and can resurface when they fit better.
+- **Heartbeat** (built, see [docs/heartbeat.md](docs/heartbeat.md)): a timer (about every `heartbeatHours`, ±20%) wakes the partner even with the app closed, so they can text you out of nowhere. The wake-up rules come first, so most beats cost nothing. Termux notifications (when the app isn't on screen, as it reports) and a wake lock, as in Kitsikai.
+- **Generate-and-grade** (built): the partner generates three ideas (story, character, twist, thought); Jev grades each with a three-question series (fresh, exciting, worth texting) that must agree. Only the best confidently exciting idea is shared, and still only if Jev's "is it the moment?" says yes.
+- **Idea drawer** (built): ideas that aren't shared are kept privately (dropped ones too, so they aren't had again), offered on later wake-ups, and marked shared when Jev sees a message brought one up. Visible and deletable in Settings.
 - **Controls:** chattiness setting, quiet hours, and cooldowns to limit spam and API cost. (Built in stage 8, for wake-ups; the heartbeat will use them too.)
 - **RNG partner creation.**
 - **Channel categories** and drag-and-drop reordering polish.
