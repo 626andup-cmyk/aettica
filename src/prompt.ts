@@ -48,6 +48,7 @@
  * summarized yet is always sent, so nothing falls in between.
  */
 
+import { BUBBLE_MARKER, TEXTING_STYLE } from "./texting.ts";
 import type { PromptEntry } from "./notebook.ts";
 import { playedBy } from "./permissions.ts";
 import type { Channel, ChannelKind, ChannelMode, ChatMessage, Message, NotebookEntry, Player, Settings } from "./types.ts";
@@ -391,6 +392,7 @@ export function buildPromptStack({
       content: joinNonEmpty([
         isRp ? modeInstructions(channel.mode, yourCharacters[0] ?? sharedCharacters[0] ?? "") : "",
         channelPrompt(settings, channel),
+        !isRp && settings.oocBubbles ? TEXTING_STYLE : "",
       ]),
     },
     // Layer 3, in RP: the notebook entries pinned to the channel (the cast
@@ -442,7 +444,7 @@ export function buildPromptStack({
   layers.splice(layers.findIndex((l) => l.title === "Comment threads") + 1, 0, reactionsLayer);
   const system: ChatMessage = { role: "system", content: renderLayers(layers) };
 
-  const history = toChatHistory(messages.slice(start));
+  const history = toChatHistory(messages.slice(start), { texting: !isRp && settings.oocBubbles });
 
   // If the conversation doesn't end on your message, add a nudge so the model
   // knows it's being asked to continue. This is what lets the partner take a
@@ -658,7 +660,7 @@ export function recentMessages(messages: Message[], limit: number): Message[] {
  *     line by line, like a chat log. That's the same format the model is
  *     asked to write in, so it can see who said what.
  */
-export function toChatHistory(messages: Message[]): ChatMessage[] {
+export function toChatHistory(messages: Message[], options: { texting?: boolean } = {}): ChatMessage[] {
   const history: ChatMessage[] = [];
   for (const message of messages) {
     let content: string;
@@ -672,6 +674,9 @@ export function toChatHistory(messages: Message[]): ChatMessage[] {
       content = message.content.trim();
       if (content === "") continue;
       role = message.author === "user" ? "user" : "assistant";
+      // Texting in OOC: your partner's bubbles are joined with the marker,
+      // so the model keeps writing that way; yours, one per line.
+      if (options.texting) separator = role === "assistant" ? ` ${BUBBLE_MARKER} ` : "\n";
       if (message.mode === "casual") {
         if (message.characters.length > 0) content = `${message.characters.join(" & ")}: ${content}`;
         separator = "\n";

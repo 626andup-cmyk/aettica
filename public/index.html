@@ -262,6 +262,32 @@
         <label for="setting-partner">Who your partner is</label>
         <p class="hint">Their name, personality and taste as a writer. Used in every channel.</p>
         <textarea id="setting-partner" name="partnerPrompt" rows="5"></textarea>
+        <div class="memory-buttons">
+          <button type="button" class="button" id="surprise-partner">🎲 Surprise me</button>
+        </div>
+        <p class="hint" id="surprise-result" role="status">
+          A new partner from a few random ingredients. Nothing changes until you press Save.
+        </p>
+
+        <label class="check-option">
+          <input type="checkbox" name="oocBubbles" />
+          <span
+            ><strong>Texting in OOC</strong><br /><span class="hint"
+              >Your partner texts in short bursts, shown one at a time with "typing…" between them (double-tap it to
+              skip). Each thing you send is its own text, and they answer once you pause.</span
+            ></span
+          >
+        </label>
+        <div class="grid assignment-grid texting-only">
+          <div>
+            <label for="setting-reply-delay">They answer after a pause of (seconds)</label>
+            <input id="setting-reply-delay" name="replyDelaySeconds" type="number" min="0" max="30" step="0.5" />
+          </div>
+          <div>
+            <label for="setting-typing-speed">Typing speed (ms per character)</label>
+            <input id="setting-typing-speed" name="typingPerCharMs" type="number" min="0" max="1000" step="5" />
+          </div>
+        </div>
 
         <!--
           One prompt per kind of channel. Only the one that applies is sent,

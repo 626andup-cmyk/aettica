@@ -238,7 +238,8 @@ function isUnread(channel) {
 async function checkLive() {
   if (document.visibilityState !== "visible") return;
   sendPresence();
-  if (state.busy.size > 0) return;
+  // Not while texts are still being revealed, or waiting for you to pause.
+  if (state.busy.size > 0 || state.reveal || state.replyTimer) return;
   let data;
   try {
     data = await api("GET", "/api/state");
@@ -314,6 +315,13 @@ async function checkServerVersion() {
 async function openChannel(channelId) {
   // Keep whatever you'd typed in the channel you're leaving.
   if (state.channelId) state.drafts.set(state.channelId, els.input.value);
+  // Leaving texts your partner hasn't answered yet: they answer now.
+  if (state.replyTimer && state.channelId !== channelId) {
+    clearTimeout(state.replyTimer);
+    state.replyTimer = 0;
+    partnerTurn();
+  }
+  stopReveal();
 
   state.channelId = channelId;
   state.editingId = null;
@@ -597,6 +605,10 @@ async function sendMessage() {
   const channelId = state.channelId;
   const content = els.input.value;
   if (!channelId || content.trim() === "" || state.busy.has(channelId)) return;
+  finishReveal();
+  // Texting in OOC: each send is a bubble, and your partner answers once you pause.
+  const texting = currentChannel()?.kind === "ooc" && state.settings.oocBubbles && state.settings.replyDelayMs > 0;
+  if (texting) return sendText(channelId, content);
 
   hideError();
   // Show your post straight away, as a placeholder, while the partner
@@ -757,7 +769,15 @@ async function renameSceneBreak(sceneBreak) {
  * inbox may have changed too, so they're reloaded.
  */
 function acceptTurn(data) {
-  state.messages.push(...data.partnerMessages);
+  // Texts in OOC come in one at a time, with "typing…" between them.
+  const channel = currentChannel();
+  if (channel?.kind === "ooc" && state.settings.oocBubbles && data.partnerMessages.length > 1) {
+    const [first, ...rest] = data.partnerMessages;
+    state.messages.push(first);
+    revealLater(channel.id, rest);
+  } else {
+    state.messages.push(...data.partnerMessages);
+  }
   state.toolCalls.push(...(data.toolCalls ?? []));
   if (data.channels) state.channels = data.channels;
   const skippedNotice = `${state.settings.partnerName} chose not to reply this time.`;
@@ -1771,8 +1791,12 @@ function renderComposer() {
   if (!channel) return;
 
   const busy = state.busy.has(channel.id);
-  els.status.hidden = !busy;
-  $("status-text").textContent = `${state.settings.partnerName} is writing…`;
+  // "Writing" while the model works; "typing" while texts are revealed one by one.
+  els.status.hidden = !busy && !state.reveal;
+  $("status-text").textContent = `${state.settings.partnerName} is ${busy ? "writing" : "typing"}…`;
+  // Only a turn in progress can be stopped; "typing…" is skipped with a double-tap.
+  $("stop-button").hidden = !busy;
+  els.status.title = busy ? "" : "Double-tap to show the rest now";
   els.send.disabled = busy;
   els.turn.disabled = busy;
 
@@ -2479,6 +2503,10 @@ function openSettings() {
   fillFallbackSelect(form.decisionFallback, s.decisionFallback);
   form.notebookKeeper.checked = s.notebookKeeper;
   form.jevChecks.checked = s.jevChecks;
+  form.oocBubbles.checked = s.oocBubbles;
+  form.replyDelaySeconds.value = s.replyDelayMs / 1000;
+  form.typingPerCharMs.value = s.typingPerCharMs;
+  updateTextingOnly();
   form.heartbeatHours.value = String(s.heartbeatHours);
   // A custom value (set some other way) still shows.
   if (form.heartbeatHours.value !== String(s.heartbeatHours)) {
@@ -2521,6 +2549,9 @@ async function saveSettings(event) {
       decisionFallback: form.decisionFallback.value,
       notebookKeeper: form.notebookKeeper.checked,
       jevChecks: form.jevChecks.checked,
+      oocBubbles: form.oocBubbles.checked,
+      replyDelayMs: Math.round(Number(form.replyDelaySeconds.value) * 1000),
+      typingPerCharMs: Number(form.typingPerCharMs.value),
       heartbeatHours: Number(form.heartbeatHours.value),
       keeperEvery: Number(form.keeperEvery.value),
     });
@@ -5192,6 +5223,147 @@ async function deleteEmoji(name) {
 }
 
 $("emoji-form").addEventListener("submit", addEmoji);
+
+// ------------------------------------------------------------- texting
+
+/*
+ * Texting in OOC (src/texting.ts), like Kitsikai: each thing you send is
+ * its own bubble, and your partner waits until you pause (replyDelayMs,
+ * longer while you're still typing) before answering all of them in one
+ * turn. Their answer comes as a burst of texts, shown one at a time with
+ * "typing…" between them: base + characters × per-character, so a long
+ * text takes longer. Double-tap "typing…" to skip the wait. History and
+ * your own messages always show at once.
+ */
+
+/** Send one bubble without asking for a reply yet. */
+async function sendText(channelId, content) {
+  const attach = [...(state.attachments.get(channelId) ?? [])];
+  state.attachments.delete(channelId);
+  const placeholder = {
+    id: "pending",
+    channelId,
+    kind: "post",
+    mode: null,
+    author: "user",
+    content,
+    characters: [],
+    attachments: attach,
+    reactions: [],
+    createdAt: new Date().toISOString(),
+  };
+  state.messages.push(placeholder);
+  els.input.value = "";
+  state.drafts.delete(channelId);
+  autoGrow();
+  renderMessages();
+  scrollToBottom();
+  try {
+    const data = await api("POST", channelPath("messages", channelId), { content, attach, reply: false });
+    const index = state.messages.indexOf(placeholder);
+    if (index >= 0) state.messages.splice(index, 1, ...data.userMessages);
+    renderMessages();
+    scheduleReply(channelId);
+  } catch (error) {
+    state.messages = state.messages.filter((m) => m !== placeholder);
+    renderMessages();
+    if (state.channelId === channelId && els.input.value === "") {
+      els.input.value = content;
+      autoGrow();
+    }
+    showError(error.message, sendMessage);
+  }
+}
+
+/** Ask for your partner's answer once you've paused. */
+function scheduleReply(channelId) {
+  clearTimeout(state.replyTimer);
+  state.replyChannel = channelId;
+  state.replyTimer = setTimeout(() => {
+    state.replyTimer = 0;
+    if (state.channelId === channelId) partnerTurn();
+  }, state.settings.replyDelayMs);
+}
+
+// Still typing another bubble: keep waiting.
+els.input.addEventListener("input", () => {
+  if (state.replyTimer && els.input.value.trim() !== "") scheduleReply(state.replyChannel);
+});
+
+/** How long a text takes to "type". */
+function typingDelay(text) {
+  return state.settings.typingBaseMs + text.length * state.settings.typingPerCharMs;
+}
+
+/** Show the rest of a burst one text at a time. */
+function revealLater(channelId, queue) {
+  stopReveal();
+  const reveal = { channelId, queue: [...queue], timer: 0 };
+  state.reveal = reveal;
+  renderComposer();
+  const next = () => {
+    if (state.reveal !== reveal) return;
+    if (reveal.queue.length === 0) return finishReveal();
+    reveal.timer = setTimeout(() => {
+      const message = reveal.queue.shift();
+      if (!state.messages.some((m) => m.id === message.id)) state.messages.push(message);
+      renderMessages();
+      scrollToBottom();
+      next();
+    }, typingDelay(reveal.queue[0].content));
+  };
+  next();
+}
+
+/** Show whatever's left of a burst straight away (double-tap "typing…", or you send something). */
+function finishReveal() {
+  const reveal = state.reveal;
+  if (!reveal) return;
+  clearTimeout(reveal.timer);
+  state.reveal = null;
+  if (state.channelId === reveal.channelId) {
+    for (const message of reveal.queue) if (!state.messages.some((m) => m.id === message.id)) state.messages.push(message);
+    renderMessages();
+    scrollToBottom();
+  }
+  renderComposer();
+}
+
+/** Forget a burst (you left the channel: it loads in full when you come back). */
+function stopReveal() {
+  if (!state.reveal) return;
+  clearTimeout(state.reveal.timer);
+  state.reveal = null;
+}
+
+els.status.addEventListener("dblclick", finishReveal);
+
+/** Show the texting numbers only when texting is on. */
+function updateTextingOnly() {
+  const on = els.settingsForm.elements.oocBubbles.checked;
+  for (const element of els.settingsForm.querySelectorAll(".texting-only")) element.hidden = !on;
+}
+els.settingsForm.elements.oocBubbles.addEventListener("change", updateTextingOnly);
+
+/** Settings → "Surprise me": a new partner, filled in but not saved. */
+async function surprisePartner() {
+  const button = $("surprise-partner");
+  const result = $("surprise-result");
+  button.disabled = true;
+  result.textContent = "Rolling…";
+  try {
+    const { name, prompt, seeds } = await api("POST", "/api/partner/random", {});
+    const form = els.settingsForm.elements;
+    form.partnerName.value = name;
+    form.partnerPrompt.value = prompt;
+    result.textContent = `Meet ${name} (${seeds}). Press Save to keep them, or roll again.`;
+  } catch (error) {
+    result.textContent = `✗ ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+$("surprise-partner").addEventListener("click", surprisePartner);
 
 // Every "Cancel" / "Close" button closes the dialog it's in.
 for (const button of document.querySelectorAll("[data-close]")) {

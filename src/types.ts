@@ -369,6 +369,13 @@ export interface Settings {
    * (roughly: each gap varies by ±20%). 0 turns it off. See src/heartbeat.ts.
    */
   heartbeatHours: number;
+  /** OOC: your partner texts in short bubbles (split at `<cht>`), shown one at a time. */
+  oocBubbles: boolean;
+  /** How long a bubble takes to "type": `typingBaseMs + characters × typingPerCharMs` (as in Kitsikai). */
+  typingBaseMs: number;
+  typingPerCharMs: number;
+  /** OOC, with bubbles: how long your partner waits after your last bubble before answering (ms). 0: at once. */
+  replyDelayMs: number;
   /** Whether Jev double-checks guesses: comment replies, deleting entries, summaries, channel mentions (src/judge.ts). */
   jevChecks: boolean;
 }

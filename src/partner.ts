@@ -42,6 +42,7 @@ import { parseExtraParams } from "./profiles.ts";
 import { buildPromptStack, isNothing, type PromptMemory, type PromptReview, type PromptThread, type WakeContext } from "./prompt.ts";
 import { channelSummaryText, splitScenes, windowStart, type SeqMessage } from "./summaries.ts";
 import type { Judge } from "./judge.ts";
+import { splitTexts } from "./texting.ts";
 import type { Store } from "./store.ts";
 import { extractTextToolCalls, parseArguments, type ParsedCall } from "./toolcalls.ts";
 import { runTool, toolSpecs, type ToolContext, type ToolOutcome } from "./tools.ts";
@@ -524,7 +525,8 @@ export class Partner {
       }
 
       if (replyingTo) {
-        result.thread = this.store.comments.reply("partner", replyingTo, loop.content);
+        // A comment is one note: any texting markers become line breaks.
+        result.thread = this.store.comments.reply("partner", replyingTo, splitTexts(loop.content).join("\n") || loop.content);
         return result;
       }
 

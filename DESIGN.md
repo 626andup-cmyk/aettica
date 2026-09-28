@@ -248,15 +248,15 @@ Each stage adds one new concept, so there's only ever one new thing to learn. St
 
 ## Endgame features
 
-These are parked until the core works.
+All of these are built now (each links to how it works).
 
 - **Heartbeat** (built, see [docs/heartbeat.md](docs/heartbeat.md)): a timer (about every `heartbeatHours`, ±20%) wakes the partner even with the app closed, so they can text you out of nowhere. The wake-up rules come first, so most beats cost nothing. Termux notifications (when the app isn't on screen, as it reports) and a wake lock, as in Kitsikai.
 - **Generate-and-grade** (built): the partner generates three ideas (story, character, twist, thought); Jev grades each with a three-question series (fresh, exciting, worth texting) that must agree. Only the best confidently exciting idea is shared, and still only if Jev's "is it the moment?" says yes.
 - **Idea drawer** (built): ideas that aren't shared are kept privately (dropped ones too, so they aren't had again), offered on later wake-ups, and marked shared when Jev sees a message brought one up. Visible and deletable in Settings.
-- **Controls:** chattiness setting, quiet hours, and cooldowns to limit spam and API cost. (Built in stage 8, for wake-ups; the heartbeat will use them too.)
-- **RNG partner creation.**
+- **Controls** (built in stage 8): chattiness, quiet hours, and cooldowns to limit spam and API cost, for wake-ups and the heartbeat alike.
+- **RNG partner creation** (built, see [docs/texting.md](docs/texting.md)): "Surprise me" rolls random ingredients (temperament, voice, interests, a quirk, favourite kinds of story), and the model turns them into a name and a partner prompt, filled in but not saved.
 - **Channel categories** and drag-and-drop reordering (built, see [docs/categories.md](docs/categories.md)): collapsible, Discord-style categories; drag channels and category headers with a mouse, or press-and-hold on a phone. Your partner can make categories and move channels into them.
-- **Multi-bubble OOC** with typing delays, reusing the Kitsikai extension ideas.
+- **Multi-bubble OOC** with typing delays (built, see [docs/texting.md](docs/texting.md)): Kitsikai's `<cht>` texting, revealed one text at a time with "typing…" (base + characters × per-character, double-tap to skip), and a pause before your partner answers several quick texts at once.
 - **Emoji reactions** (built, see [docs/reactions.md](docs/reactions.md)): on messages, from you and your partner (with the `react_to_message` tool), including custom emojis (uploaded images used as `:name:`, in reactions and messages). Your partner sees reactions on recent messages in both directions, as quiet feedback.
 - **Notebook keeper** (built, see [docs/notebook-keeper.md](docs/notebook-keeper.md)): every few roleplay posts, a Jev series (each question in two phrasings that must agree) asks whether something new was named or a lasting fact established. Only on a yes does a writer draft changes, each with a claim. Every claim is checked by Jev against the messages alone before it's made, as your partner (new entries shared; notes on your entries go through permissions and may become suggestions). It never sees entries hidden from you.
 - **Jev everywhere it helps** (built, see [docs/jev-audit.md](docs/jev-audit.md)): every guess in Aettica was reviewed. Now Jev series decide comment replies on your own messages, confirm your partner deleting an entry, turn their edits to your entries into suggestions unless you asked, check scene summaries against the scene, and confirm bare-word channel mentions in OOC. Borrowed from Kitsikai: a wake-up's channel is Jev's choice, and the notebook keeper corrects notes the story contradicts. Everything else stays a rule, with the reasons in the audit.
