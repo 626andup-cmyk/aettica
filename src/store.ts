@@ -88,6 +88,10 @@ export function defaultSettings(): Settings {
     keeperEvery: 6,
     jevChecks: true,
     heartbeatHours: 0,
+    oocBubbles: true,
+    typingBaseMs: 600,
+    typingPerCharMs: 40,
+    replyDelayMs: 2500,
     appTheme: "classic",
   };
 }
@@ -117,6 +121,9 @@ const LIMITS = {
   hour: { min: -1, max: 23 },
   keeperEvery: { min: 2, max: 100 },
   heartbeatHours: { min: 0, max: 168 },
+  typingBaseMs: { min: 0, max: 10_000 },
+  typingPerCharMs: { min: 0, max: 1000 },
+  replyDelayMs: { min: 0, max: 30_000 },
   /** Longest partner prompt, in characters. */
   longText: 100_000,
   /** Longest name (channel, partner), in characters. */
@@ -183,6 +190,13 @@ export function validateSettings(input: unknown): Partial<Settings> {
   if (raw.heartbeatHours !== undefined) {
     clean.heartbeatHours = numberInRange(raw.heartbeatHours, "heartbeatHours", LIMITS.heartbeatHours, false);
     if (clean.heartbeatHours > 0 && clean.heartbeatHours < 1) throw new ValidationError("heartbeatHours must be 0 (off) or at least 1");
+  }
+  if (raw.oocBubbles !== undefined) {
+    if (typeof raw.oocBubbles !== "boolean") throw new ValidationError("oocBubbles must be true or false");
+    clean.oocBubbles = raw.oocBubbles;
+  }
+  for (const key of ["typingBaseMs", "typingPerCharMs", "replyDelayMs"] as const) {
+    if (raw[key] !== undefined) clean[key] = numberInRange(raw[key], key, LIMITS[key], true);
   }
   if (raw.jevChecks !== undefined) {
     if (typeof raw.jevChecks !== "boolean") throw new ValidationError("jevChecks must be true or false");

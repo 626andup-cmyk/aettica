@@ -15,6 +15,7 @@
  *
  *   POST   /api/wake                           You opened the app: your partner may wake up (stage 8)
  *   GET    /api/wakeups                        Recent wake-ups, and what came of them
+ *   POST   /api/partner/random                 "Surprise me": a new partner's name and prompt, from random ingredients
  *   POST   /api/presence                       The app is (or isn't) on screen: {visible}
  *   POST   /api/heartbeat                      Beat now: ideas, graded, and maybe a message
  *   GET    /api/ideas                          The idea drawer
@@ -127,6 +128,7 @@ import { FRESH_SCENE_MINUTES, Wakeups } from "./wakeups.ts";
 import { Keeper } from "./keeper.ts";
 import { Judge } from "./judge.ts";
 import { Heartbeat } from "./heartbeat.ts";
+import { describeSeeds, randomPartner, rollSeeds } from "./rng.ts";
 import { keepAwake, Presence, TermuxNotifier, type Notifier } from "./notify.ts";
 import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
 import { ENTRY_TEMPLATES } from "./notebook.ts";
@@ -482,6 +484,23 @@ export function createApp(config: Config): App {
       },
     },
     {
+      // Settings → "Surprise me": a new partner from random ingredients (not saved).
+      method: "POST",
+      pattern: "/api/partner/random",
+      handler: async () => {
+        if (!config.apiKey) throw new HttpError(400, "Add your nanoGPT API key first.");
+        const seeds = rollSeeds();
+        const ooc = store.listChannels().find((c) => c.kind === "ooc") ?? store.listChannels()[0]!;
+        try {
+          const made = await randomPartner(api, pickProfile(store, ooc), seeds);
+          return json({ ...made, seeds: describeSeeds(seeds) });
+        } catch (error) {
+          if (error instanceof ApiError) throw error;
+          throw new HttpError(502, error instanceof Error ? error.message : String(error));
+        }
+      },
+    },
+    {
       // The app is (or isn't) on screen: no notifications while it is.
       method: "POST",
       pattern: "/api/presence",
@@ -744,6 +763,11 @@ export function createApp(config: Config): App {
           if (entry) store.notebook.pin("user", id!, entry.id);
         }
 
+        // `reply: false`: just save it. In OOC with texting on, the app sends
+        // your bubbles this way and asks for a turn once you pause.
+        if ((body as { reply?: unknown }).reply === false) {
+          return json({ userMessages, channel: channelView(store.getChannel(id!)), channels: channelViews() });
+        }
         // The reply is attempted separately: if it fails, your message is still
         // saved and the app offers to retry with a partner turn.
         const reply = await tryTurn(() => partner.takeTurn(id!, "user-message"));

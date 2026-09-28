@@ -2,7 +2,7 @@
 
 Aettica gives you an AI **RP partner**, not a character: a writer with their own style who plays characters alongside you. The full vision is in [DESIGN.md](DESIGN.md).
 
-**Status: all 8 stages built; endgame features in progress.** A Discord-style server of channels with your partner, with scenes, literary or casual styles, themes, a shared notebook of characters and lore, a mix of models, and a partner who can act through tools, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels), [stage 3](docs/stage-3.md) (scenes, modes), [stage 3.5](docs/stage-3.5.md) (themes), [stage 4](docs/stage-4.md) (the notebook and permissions), [stage 5](docs/stage-5.md) (connection profiles and roulettes), [stage 6](docs/stage-6.md) (tools, approvals, comments, and troubleshooting tool calls), [stage 7](docs/stage-7.md) (summaries and the server digest) and [stage 8](docs/stage-8.md) (your partner reaching out, and Jev).
+**Status: all 8 stages and the endgame features are built.** A Discord-style server of channels with your partner, with scenes, literary or casual styles, themes, a shared notebook of characters and lore, a mix of models, and a partner who can act through tools, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels), [stage 3](docs/stage-3.md) (scenes, modes), [stage 3.5](docs/stage-3.5.md) (themes), [stage 4](docs/stage-4.md) (the notebook and permissions), [stage 5](docs/stage-5.md) (connection profiles and roulettes), [stage 6](docs/stage-6.md) (tools, approvals, comments, and troubleshooting tool calls), [stage 7](docs/stage-7.md) (summaries and the server digest) and [stage 8](docs/stage-8.md) (your partner reaching out, and Jev).
 
 ## What it can do
 
@@ -29,6 +29,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - **Reactions**: react to messages with emojis, and your partner reacts too. Upload **custom emojis** and use them as `:name:`. See [reactions](docs/reactions.md).
 - **Comments**: select text in a message to comment on it; your partner replies in the thread.
 - **Inbox** (the tray at the top of the channel list): your partner's proposals and suggested changes, to approve or reject.
+- **Texting in OOC**: your partner texts in short bursts that arrive one at a time with "typing…", and waits for you to pause before answering. **🎲 Surprise me** in Settings invents a new partner. See [texting](docs/texting.md).
 - **Heartbeat** (off by default): now and then, even with the app closed, your partner comes up with ideas, Jev grades them, and they text you the best one, with a phone notification. The rest wait in their **idea drawer** for a better moment. See [the heartbeat](docs/heartbeat.md).
 - **Your partner reaches out**: when you come back after a while, when a scene ends, or when a suggestion is waiting for them, your partner may write to you in OOC first. Jev, a small decision model, checks it's the moment first, and chattiness, quiet hours and a cooldown keep it from being too much (Settings → Your partner reaching out, with a log of every wake-up). A dot marks channels with messages you haven't seen.
 - **Partner's turn**: let your partner write without a new message from you, including opening an empty channel.
@@ -120,6 +121,8 @@ src/
   heartbeat.ts The heartbeat: ideas, graded, and shared at the right moment
   ideas.ts     The idea drawer
   notify.ts    Phone notifications (Termux)
+  texting.ts   Texting in OOC: splitting replies into texts
+  rng.ts       "Surprise me": a random partner
   jevlog.ts    The Jev log: every call from the last 36 hours
   json.ts      Finding JSON in a model's reply
   reactions.ts Emoji reactions and custom emojis

@@ -16,6 +16,7 @@
  * a scene break instead of a post; see `parseSceneBreak`.
  */
 
+import { splitTexts } from "./texting.ts";
 import { partnerAliases, splitBubbles } from "./bubbles.ts";
 import type { NewMessage } from "./store.ts";
 import type { Channel } from "./types.ts";
@@ -108,7 +109,11 @@ export function replyToMessages(
   partnerCharacters: Voice[],
 ): TurnMessage[] {
   const base = { channelId: channel.id, author: "partner" as const, model };
-  if (channel.kind === "ooc") return [{ ...base, content, characters: [], mode: null }];
+  // OOC: a burst of texts, split at <cht> (src/texting.ts).
+  if (channel.kind === "ooc") {
+    const texts = splitTexts(content);
+    return (texts.length > 0 ? texts : [content.trim()]).map((text) => ({ ...base, content: text, characters: [], mode: null }));
+  }
 
   if (channel.mode === "literary") {
     return [{ ...base, content, characters: mentionedCharacters(content, partnerCharacters), mode: "literary" }];
