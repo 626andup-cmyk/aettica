@@ -213,8 +213,10 @@ export interface Channel {
    * one for this kind of channel (see `Settings.rpAssignment`), or `null`.
    */
   assignment: string | null;
-  /** Where the channel sits in the sidebar: 0 is the top. */
+  /** Where the channel sits in the sidebar: 0 is the top (channels are ordered together, then grouped by category). */
   position: number;
+  /** The category it's in, or `null` for none (listed above the categories). */
+  categoryId: string | null;
   /** When the channel was created, as an ISO 8601 timestamp. */
   createdAt: string;
 }
@@ -552,4 +554,15 @@ export interface ChannelSummaries {
 export interface Reaction {
   emoji: string;
   author: Author;
+}
+
+/** A named, collapsible group of channels in the sidebar. */
+export interface Category {
+  id: string;
+  name: string;
+  /** Where it sits among the categories: 0 is the top. */
+  position: number;
+  /** Folded up in the sidebar. */
+  collapsed: boolean;
+  createdAt: string;
 }

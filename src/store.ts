@@ -29,6 +29,7 @@ import { Reactions } from "./reactions.ts";
 import { AppState, Ideas } from "./ideas.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
+  Category,
   Author,
   Channel,
   ChannelKind,
@@ -277,7 +278,7 @@ export function validateNewChannel(input: unknown): NewChannel {
  * The channel fields that can be changed after creation. `mode` is the mode
  * you *ask* for; see `Store.updateChannel` for when it takes effect.
  */
-export type ChannelUpdate = Partial<Pick<Channel, "name" | "mode" | "theme" | "assignment">>;
+export type ChannelUpdate = Partial<Pick<Channel, "name" | "mode" | "theme" | "assignment" | "categoryId">>;
 
 /** Check a partial channel update. The kind can't be changed, so it's ignored. */
 export function validateChannelUpdate(input: unknown): ChannelUpdate {
@@ -289,6 +290,11 @@ export function validateChannelUpdate(input: unknown): ChannelUpdate {
   if (raw.theme !== undefined) clean.theme = raw.theme === null || raw.theme === "" ? null : themeId(raw.theme, "theme");
   // `null` (or "") means "use the server-wide profile for this kind of channel".
   if (raw.assignment !== undefined) clean.assignment = assignment(raw.assignment, "assignment");
+  // `null` (or "") means "in no category". The store checks it exists.
+  if (raw.categoryId !== undefined) {
+    if (raw.categoryId !== null && typeof raw.categoryId !== "string") throw new ValidationError("categoryId must be a category id, or null");
+    clean.categoryId = raw.categoryId || null;
+  }
   return clean;
 }
 
@@ -347,6 +353,15 @@ interface ChannelRow {
   theme: string | null;
   assignment: string | null;
   position: number;
+  category_id: string | null;
+  created_at: string;
+}
+
+interface CategoryRow {
+  id: string;
+  name: string;
+  position: number;
+  collapsed: number;
   created_at: string;
 }
 
@@ -380,8 +395,13 @@ function toChannel(row: ChannelRow): Channel {
     theme: row.theme,
     assignment: row.assignment,
     position: row.position,
+    categoryId: row.category_id,
     createdAt: row.created_at,
   };
+}
+
+function toCategory(row: CategoryRow): Category {
+  return { id: row.id, name: row.name, position: row.position, collapsed: row.collapsed === 1, createdAt: row.created_at };
 }
 
 function toMessage(row: MessageRow): Message {
@@ -600,15 +620,15 @@ export class Store {
   }
 
   /** Create a channel at the bottom of the sidebar. */
-  createChannel(input: NewChannel): Channel {
+  createChannel(input: NewChannel & { categoryId?: string | null }): Channel {
     const { next } = this.db.query("SELECT COALESCE(MAX(position) + 1, 0) AS next FROM channels").get() as {
       next: number;
     };
     const id = crypto.randomUUID();
     this.db
       .query(
-        `INSERT INTO channels (id, name, kind, mode, position, created_at)
-         VALUES ($id, $name, $kind, $mode, $position, $createdAt)`,
+        `INSERT INTO channels (id, name, kind, mode, position, category_id, created_at)
+         VALUES ($id, $name, $kind, $mode, $position, $categoryId, $createdAt)`,
       )
       .run({
         id,
@@ -616,6 +636,7 @@ export class Store {
         kind: input.kind,
         mode: input.mode ?? "literary",
         position: next,
+        categoryId: input.categoryId ? this.getCategory(input.categoryId).id : null,
         createdAt: new Date().toISOString(),
       });
     return this.getChannel(id);
@@ -649,7 +670,7 @@ export class Store {
     this.db
       .query(
         `UPDATE channels SET name = $name, mode = $mode, pending_mode = $pendingMode, theme = $theme,
-                assignment = $assignment
+                assignment = $assignment, category_id = $categoryId
          WHERE id = $id`,
       )
       .run({
@@ -659,6 +680,7 @@ export class Store {
         pendingMode: merged.pendingMode,
         theme: merged.theme,
         assignment: merged.assignment,
+        categoryId: merged.categoryId === null ? null : this.getCategory(merged.categoryId).id,
       });
     return this.getChannel(id);
   }
@@ -702,17 +724,81 @@ export class Store {
    *             an unknown one is an error, so the order can never end up
    *             with gaps or duplicates.
    */
-  reorderChannels(ids: string[]): Channel[] {
+  reorderChannels(ids: string[], categoryOf?: Record<string, string | null>): Channel[] {
     const existing = new Set(this.listChannels().map((c) => c.id));
     const given = new Set(ids);
     if (given.size !== ids.length || given.size !== existing.size || ids.some((id) => !existing.has(id))) {
       throw new ValidationError("The new order must list every channel exactly once.");
     }
+    // Moving channels between categories (a drag in the sidebar) happens
+    // with the new order, all at once.
+    const categories = new Set(this.listCategories().map((c) => c.id));
+    for (const [channelId, categoryId] of Object.entries(categoryOf ?? {})) {
+      if (!existing.has(channelId)) throw new ValidationError("categories must map channel ids to category ids.");
+      if (categoryId !== null && !categories.has(categoryId)) throw new NotFoundError("category");
+    }
     const setPosition = this.db.query("UPDATE channels SET position = $position WHERE id = $id");
+    const setCategory = this.db.query("UPDATE channels SET category_id = $categoryId WHERE id = $id");
     this.db.transaction(() => {
       ids.forEach((id, position) => setPosition.run({ id, position }));
+      for (const [id, categoryId] of Object.entries(categoryOf ?? {})) setCategory.run({ id, categoryId });
     })();
     return this.listChannels();
+  }
+
+  // ------------------------------------------------------------ categories
+
+  /** Every category, in sidebar order. */
+  listCategories(): Category[] {
+    return (this.db.query("SELECT * FROM categories ORDER BY position, created_at").all() as CategoryRow[]).map(toCategory);
+  }
+
+  getCategory(id: string): Category {
+    const row = this.db.query("SELECT * FROM categories WHERE id = $id").get({ id }) as CategoryRow | null;
+    if (!row) throw new NotFoundError("category");
+    return toCategory(row);
+  }
+
+  /** Make a category, at the bottom. */
+  createCategory(input: unknown): Category {
+    const raw = requireObject(input, "Category");
+    const id = crypto.randomUUID();
+    const { next } = this.db.query("SELECT COALESCE(MAX(position) + 1, 0) AS next FROM categories").get() as { next: number };
+    this.db
+      .query("INSERT INTO categories (id, name, position, collapsed, created_at) VALUES ($id, $name, $next, 0, $now)")
+      .run({ id, name: name(raw.name, "name"), next, now: new Date().toISOString() });
+    return this.getCategory(id);
+  }
+
+  /** Rename a category, or fold it up (or open it). */
+  updateCategory(id: string, input: unknown): Category {
+    const raw = requireObject(input, "Category");
+    const current = this.getCategory(id);
+    if (raw.collapsed !== undefined && typeof raw.collapsed !== "boolean") throw new ValidationError("collapsed must be true or false");
+    this.db.query("UPDATE categories SET name = $name, collapsed = $collapsed WHERE id = $id").run({
+      id,
+      name: raw.name !== undefined ? name(raw.name, "name") : current.name,
+      collapsed: (raw.collapsed ?? current.collapsed) ? 1 : 0,
+    });
+    return this.getCategory(id);
+  }
+
+  /** Delete a category. Its channels stay, outside any category. */
+  deleteCategory(id: string): void {
+    this.getCategory(id);
+    this.db.query("DELETE FROM categories WHERE id = $id").run({ id });
+  }
+
+  /** Put the categories in a new order (every one, exactly once). */
+  reorderCategories(ids: string[]): Category[] {
+    const existing = new Set(this.listCategories().map((c) => c.id));
+    const given = new Set(ids);
+    if (given.size !== ids.length || given.size !== existing.size || ids.some((id) => !existing.has(id))) {
+      throw new ValidationError("The new order must list every category exactly once.");
+    }
+    const set = this.db.query("UPDATE categories SET position = $position WHERE id = $id");
+    this.db.transaction(() => ids.forEach((id, position) => set.run({ id, position })))();
+    return this.listCategories();
   }
 
   /**

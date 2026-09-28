@@ -311,6 +311,8 @@ export interface PromptInput {
   library?: { title: string; description: string; passages: number }[];
   /** Custom emoji names (without colons), for reactions (only mentioned with tools). */
   customEmojis?: string[];
+  /** Channel category names by id, for the OOC channel list. */
+  categoryNames?: Record<string, string>;
 }
 
 /** Layer 5: the summaries of what came before the recent messages. */
@@ -365,6 +367,7 @@ export function buildPromptStack({
   wake,
   library,
   customEmojis,
+  categoryNames,
 }: PromptInput): ChatMessage[] {
   const isRp = channel.kind === "rp";
   const pinned = notebook?.pinned ?? [];
@@ -402,7 +405,7 @@ export function buildPromptStack({
     // Layer 3, in OOC: an overview of the server and the notebook instead.
     {
       title: "Channels on your server",
-      content: isRp ? null : describeChannels(channels, channel, overview?.castNames ?? {}, digests ?? {}),
+      content: isRp ? null : describeChannels(channels, channel, overview?.castNames ?? {}, digests ?? {}, categoryNames ?? {}),
     },
     ...(mentioned ?? []).map((m) => ({ title: `About #${m.name}`, content: m.summary })),
     { title: "Your shared notebook", content: isRp ? null : describeNotebook(overview?.entries ?? []) },
@@ -531,15 +534,17 @@ export function describeChannels(
   current: Channel,
   castNames: Record<string, string[]>,
   digests: Record<string, string> = {},
+  categoryNames: Record<string, string> = {},
 ): string {
   return channels
     .map((c) => {
-      if (c.id === current.id) return `- #${c.name}: this conversation`;
+      const inCategory = c.categoryId && categoryNames[c.categoryId] ? ` (in ${categoryNames[c.categoryId]})` : "";
+      if (c.id === current.id) return `- #${c.name}${inCategory}: this conversation`;
       const digest = digests[c.id]?.trim().replace(/\s*\n\s*/g, " ");
       const about = digest ? `. ${digest}` : "";
-      if (c.kind === "ooc") return `- #${c.name}: another out-of-character chat${about}`;
+      if (c.kind === "ooc") return `- #${c.name}${inCategory}: another out-of-character chat${about}`;
       const names = castNames[c.id] ?? [];
-      return `- #${c.name}: roleplay${names.length ? `, you play ${names.join(", ")}` : ""}${about}`;
+      return `- #${c.name}${inCategory}: roleplay${names.length ? `, you play ${names.join(", ")}` : ""}${about}`;
     })
     .join("\n");
 }

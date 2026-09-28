@@ -72,6 +72,7 @@ describe("parseSceneBreak", () => {
 
 function channel(overrides: Partial<Channel>): Channel {
   return {
+    categoryId: null,
     id: "c",
     name: "story",
     kind: "rp",

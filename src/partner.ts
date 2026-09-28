@@ -201,6 +201,7 @@ export function promptForChannel(store: Store, channelId: string, options: Promp
     wake: options.wake,
     library: store.library.forChannel(channel),
     customEmojis: store.reactions.listEmojis().map((e) => e.name),
+    categoryNames: Object.fromEntries(store.listCategories().map((c) => [c.id, c.name])),
   });
 }
 

@@ -561,6 +561,24 @@ export const MIGRATIONS: Migration[] = [
     value TEXT NOT NULL
   );
   `,
+
+  // --------------------------------------------------------------- 13
+  // Channel categories: named, collapsible groups in the sidebar.
+  `
+  CREATE TABLE categories (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    -- Where it sits among the categories: 0 is the top. Channels outside
+    -- any category are listed above all of them.
+    position   INTEGER NOT NULL,
+    -- 1 when folded up in the sidebar.
+    collapsed  INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+
+  -- Deleting a category leaves its channels, outside any category.
+  ALTER TABLE channels ADD COLUMN category_id TEXT REFERENCES categories (id) ON DELETE SET NULL;
+  `,
 ];
 
 /**

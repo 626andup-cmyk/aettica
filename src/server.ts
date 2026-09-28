@@ -42,7 +42,11 @@
  *   POST   /api/channels                       Create a channel
  *   PATCH  /api/channels/:id                   Rename a channel, or change its style, theme or profile
  *   DELETE /api/channels/:id                   Delete a channel and all its messages
- *   PUT    /api/channels/order                 Put the channels in a new order
+ *   PUT    /api/channels/order                 Put the channels in a new order (and move them between categories)
+ *   POST   /api/categories                     Make a channel category
+ *   PUT    /api/categories/order               Put the categories in a new order
+ *   PATCH  /api/categories/:id                 Rename a category, or fold it up
+ *   DELETE /api/categories/:id                 Delete a category (its channels stay)
  *
  *   GET    /api/channels/:id/messages          Every message in a channel, with its tool calls, comment threads
  *                                              and summaries
@@ -401,6 +405,7 @@ export function createApp(config: Config): App {
         json({
           settings: store.getSettings(),
           channels: channelViews(),
+          categories: store.listCategories(),
           profiles: store.profiles.list(),
           roulettes: store.profiles.listRoulettes(),
           proposals: store.proposals.pending(),
@@ -555,18 +560,35 @@ export function createApp(config: Config): App {
     {
       method: "POST",
       pattern: "/api/channels",
-      handler: async (request) =>
-        json({ channel: channelView(store.createChannel(validateNewChannel(await readJson(request)))) }),
+      handler: async (request) => {
+        const body = await readJson(request);
+        const categoryId = (body as { categoryId?: unknown } | null)?.categoryId;
+        if (categoryId !== undefined && categoryId !== null && typeof categoryId !== "string") {
+          throw new HttpError(400, '"categoryId" must be a category id.');
+        }
+        return json({ channel: channelView(store.createChannel({ ...validateNewChannel(body), categoryId: categoryId || null })) });
+      },
     },
     {
       method: "PUT",
       pattern: "/api/channels/order",
       handler: async (request) => {
-        const body = (await readJson(request)) as { ids?: unknown };
+        // A drag in the sidebar: the new order, and (optionally) which
+        // category each moved channel is now in: {channelId: categoryId | null}.
+        const body = (await readJson(request)) as { ids?: unknown; categories?: unknown };
         if (!Array.isArray(body?.ids) || !body.ids.every((id) => typeof id === "string")) {
           throw new HttpError(400, '"ids" must be a list of channel ids.');
         }
-        store.reorderChannels(body.ids);
+        const categories = body.categories ?? {};
+        if (
+          typeof categories !== "object" ||
+          categories === null ||
+          Array.isArray(categories) ||
+          !Object.values(categories).every((c) => c === null || typeof c === "string")
+        ) {
+          throw new HttpError(400, '"categories" must map channel ids to category ids (or null).');
+        }
+        store.reorderChannels(body.ids, categories as Record<string, string | null>);
         return json({ channels: channelViews() });
       },
     },
@@ -827,6 +849,37 @@ export function createApp(config: Config): App {
         ensureIdle(store.getMessage(id!).channelId);
         store.deleteMessage(id!);
         return json({ ok: true });
+      },
+    },
+
+    // -------------------------------------------------------- categories
+    {
+      method: "POST",
+      pattern: "/api/categories",
+      handler: async (request) => json({ category: store.createCategory(await readJson(request)), categories: store.listCategories() }),
+    },
+    {
+      method: "PUT",
+      pattern: "/api/categories/order",
+      handler: async (request) => {
+        const body = (await readJson(request)) as { ids?: unknown };
+        if (!Array.isArray(body?.ids) || !body.ids.every((id) => typeof id === "string")) {
+          throw new HttpError(400, '"ids" must be a list of category ids.');
+        }
+        return json({ categories: store.reorderCategories(body.ids) });
+      },
+    },
+    {
+      method: "PATCH",
+      pattern: "/api/categories/:id",
+      handler: async (request, { id }) => json({ category: store.updateCategory(id!, await readJson(request)) }),
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/categories/:id",
+      handler: (_request, { id }) => {
+        store.deleteCategory(id!);
+        return json({ categories: store.listCategories(), channels: channelViews() });
       },
     },
 
