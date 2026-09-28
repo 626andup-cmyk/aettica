@@ -22,6 +22,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - Edit the **partner prompts**: who your partner is (used everywhere), and how they write in literary scenes, in casual scenes, and out of character. Each channel only gets the one for its own kind, so OOC chat stays short even if your literary style is long. Also how many recent messages the partner sees.
 - **Connection profiles and roulettes** (Settings → Profiles and roulettes): a profile is a model with its settings and its own "model notes"; a roulette picks one of several profiles at random each turn, by weight. Choose what writes roleplay and OOC, and override it per channel.
 - **Your partner acts**, if their profile can use tools: they read the notebook, make and edit entries, pin characters, make channels, start scenes, comment on messages, review your suggestions, or choose not to reply. What they did shows under their message. Each profile has a **Test tools** button, and each channel a **tool log**, for when a model gets it wrong.
+- **Reference library** (Notebook → Library): upload long texts like a film's script or a book for a fandom. Your partner searches them and reads the passages they need, instead of guessing; nothing is sent whole. See [the library](docs/library.md).
 - **Attach notes** to a message with the paperclip, or write `[[Name]]` in it: your partner gets those entries in full.
 - **Comments**: select text in a message to comment on it; your partner replies in the thread.
 - **Inbox** (the tray at the top of the channel list): your partner's proposals and suggested changes, to approve or reject.
@@ -110,6 +111,7 @@ src/
   jev.ts       Asking Jev, the decision model, yes-or-no questions
   jevlog.ts    The Jev log: every call from the last 36 hours
   json.ts      Finding JSON in a model's reply
+  library.ts   The reference library: splitting long texts into passages, and searching them
   notebook.ts  The notebook: entries, folders, suggestions and each channel's cast
   permissions.ts  Who can see, edit and manage each notebook entry
   sheets.ts    Reads a plain-text character sheet into labelled fields

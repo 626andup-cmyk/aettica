@@ -21,6 +21,7 @@
  */
 
 import { NotFoundError, PermissionError, ValidationError } from "./errors.ts";
+import type { LibraryDoc } from "./library.ts";
 import type { EntryView } from "./notebook.ts";
 import type { ToolSpec } from "./nanogpt.ts";
 import type { Store } from "./store.ts";
@@ -111,6 +112,25 @@ function findChannel(ctx: ToolContext, name: string | undefined): Channel {
   const match = channels.find((c) => norm(c.name) === wanted);
   if (match) return match;
   throw new ToolError(`There's no channel called #${wanted}. Channels: ${channels.map((c) => `#${c.name}`).join(", ")}.`);
+}
+
+/**
+ * The library documents a tool may use here: all the ones this channel can
+ * see, or the one named (explaining which there are if it isn't found).
+ */
+function libraryDocs(ctx: ToolContext, name: string | undefined): LibraryDoc[] {
+  const docs = ctx.store.library.forChannel(ctx.channel);
+  if (!name) return docs;
+  const doc = ctx.store.library.find(name, docs);
+  if (!doc) throw new ToolError(`There's no document called "${name}" here. The library has: ${docs.map((d) => `"${d.title}"`).join(", ") || "(nothing)"}.`);
+  return [doc];
+}
+
+/** A whole-number argument (models sometimes send "3" as text). */
+function wholeNumber(value: unknown, key: string): number {
+  const n = typeof value === "string" ? Number(value.trim()) : value;
+  if (typeof n !== "number" || !Number.isInteger(n)) throw new ToolError(`"${key}" must be a whole number.`);
+  return n;
 }
 
 /** How your partner sees an entry's owner. */
@@ -424,6 +444,66 @@ const TOOLS: ToolDefinition[] = [
       return {
         result: summary ? { channel: hash(channel), summary } : { channel: hash(channel), summary: null, note: "Nothing has been summarized there yet." },
         summary: `read the summary of ${hash(channel)}`,
+      };
+    },
+  },
+
+  // ---------------------------------------------------- the reference library
+  {
+    name: "search_library",
+    description:
+      "Search the reference library (long texts the user uploaded, like scripts or books) for passages about something: a scene, a character, a line, a place. Returns the best matches with a snippet each; read one in full with read_library. Put exact phrases in quotes.",
+    parameters: object(
+      {
+        query: str('What to look for, in a few words: "Gandalf Bag End", or an exact line in quotes.'),
+        document: str("Only this document (its title). Leave out to search them all."),
+      },
+      ["query"],
+    ),
+    available: (ctx) => ctx.store.library.forChannel(ctx.channel).length > 0,
+    run: (ctx, args) => {
+      const query = need(args, "query");
+      const docs = libraryDocs(ctx, maybe(args, "document"));
+      const hits = ctx.store.library.search(query, docs.map((d) => d.id));
+      const where = docs.length === 1 ? `"${docs[0]!.title}"` : "the library";
+      return {
+        result: hits.length
+          ? {
+              results: hits.map((h) => ({ document: h.title, passage: h.seq, ...(h.heading ? { heading: h.heading } : {}), snippet: h.snippet })),
+              note: "Read a passage in full with read_library (document and passage number).",
+            }
+          : { results: [], note: `Nothing in ${where} matches. Try other words: a name, or a word likely to be in the text.` },
+        summary: `searched ${where} for "${query}"`,
+      };
+    },
+  },
+  {
+    name: "read_library",
+    description:
+      "Read passages of a document in the reference library in full, by number (from search_library). Reads up to 3 in a row, for more of a scene.",
+    parameters: object(
+      {
+        document: str("The document's title."),
+        passage: { type: "integer", description: "The passage number to start from." },
+        count: { type: "integer", description: "How many passages to read in a row, 1 to 3 (default 1)." },
+      },
+      ["document", "passage"],
+    ),
+    available: (ctx) => ctx.store.library.forChannel(ctx.channel).length > 0,
+    run: (ctx, args) => {
+      const [doc] = libraryDocs(ctx, need(args, "document"));
+      const from = wholeNumber(args.passage, "passage");
+      const count = args.count === undefined || args.count === null ? 1 : Math.min(3, Math.max(1, wholeNumber(args.count, "count")));
+      if (from < 1 || from > doc!.passages) throw new ToolError(`"${doc!.title}" has passages 1 to ${doc!.passages}.`);
+      const passages = ctx.store.library.passages(doc!.id, from, count);
+      const last = passages.at(-1)!.seq;
+      return {
+        result: {
+          document: doc!.title,
+          passages: passages.map((p) => ({ passage: p.seq, ...(p.heading ? { heading: p.heading } : {}), text: p.content })),
+          ...(last < doc!.passages ? { next: last + 1 } : { note: "That's the end of the document." }),
+        },
+        summary: `read ${passages.length === 1 ? `passage ${from}` : `passages ${from}–${last}`} of "${doc!.title}"`,
       };
     },
   },

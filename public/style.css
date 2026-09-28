@@ -2067,3 +2067,74 @@ button.attach-chip {
   color: var(--text-muted);
   text-align: right;
 }
+
+/* ------------------------------------------------------------ library */
+
+.library-list,
+.library-results {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+/* A document, or a search result: the whole row opens it. */
+.library-doc,
+.library-hit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.library-doc:hover,
+.library-hit:hover {
+  background: var(--message-hover-bg);
+}
+
+.library-hit-where {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.library-snippet {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.library-snippet mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: inherit;
+}
+
+.library-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 8px;
+}
+
+/* A passage, as written: scripts rely on their spacing. */
+.library-passage {
+  max-height: 60vh;
+  margin: 0 0 12px;
+  padding: 12px;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--input-bg, rgba(0, 0, 0, 0.15));
+  color: var(--text);
+  font: 13px/1.45 ui-monospace, "Courier Prime", "Courier New", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

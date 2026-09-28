@@ -137,6 +137,20 @@ export function isNothing(text: string): boolean {
   return /^\s*\[?\s*nothing\s*\]?\s*\.?\s*$/i.test(text);
 }
 
+/**
+ * What's in the reference library: titles and descriptions only. The texts
+ * themselves are read with tools, when a detail is worth looking up.
+ */
+export function describeLibrary(docs: { title: string; description: string; passages: number }[]): string | null {
+  if (docs.length === 0) return null;
+  const lines = docs.map((d) => `- "${d.title}"${d.description ? `: ${d.description}` : ""} (${d.passages} passage${d.passages === 1 ? "" : "s"})`);
+  return [
+    "The user uploaded these for you to look things up in:",
+    ...lines,
+    "When a detail from one would help (what happens in a scene, how a character talks, a line, a place), search it with search_library and read the passage with read_library rather than guessing or going from memory. Use what you find naturally; don't paste long passages back.",
+  ].join("\n");
+}
+
 /** The "Why you're up" section of a wake-up turn's prompt. */
 export function describeWake(wake: WakeContext, tools: boolean): string {
   const since = wake.sinceUser ? `It's been ${wake.sinceUser} since the user last wrote anything.` : "The user hasn't written anything yet.";
@@ -266,6 +280,8 @@ export interface PromptInput {
   replyingTo?: { threadId: string; quote: string; note: string; onYourMessage: boolean };
   /** A wake-up turn (stage 8): why your partner is taking a turn on their own. */
   wake?: WakeContext;
+  /** The reference library documents usable here (only mentioned with tools, which read them). */
+  library?: { title: string; description: string; passages: number }[];
 }
 
 /** Layer 5: the summaries of what came before the recent messages. */
@@ -318,6 +334,7 @@ export function buildPromptStack({
   tools,
   replyingTo,
   wake,
+  library,
 }: PromptInput): ChatMessage[] {
   const isRp = channel.kind === "rp";
   const pinned = notebook?.pinned ?? [];
@@ -366,6 +383,7 @@ export function buildPromptStack({
     { title: "Waiting for your review", content: tools ? describeReviews(reviews ?? []) : null },
     { title: "What you did recently", content: (recentActions ?? []).map((line) => `- ${line}`).join("\n") },
     { title: "Tools", content: tools ? toolGuidance(channel.kind) : null },
+    { title: "Reference library", content: tools ? describeLibrary(library ?? []) : null },
     // A wake-up (stage 8): why your partner is taking a turn on their own.
     { title: "Why you're up", content: wake ? describeWake(wake, tools ?? false) : null },
     // Layer 4: the connection profile's notes on this model's habits.

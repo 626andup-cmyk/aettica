@@ -17,6 +17,13 @@
  *   GET    /api/wakeups                        Recent wake-ups, and what came of them
  *   POST   /api/jev/test                       Ask Jev one tiny question, to see if it's reachable and understood
  *   GET    /api/jev/log                        Every Jev call from the last 36 hours, exactly as sent and received
+ *
+ *   GET    /api/library                        The reference library's documents
+ *   POST   /api/library                        Add a document: title, description, channelIds and its text
+ *   GET    /api/library/search?q=...           Search passages (&doc=id for one document)
+ *   PATCH  /api/library/:id                    Change a document's title, description or channels
+ *   DELETE /api/library/:id                    Delete a document
+ *   GET    /api/library/:id/passages/:seq      Read passages in full (&count=n in a row, up to 10)
  *   GET    /api/state                          Settings, channels, profiles, roulettes, proposals waiting,
  *                                              where the partner is writing, and the app version
  *   PUT    /api/settings                       Change settings (any subset of fields)
@@ -379,6 +386,49 @@ export function createApp(config: Config): App {
         if (body?.event !== "opened") throw new HttpError(400, '"event" must be "opened".');
         if (autoWake) void wakeups.event("opened");
         return json({ ok: true });
+      },
+    },
+    // The reference library: long texts your partner can search.
+    {
+      method: "GET",
+      pattern: "/api/library",
+      handler: () => json({ documents: store.library.list() }),
+    },
+    {
+      method: "POST",
+      pattern: "/api/library",
+      handler: async (request) => json({ document: store.library.add(await readObject(request)) }),
+    },
+    {
+      method: "GET",
+      pattern: "/api/library/search",
+      handler: (request) => {
+        const params = new URL(request.url).searchParams;
+        const doc = params.get("doc");
+        return json({ results: store.library.search(params.get("q") ?? "", doc ? [store.library.get(doc).id] : undefined, 20) });
+      },
+    },
+    {
+      method: "PATCH",
+      pattern: "/api/library/:id",
+      handler: async (request, { id }) => json({ document: store.library.update(id!, await readObject(request)) }),
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/library/:id",
+      handler: (_request, { id }) => {
+        store.library.remove(id!);
+        return json({ ok: true });
+      },
+    },
+    {
+      method: "GET",
+      pattern: "/api/library/:id/passages/:seq",
+      handler: (request, { id, seq }) => {
+        const count = Number(new URL(request.url).searchParams.get("count") ?? 1);
+        const from = Number(seq);
+        if (!Number.isInteger(from) || !Number.isInteger(count)) throw new HttpError(400, "Passage numbers are whole numbers.");
+        return json({ document: store.library.get(id!), passages: store.library.passages(id!, from, Math.min(10, Math.max(1, count))) });
       },
     },
     {

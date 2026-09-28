@@ -446,6 +446,45 @@ export const MIGRATIONS: Migration[] = [
   );
   CREATE INDEX wakeups_by_time ON wakeups (at);
   `,
+
+  // ---------------------------------------------------------------- 9
+  // The reference library (src/library.ts): long texts, split into
+  // passages, that your partner can search and read with tools.
+  `
+  CREATE TABLE library_docs (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    -- A JSON list of the channels it's limited to; '[]' means everywhere.
+    channel_ids TEXT NOT NULL DEFAULT '[]',
+    chars       INTEGER NOT NULL,
+    passages    INTEGER NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+  );
+
+  -- A page or so of a document each. The rowid ties it to the search index.
+  CREATE TABLE library_passages (
+    rowid    INTEGER PRIMARY KEY,
+    doc_id   TEXT NOT NULL REFERENCES library_docs (id) ON DELETE CASCADE,
+    -- Counts from 1, in order.
+    seq      INTEGER NOT NULL,
+    -- The scene or chapter it's in.
+    heading  TEXT NOT NULL DEFAULT '',
+    -- In a script, the characters with lines in it, one per line.
+    speakers TEXT NOT NULL DEFAULT '',
+    content  TEXT NOT NULL,
+    UNIQUE (doc_id, seq)
+  );
+
+  -- The full-text search index over the passages (FTS5), with stemming, so
+  -- "running" finds "run". It reads its text from library_passages.
+  CREATE VIRTUAL TABLE library_fts USING fts5 (
+    heading, speakers, content,
+    content = 'library_passages', content_rowid = 'rowid',
+    tokenize = 'porter unicode61'
+  );
+  `,
 ];
 
 /**
