@@ -42,6 +42,7 @@ const settings: Settings = {
   wakeCooldownMinutes: 60,
   notebookKeeper: true,
   keeperEvery: 6,
+  jevChecks: true,
   quietStart: -1,
   quietEnd: 8,
   appTheme: "classic",

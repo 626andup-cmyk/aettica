@@ -43,7 +43,7 @@
  */
 
 import type { Database } from "bun:sqlite";
-import { percent, probabilityOf, tier, type Decider, type Question } from "./jev.ts";
+import { confidentChoice, percent, probabilityOf, tier, type Decider, type Question } from "./jev.ts";
 import { BusyError, pickProfile, type Partner } from "./partner.ts";
 import type { WakeContext, WakeReason } from "./prompt.ts";
 import type { Store } from "./store.ts";
@@ -232,7 +232,7 @@ export class Wakeups {
       return skip("You were talking just now: that's a conversation, not a wake-up.");
     }
 
-    const channel = homeChannel(store, channels);
+    let channel = homeChannel(store, channels);
     if (!channel) return skip("There's no OOC channel for your partner to write in.");
     if (this.partner.isBusy(channel.id)) return skip("Your partner is writing there already.");
     if (reason === "review" && !pickProfile(store, channel).supportsTools) {
@@ -245,10 +245,22 @@ export class Wakeups {
     // Jev: is it the moment? (Not for reviews: those are work.)
     if (reason !== "review" && this.decider.enabled()) {
       const question = QUESTIONS[reason](context);
+      // Several OOC channels: Jev picks the one this fits best, in the same
+      // call (Kitsikai's "which channel?"). Unsure keeps the one you used last.
+      const oocs = channels.filter((c) => c.kind === "ooc");
+      const pick: Question | null =
+        oocs.length > 1
+          ? { id: "channel", kind: "choice", question: "Which of the out-of-character channels (listed above) fits this message best?", options: oocs.map((c) => c.name) }
+          : null;
+      let state = snapshot(store, channel, context, now);
+      if (pick) state += `\nThe out-of-character channels:\n${oocs.map((c) => `#${c.name}: ${channelLine(store, c)}`).join("\n")}`;
       let yes: number;
       try {
-        const answers = await this.decider.ask(snapshot(store, channel, context, now), [question], { purpose: `Wake-up (${reason})` });
+        const answers = await this.decider.ask(state, pick ? [question, pick] : [question], { purpose: `Wake-up (${reason})` });
         const answer = answers.get(question.id);
+        const picked = pick ? confidentChoice(answers.get("channel"), settings.decisionConfidence) : null;
+        const chosen = picked ? oocs.find((c) => c.name === picked) : undefined;
+        if (chosen && !this.partner.isBusy(chosen.id)) channel = chosen;
         yes = probabilityOf(answer, "yes");
         const verdict = tier(answer, settings.decisionConfidence);
         if (verdict !== "yes") {
@@ -356,6 +368,14 @@ const QUESTIONS: Record<Exclude<WakeReason, "review">, (context: WakeContext) =>
       : "Would a short message from their writing partner, out of nowhere, feel natural and welcome right now?",
   }),
 };
+
+/** A channel in a line, for choosing between them: its digest, or its newest post. */
+function channelLine(store: Store, channel: Channel): string {
+  const digest = store.summaries.get(channel.id, "digest")?.content;
+  if (digest) return digest.replace(/\s+/g, " ").slice(0, 300);
+  const last = store.getMessages(channel.id).filter((m) => m.kind === "post").at(-1);
+  return last ? `last message: ${last.content.replace(/\s+/g, " ").slice(0, 200)}` : "empty";
+}
 
 /** What Jev is shown: the time, the silence, the recent OOC chat, what's waiting. */
 export function snapshot(store: Store, channel: Channel, context: WakeContext, now: Date): string {

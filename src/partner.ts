@@ -41,6 +41,7 @@ import { replyToMessages } from "./posts.ts";
 import { parseExtraParams } from "./profiles.ts";
 import { buildPromptStack, isNothing, type PromptMemory, type PromptReview, type PromptThread, type WakeContext } from "./prompt.ts";
 import { channelSummaryText, splitScenes, windowStart, type SeqMessage } from "./summaries.ts";
+import type { Judge } from "./judge.ts";
 import type { Store } from "./store.ts";
 import { extractTextToolCalls, parseArguments, type ParsedCall } from "./toolcalls.ts";
 import { runTool, toolSpecs, type ToolContext, type ToolOutcome } from "./tools.ts";
@@ -120,6 +121,8 @@ export interface PromptOptions {
   replyingTo?: string;
   /** A wake-up (stage 8). */
   wake?: WakeContext;
+  /** OOC: channels Jev said aren't being talked about, though their name came up (src/judge.ts). */
+  notAbout?: Set<string>;
 }
 
 /**
@@ -171,7 +174,8 @@ export function promptForChannel(store: Store, channelId: string, options: Promp
     windowStart: start,
     memory,
     digests: channel.kind === "ooc" && settings.summaries ? digestsFor(store, channels) : undefined,
-    mentioned: channel.kind === "ooc" && settings.summaries ? mentionedChannels(store, channel, channels, window) : undefined,
+    mentioned:
+      channel.kind === "ooc" && settings.summaries ? mentionedChannels(store, channel, channels, window, options.notAbout) : undefined,
     notebook,
     overview:
       channel.kind === "ooc"
@@ -255,25 +259,54 @@ const MENTION_WINDOW = 6;
  * name as a word), with their fuller summary: the story so far, the last
  * scene, and what's happened in the scene still going. At most two.
  */
-export function mentionedChannels(store: Store, ooc: Channel, channels: Channel[], window: Message[]): { name: string; summary: string }[] {
+export function mentionedChannels(
+  store: Store,
+  ooc: Channel,
+  channels: Channel[],
+  window: Message[],
+  notAbout?: Set<string>,
+): { name: string; summary: string }[] {
+  const found: { name: string; summary: string }[] = [];
+  for (const { channel } of mentionCandidates(ooc, channels, window)) {
+    if (found.length >= 2) break;
+    if (notAbout?.has(channel.id)) continue;
+    // (Its digest is already in the list of channels.)
+    const summary = channelSummaryText(store, channel, { withDigest: false });
+    if (summary) found.push({ name: channel.name, summary });
+  }
+  return found;
+}
+
+/**
+ * The channels named in an OOC channel's last few posts: as `#story`
+ * (`explicit`), or as the bare word "story", which may not be about the
+ * channel at all (Jev can check those, see src/judge.ts).
+ */
+export function mentionCandidates(ooc: Channel, channels: Channel[], window: Message[]): { channel: Channel; explicit: boolean }[] {
   const text = window
     .filter((m) => m.kind === "post")
     .slice(-MENTION_WINDOW)
     .map((m) => m.content.toLowerCase())
     .join("\n");
   const escape = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const found: { name: string; summary: string }[] = [];
+  const found: { channel: Channel; explicit: boolean }[] = [];
   for (const channel of channels) {
-    if (channel.id === ooc.id || found.length >= 2) continue;
+    if (channel.id === ooc.id) continue;
     const name = channel.name.toLowerCase();
-    const named =
-      text.includes(`#${name}`) || (name.length >= 3 && new RegExp(`(^|[^\\w])${escape(name)}($|[^\\w])`).test(text));
-    if (!named) continue;
-    // (Its digest is already in the list of channels.)
-    const summary = channelSummaryText(store, channel, { withDigest: false });
-    if (summary) found.push({ name: channel.name, summary });
+    if (text.includes(`#${name}`)) found.push({ channel, explicit: true });
+    else if (name.length >= 3 && new RegExp(`(^|[^\\w])${escape(name)}($|[^\\w])`).test(text)) found.push({ channel, explicit: false });
   }
   return found;
+}
+
+/** The newest posts, as Jev reads them. */
+function recentLines(store: Store, channelId: string, count: number): string[] {
+  const partnerName = store.getSettings().partnerName;
+  return store
+    .getMessages(channelId)
+    .filter((m) => m.kind === "post")
+    .slice(-count)
+    .map((m) => `${m.author === "user" ? "User" : partnerName}: ${m.content.replace(/\s+/g, " ").slice(0, 400)}`);
 }
 
 /** Unresolved threads on this channel's messages, newest ten, plus the one being replied to. */
@@ -377,6 +410,12 @@ export class Partner {
    */
   private readonly writingIn = new Map<string, AbortController>();
 
+  /** Jev's double-checks (src/judge.ts), once the server has set them up. */
+  judge: Judge | null = null;
+
+  /** Channel-mention checks already made, by OOC channel, newest post and channel: left out or not. */
+  private readonly mentionChecks = new Map<string, boolean>();
+
   constructor(
     private readonly store: Store,
     private readonly api: ApiOptions,
@@ -444,11 +483,13 @@ export class Partner {
     this.writingIn.set(channelId, controller);
     try {
       const profile = options.profileId ? this.store.profiles.get(options.profileId) : pickProfile(this.store, channel);
+      const notAbout = await this.checkMentions(channel, options.replacing ?? []);
       const conversation: ApiMessage[] = promptForChannel(this.store, channelId, {
         excludeIds: options.replacing,
         profile,
         replyingTo,
         wake: options.wake,
+        notAbout,
       });
       const context: ToolContext = { store: this.store, channel, mode: replyingTo ? "comment" : "post" };
       const tools = profile.supportsTools ? toolSpecs(context) : [];
@@ -510,6 +551,30 @@ export class Partner {
       // started in the channel.)
       if (this.writingIn.get(channelId) === controller) this.writingIn.delete(channelId);
     }
+  }
+
+  /**
+   * OOC: ask Jev about channels named only by a bare word in the last few
+   * posts (is "story" about #story?), remembering the answers per newest
+   * post, so a regeneration doesn't ask again. The ones to leave out.
+   */
+  private async checkMentions(channel: Channel, excluded: string[]): Promise<Set<string> | undefined> {
+    if (channel.kind !== "ooc" || !this.judge?.enabled() || !this.store.getSettings().summaries) return undefined;
+    const skip = new Set(excluded);
+    const window = this.store.getMessages(channel.id).filter((m) => !skip.has(m.id));
+    const newest = window.filter((m) => m.kind === "post").at(-1);
+    if (!newest) return undefined;
+    const candidates = mentionCandidates(channel, this.store.listChannels(), window).filter((c) => !c.explicit).map((c) => c.channel);
+    const key = (id: string) => `${channel.id}|${newest.id}|${id}`;
+    const unchecked = candidates.filter((c) => !this.mentionChecks.has(key(c.id)));
+    if (unchecked.length > 0) {
+      const lines = recentLines(this.store, channel.id, MENTION_WINDOW);
+      const out = await this.judge.aboutChannels(unchecked, lines);
+      for (const c of unchecked) this.mentionChecks.set(key(c.id), out.has(c.id));
+      // Only the recent answers matter.
+      while (this.mentionChecks.size > 200) this.mentionChecks.delete(this.mentionChecks.keys().next().value!);
+    }
+    return new Set(candidates.filter((c) => this.mentionChecks.get(key(c.id))).map((c) => c.id));
   }
 
   /**
@@ -575,7 +640,7 @@ export class Partner {
         const outcome =
           offered.length === 0
             ? failed("You're out of tool rounds for this turn, so this wasn't run. Write your reply now.")
-            : this.runCall(context, call);
+            : await this.runCall(context, call);
         toolCalls.push(
           this.store.toolLog.add({
             channelId: context.channel.id,
@@ -607,10 +672,33 @@ export class Partner {
     return { content, toolCalls, stopped: false, rounds: MAX_ROUNDS };
   }
 
-  /** Parse one call's arguments and run it. */
-  private runCall(context: ToolContext, call: ParsedCall): ToolOutcome {
+  /**
+   * Parse one call's arguments and run it. Deleting one of your partner's
+   * own entries (the one thing that can't be undone) is double-checked with
+   * Jev first (src/judge.ts).
+   */
+  private async runCall(context: ToolContext, call: ParsedCall): Promise<ToolOutcome> {
     const args = parseArguments(call.arguments);
     if (!args.ok) return failed(`${args.error} Call ${call.name} again with valid JSON arguments.`);
+    if (call.name === "delete_notebook_entry" && this.judge?.enabled() && typeof args.value.name === "string") {
+      const wanted = args.value.name.trim().toLowerCase();
+      const entry = this.store.notebook.listEntries("partner").find((e) => e.name.toLowerCase() === wanted);
+      // Only a real deletion (their own entry); anything else becomes a suggestion anyway.
+      if (entry?.access.delete) {
+        const check = await this.judge.confirmDelete(entry, recentLines(this.store, context.channel.id, 8));
+        if (!check.ok) return failed(check.why);
+      }
+    }
+    // An edit to one of *your* entries that your partner could make
+    // directly: only if you asked for it (Jev), otherwise a suggestion.
+    if (call.name === "edit_notebook_entry" && this.judge?.enabled() && typeof args.value.name === "string") {
+      const wanted = args.value.name.trim().toLowerCase();
+      const entry = this.store.notebook.listEntries("partner").find((e) => e.name.toLowerCase() === wanted);
+      if (entry?.owner === "user" && entry.access.edit === "direct") {
+        const asked = await this.judge.userAskedFor(entry, call.arguments, recentLines(this.store, context.channel.id, 8));
+        if (!asked) return runTool({ ...context, suggestOnly: true }, call.name, args.value);
+      }
+    }
     return runTool(context, call.name, args.value);
   }
 }

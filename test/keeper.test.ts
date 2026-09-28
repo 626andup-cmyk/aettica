@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { agree, seriesQuestions, seriesVerdicts, type Answer } from "../src/jev.ts";
-import { mergeFields, readChanges, verifySeries, type KeeperChange } from "../src/keeper.ts";
+import { mergeFields, readChanges, replaceFields, verifySeries, type KeeperChange } from "../src/keeper.ts";
 import { createApp, type App } from "../src/server.ts";
 import { validateSettings } from "../src/store.ts";
 import type { Channel } from "../src/types.ts";
@@ -43,9 +43,16 @@ function jev(answers: Record<string, object>) {
   return { content: JSON.stringify({ answers }) };
 }
 
-/** Jev's step 1: new, facts. */
-const detect = (newYes: boolean, factsYes: boolean) =>
-  jev({ "new~0": newYes ? yes() : no(), "new~1": newYes ? yes() : no(), "facts~0": factsYes ? yes() : no(), "facts~1": factsYes ? yes() : no() });
+/** Jev's step 1: new, facts, changed. */
+const detect = (newYes: boolean, factsYes: boolean, changedYes = false) =>
+  jev({
+    "new~0": newYes ? yes() : no(),
+    "new~1": newYes ? yes() : no(),
+    "facts~0": factsYes ? yes() : no(),
+    "facts~1": factsYes ? yes() : no(),
+    "changed~0": changedYes ? yes() : no(),
+    "changed~1": changedYes ? yes() : no(),
+  });
 
 /** The writer's draft. */
 const draft = (changes: object[]) => ({ content: JSON.stringify({ changes }) });
@@ -123,6 +130,13 @@ describe("pieces", () => {
     expect(mergeFields(fields, [{ label: "Background", value: "keeps the lighthouse" }])).toBeNull();
   });
 
+  test("replacing notes that are now wrong", () => {
+    const fields = [{ label: "Age", value: "60s" }];
+    expect(replaceFields(fields, [{ label: "Age", value: "34" }])).toEqual([{ label: "Age", value: "34" }]);
+    expect(replaceFields(fields, [{ label: "Age", value: "60s" }])).toBeNull();
+    expect(readChanges('{"changes": [{"action": "replace", "entry": "Ilse", "fields": [{"label": "Age", "value": "34"}], "claim": "She is 34."}]}')[0]!.action).toBe("replace");
+  });
+
   test("a new entry is checked three ways, a note two", () => {
     const create: KeeperChange = { action: "create", kind: "character", name: "Tamsin", fields: [], claim: "Tamsin is the ferryman." };
     expect(verifySeries(create, 0).phrasings).toHaveLength(3);
@@ -134,38 +148,39 @@ describe("the keeper", () => {
   test("waits for enough posts", async () => {
     posts(3);
     expect((await app.keeper.catchUp(story.id)).outcome).toBe("not-due");
-    expect(fake.requests).toHaveLength(0);
+    expect(fake.jevRequests).toHaveLength(0);
   });
 
   test("a scene ending counts, however few posts", async () => {
     posts(2);
     app.store.addSceneBreak(story.id, "user", "Dawn");
-    fake.replies.push(detect(false, false));
+    fake.jevReplies.push(detect(false, false));
     expect((await app.keeper.catchUp(story.id)).outcome).toBe("nothing");
-    expect(fake.requests).toHaveLength(1);
+    expect(fake.jevRequests).toHaveLength(1);
   });
 
   test("usually nothing: one Jev call, and the posts count as read", async () => {
     posts(6);
-    fake.replies.push(detect(false, false));
+    fake.jevReplies.push(detect(false, false));
     const result = await app.keeper.catchUp(story.id);
     expect(result.outcome).toBe("nothing");
-    expect(fake.requests.map((r) => r.model)).toEqual([JEV]);
+    expect(fake.jevRequests.map((r) => r.model)).toEqual([JEV]);
+    expect(fake.requests).toHaveLength(0);
     // Read: the same posts don't set it off again.
     expect((await app.keeper.catchUp(story.id)).outcome).toBe("not-due");
   });
 
   test("phrasings that disagree mean unsure: nothing is written", async () => {
     posts(6);
-    fake.replies.push(jev({ "new~0": yes(), "new~1": no(0.4), "facts~0": no(), "facts~1": no() }));
+    fake.jevReplies.push(jev({ "new~0": yes(), "new~1": no(0.4), "facts~0": no(), "facts~1": no(), "changed~0": no(), "changed~1": no() }));
     expect((await app.keeper.catchUp(story.id)).outcome).toBe("unsure");
-    expect(fake.requests).toHaveLength(1);
+    expect(fake.requests).toHaveLength(0);
   });
 
   test("a new character: detected, drafted, checked, added as shared", async () => {
     posts(6, (i) => (i === 3 ? "A man steps off the ferry. \"Name's Tamsin,\" he says. \"I row the dead across.\"" : `Post ${i}`));
+    fake.jevReplies.push(detect(true, false), check(true));
     fake.replies.push(
-      detect(true, false),
       draft([
         {
           action: "create",
@@ -175,19 +190,19 @@ describe("the keeper", () => {
           claim: "A man named Tamsin arrived on the ferry and says he rows the dead across.",
         },
       ]),
-      check(true),
     );
     const result = await app.keeper.catchUp(story.id);
     expect(result).toMatchObject({ outcome: "applied", applied: ["added Tamsin to the notebook"] });
     const tamsin = entry("Tamsin")!;
     expect(tamsin).toMatchObject({ owner: "joint", kind: "character" });
     expect(tamsin.fields.find((f) => f.label === "Background")!.value).toBe("Rows the dead across on the ferry.");
-    // Jev, the writer, Jev.
-    expect(fake.requests.map((r) => r.model === JEV)).toEqual([true, false, true]);
+    // Jev twice, the writer once.
+    expect(fake.jevRequests).toHaveLength(2);
+    expect(fake.requests).toHaveLength(1);
     // The check reads the messages only, and asks each thing three ways.
-    const checkRequest = JSON.stringify(fake.requests[2]);
+    const checkRequest = JSON.stringify(fake.jevRequests[1]);
     expect(checkRequest).toContain("rows the dead across");
-    expect(Object.keys((fake.requests[2] as any).response_format.questions)).toEqual(["c0~0", "c0~1", "c0~2"]);
+    expect(Object.keys(fake.jevRequests[1]!.response_format.questions)).toEqual(["c0~0", "c0~1", "c0~2"]);
     // It shows in the channel as your partner's action.
     const calls = app.store.toolLog.forChannel(story.id);
     expect(calls).toHaveLength(1);
@@ -196,13 +211,12 @@ describe("the keeper", () => {
 
   test("claims Jev doesn't confirm are dropped", async () => {
     posts(6);
+    fake.jevReplies.push(detect(true, true), check(true, [true, false, true]));
     fake.replies.push(
-      detect(true, true),
       draft([
         { action: "create", kind: "lore", name: "The Drowned Bell", fields: [{ label: "Summary", value: "Lost" }], claim: "A bell drowned." },
         { action: "create", kind: "character", name: "Imagined", fields: [], claim: "Someone made up." },
       ]),
-      check(true, [true, false, true]),
     );
     const result = await app.keeper.catchUp(story.id);
     expect(result.applied).toEqual(["added The Drowned Bell to the notebook"]);
@@ -214,28 +228,51 @@ describe("the keeper", () => {
     const ilse = app.store.notebook.listEntries("user").find((e) => e.name === "Ilse Marrow")!;
     const kestrel = app.store.notebook.createEntry("user", { kind: "character", name: "Kestrel", editing: "suggest" });
     posts(6, (i) => (i === 2 ? "Ilse: \"My brother drowned with the bell.\" Kestrel shows her scarred hands." : `Post ${i}`));
+    fake.jevReplies.push(detect(false, true), check(true, true));
     fake.replies.push(
-      detect(false, true),
       draft([
         { action: "add", entry: "Ilse Marrow", fields: [{ label: "Background", value: "Her brother drowned with the bell." }], claim: "Ilse's brother drowned with the bell." },
         { action: "add", entry: "Kestrel", fields: [{ label: "Appearance", value: "Scarred hands." }], claim: "Kestrel has scarred hands." },
       ]),
-      check(true, true),
     );
     const result = await app.keeper.catchUp(story.id);
     expect(result.applied).toEqual(["noted in Ilse Marrow: Background", "suggested notes for Kestrel"]);
     expect(app.store.notebook.getEntry("user", ilse.id).fields.find((f) => f.label === "Background")!.value).toContain("brother drowned");
     expect(app.store.notebook.waitingFor("user").map((s) => s.entryId)).toEqual([kestrel.id]);
     // The writer saw Ilse's notes (she's mentioned).
-    expect(fake.requests[1]!.messages.at(-1)!.content).toContain("Ilse Marrow (character):");
+    expect(fake.requests[0]!.messages.at(-1)!.content).toContain("Ilse Marrow (character):");
+  });
+
+  test("a contradiction corrects the note, rather than adding to it", async () => {
+    const ilse = app.store.notebook.listEntries("user").find((e) => e.name === "Ilse Marrow")!;
+    app.store.notebook.editEntry("partner", ilse.id, { fields: [...ilse.fields.filter((f) => f.label !== "Age"), { label: "Age", value: "60s" }] });
+    posts(6, (i) => (i === 2 ? "Ilse laughs. \"I'm thirty-four, not sixty. The lamp ages everyone.\"" : `Post ${i}`));
+    fake.jevReplies.push(detect(false, false, true), check(true));
+    fake.replies.push(draft([{ action: "replace", entry: "Ilse Marrow", fields: [{ label: "Age", value: "34" }], claim: "Ilse says she is thirty-four." }]));
+    const result = await app.keeper.catchUp(story.id);
+    expect(result.applied).toEqual(["corrected Ilse Marrow: Age"]);
+    expect(app.store.notebook.getEntry("user", ilse.id).fields.find((f) => f.label === "Age")!.value).toBe("34");
+    // Jev saw the notes it contradicts.
+    expect(fake.jevRequests[0]!.messages[0]!.content).toContain("Age: 60s");
+  });
+
+  test("your own entries only ever get suggestions from the keeper", async () => {
+    const kestrel = app.store.notebook.createEntry("user", { kind: "character", name: "Kestrel" }); // open for editing
+    posts(6, () => "Kestrel shows her scarred hands.");
+    fake.jevReplies.push(detect(false, true), check(true));
+    fake.replies.push(draft([{ action: "add", entry: "Kestrel", fields: [{ label: "Appearance", value: "Scarred hands." }], claim: "Kestrel has scarred hands." }]));
+    const result = await app.keeper.catchUp(story.id);
+    expect(result.applied).toEqual(["suggested notes for Kestrel"]);
+    expect(app.store.notebook.waitingFor("user").map((s) => s.entryId)).toEqual([kestrel.id]);
   });
 
   test("never shows the writer an entry hidden from you", async () => {
     app.store.notebook.createEntry("partner", { kind: "lore", name: "The Secret", visibility: "hidden", fields: [{ label: "Summary", value: "Ilse pushed him." }] });
     posts(6, () => "The Secret is mentioned.");
-    fake.replies.push(detect(true, true), draft([]));
+    fake.jevReplies.push(detect(true, true));
+    fake.replies.push(draft([]));
     await app.keeper.catchUp(story.id);
-    const sent = JSON.stringify(fake.requests);
+    const sent = JSON.stringify([...fake.requests, ...fake.jevRequests]);
     expect(sent).not.toContain("Ilse pushed him");
     expect(sent).not.toContain("The Secret (lore)");
   });
@@ -248,14 +285,14 @@ describe("the keeper", () => {
     expect((await app.keeper.catchUp(story.id)).outcome).toBe("off");
     settings({ notebookKeeper: true, decisionModel: "" });
     expect((await app.keeper.catchUp(story.id)).outcome).toBe("off");
-    expect(fake.requests).toHaveLength(0);
+    expect(fake.requests.length + fake.jevRequests.length).toBe(0);
   });
 
   test("a failed call is reported, and the posts are read again next time", async () => {
     posts(6);
-    fake.replies.push({ status: 500, error: "down" });
+    fake.jevReplies.push({ status: 500, error: "down" });
     expect((await app.keeper.catchUp(story.id)).outcome).toBe("failed");
-    fake.replies.push(detect(false, false));
+    fake.jevReplies.push(detect(false, false));
     expect((await app.keeper.catchUp(story.id)).outcome).toBe("nothing");
   });
 

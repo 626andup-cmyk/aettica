@@ -378,7 +378,7 @@ Summarize what was talked about. Keep what matters later: plans and ideas for st
  * The messages for one summary request: the instructions, then the notes
  * so far (if any) and the new material, asking for the updated notes.
  */
-export function summaryRequest(job: SummaryJob, notes: string, material: string, heading: string) {
+export function summaryRequest(job: SummaryJob, notes: string, material: string, heading: string, extra = "") {
   const parts = [
     notes.trim() ? `Your notes so far:\n\n${notes.trim()}` : "",
     `${heading}:\n\n${material.trim()}`,
@@ -387,7 +387,7 @@ export function summaryRequest(job: SummaryJob, notes: string, material: string,
       : "Reply with the notes only.",
   ].filter(Boolean);
   return [
-    { role: "system" as const, content: SUMMARY_INSTRUCTIONS[job] },
+    { role: "system" as const, content: extra ? `${SUMMARY_INSTRUCTIONS[job]}\n\n${extra}` : SUMMARY_INSTRUCTIONS[job] },
     { role: "user" as const, content: parts.join("\n\n") },
   ];
 }

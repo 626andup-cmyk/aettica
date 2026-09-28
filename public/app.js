@@ -2162,6 +2162,7 @@ function openSettings() {
   form.decisionConfidence.value = s.decisionConfidence;
   fillFallbackSelect(form.decisionFallback, s.decisionFallback);
   form.notebookKeeper.checked = s.notebookKeeper;
+  form.jevChecks.checked = s.jevChecks;
   form.keeperEvery.value = s.keeperEvery;
   $("test-jev-result").textContent = "";
   updateWakeupsOnly();
@@ -2195,6 +2196,7 @@ async function saveSettings(event) {
       decisionConfidence: Number(form.decisionConfidence.value),
       decisionFallback: form.decisionFallback.value,
       notebookKeeper: form.notebookKeeper.checked,
+      jevChecks: form.jevChecks.checked,
       keeperEvery: Number(form.keeperEvery.value),
     });
     state.settings = data.settings;

@@ -22,6 +22,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - Edit the **partner prompts**: who your partner is (used everywhere), and how they write in literary scenes, in casual scenes, and out of character. Each channel only gets the one for its own kind, so OOC chat stays short even if your literary style is long. Also how many recent messages the partner sees.
 - **Connection profiles and roulettes** (Settings → Profiles and roulettes): a profile is a model with its settings and its own "model notes"; a roulette picks one of several profiles at random each turn, by weight. Choose what writes roleplay and OOC, and override it per channel.
 - **Your partner acts**, if their profile can use tools: they read the notebook, make and edit entries, pin characters, make channels, start scenes, comment on messages, review your suggestions, or choose not to reply. What they did shows under their message. Each profile has a **Test tools** button, and each channel a **tool log**, for when a model gets it wrong.
+- **Jev double-checks** the guesses Aettica makes: comment replies, your partner deleting or changing your things, summaries, which channel came up. See [the Jev audit](docs/jev-audit.md).
 - **Notebook keeper**: every few posts, your partner notes new characters, places and lasting facts in the notebook, after Jev checks each one against the messages. See [the notebook keeper](docs/notebook-keeper.md).
 - **Reference library** (Notebook → Library): upload long texts like a film's script or a book for a fandom. Your partner searches them and reads the passages they need, instead of guessing; nothing is sent whole. See [the library](docs/library.md).
 - **Attach notes** to a message with the paperclip, or write `[[Name]]` in it: your partner gets those entries in full.
@@ -112,6 +113,7 @@ src/
   wakeups.ts   Your partner waking up when something happens (stage 8)
   jev.ts       Asking Jev, the decision model, yes-or-no questions (and series of them)
   keeper.ts    The notebook keeper: noting what the story establishes
+  judge.ts     Jev's double-checks on the guesses Aettica makes
   jevlog.ts    The Jev log: every call from the last 36 hours
   json.ts      Finding JSON in a model's reply
   reactions.ts Emoji reactions and custom emojis

@@ -13,8 +13,9 @@
  *      notebook's names and is asked, each in two phrasings that must agree
  *      (a series, see src/jev.ts): is there a new named character, place or
  *      thing that will matter? Is there a lasting fact about something
- *      already in the notebook? Usually the answer is no, and that's one
- *      cheap call.
+ *      already in the notebook? Does the story contradict something the
+ *      notes say (Kitsikai's "does this take back the note?")? Usually the
+ *      answer is no, and that's one cheap call.
  *   2. **What exactly?** Only on a yes, a writer model (the profile that
  *      writes summaries) drafts the changes as JSON: new entries, and notes
  *      to add to existing ones, each with a one-sentence claim of what the
@@ -22,11 +23,11 @@
  *   3. **Is it really in the text?** Jev checks every claim against the
  *      posts alone, again in two or three phrasings that must all agree.
  *      Anything not confidently supported is dropped.
- *   4. **Made as your partner.** New entries are shared ("joint"). Notes on
- *      existing entries go through the notebook's permissions like any of
- *      your partner's edits: their own and open entries change directly,
- *      yours may become a suggestion for you to review, locked ones are left
- *      alone. What was done shows in the channel ("⚙ Arlo added Tamsin to
+ *   4. **Made as your partner.** New entries are shared ("joint"). Notes and
+ *      corrections go through the notebook's permissions like any of your
+ *      partner's edits (locked entries are left alone), except that your own
+ *      entries only ever get suggestions: nothing of yours changes unless
+ *      you say so. What was done shows in the channel ("⚙ Arlo added Tamsin to
  *      the notebook") and in your partner's recent actions.
  *
  * ## Nothing hidden leaks
@@ -60,7 +61,9 @@ export const KEEPER_MAX_CHANGES = 4;
 /** A change the writer drafted. */
 export type KeeperChange =
   | { action: "create"; kind: "character" | "lore"; name: string; fields: EntryField[]; claim: string }
-  | { action: "add"; entry: string; fields: EntryField[]; claim: string };
+  | { action: "add"; entry: string; fields: EntryField[]; claim: string }
+  /** Notes that are now wrong: these fields are rewritten, not added to. */
+  | { action: "replace"; entry: string; fields: EntryField[]; claim: string };
 
 /** What a run did, for tests and the log. */
 export interface KeeperReport {
@@ -114,6 +117,14 @@ export const DETECT: SeriesQuestion[] = [
       "Would a careful note-keeper add something from the new messages to an existing notebook entry, because it's now true for the rest of the story (not just a passing action or mood)?",
     ],
   },
+  {
+    // Kitsikai's "do the new messages take back or change this note?"
+    id: "changed",
+    phrasings: [
+      "Do the new messages contradict or take back something the notebook's notes say (a fact that changed, or was retold differently)?",
+      "Is anything written in the notebook's notes now wrong because of the new messages?",
+    ],
+  },
 ];
 
 /** Step 3: is a drafted change really in the text? */
@@ -147,9 +158,10 @@ export function keeperRequest(partnerName: string, notebook: string, channelName
         "Reply with JSON only, in this shape:",
         `{"changes": [
   {"action": "create", "kind": "character", "name": "Full Name", "fields": [{"label": "Appearance", "value": "short note"}], "claim": "One sentence saying what the story established."},
-  {"action": "add", "entry": "Existing Entry Name", "fields": [{"label": "Background", "value": "short note"}], "claim": "One sentence saying what the story established."}
+  {"action": "add", "entry": "Existing Entry Name", "fields": [{"label": "Background", "value": "short note"}], "claim": "One sentence saying what the story established."},
+  {"action": "replace", "entry": "Existing Entry Name", "fields": [{"label": "Age", "value": "the corrected note, in full"}], "claim": "One sentence saying what changed."}
 ]}`,
-        `Use "create" for someone or something new (kind "character", or "lore" for places, groups, objects, history), and "add" for notes on an entry the notebook already has. At most ${KEEPER_MAX_CHANGES} changes. Characters' field labels: Pronouns, Age, Appearance, Personality, Background, Speech. Lore's: Summary, Details. Values are short notes, not prose. If nothing is worth recording, reply {"changes": []}.`,
+        `Use "create" for someone or something new (kind "character", or "lore" for places, groups, objects, history), "add" for notes on an entry the notebook already has, and "replace" when the story changed or contradicted what a field says (give the field's whole corrected text). At most ${KEEPER_MAX_CHANGES} changes. Characters' field labels: Pronouns, Age, Appearance, Personality, Background, Speech. Lore's: Summary, Details. Values are short notes, not prose. If nothing is worth recording, reply {"changes": []}.`,
       ].join("\n\n"),
     },
     { role: "user", content: `The notebook:\n${notebook}\n\nThe new part of the story (#${channelName}):\n\n${lines.join("\n\n")}` },
@@ -179,9 +191,9 @@ export function readChanges(content: string): KeeperChange[] {
       const name = text(raw.name, 100);
       const kind = raw.kind === "lore" ? "lore" : "character";
       if (name) changes.push({ action: "create", kind, name, fields, claim });
-    } else if (raw?.action === "add") {
+    } else if (raw?.action === "add" || raw?.action === "replace") {
       const entry = text(raw.entry, 100);
-      if (entry && fields.length) changes.push({ action: "add", entry, fields, claim });
+      if (entry && fields.length) changes.push({ action: raw.action, entry, fields, claim });
     }
   }
   return changes.slice(0, KEEPER_MAX_CHANGES);
@@ -202,6 +214,23 @@ export function mergeFields(current: EntryField[], additions: EntryField[]): Ent
       changed = true;
     } else if (!plain(existing.value).includes(plain(add.value))) {
       existing.value = `${existing.value.trim()}${/[.!?]$/.test(existing.value.trim()) ? "" : "."} ${add.value}`;
+      changed = true;
+    }
+  }
+  return changed ? fields : null;
+}
+
+/** Rewrite fields whose notes are now wrong (adding any that are missing). `null` if nothing changes. */
+export function replaceFields(current: EntryField[], replacements: EntryField[]): EntryField[] | null {
+  const fields = current.map((f) => ({ ...f }));
+  let changed = false;
+  for (const r of replacements) {
+    const existing = fields.find((f) => f.label.toLowerCase() === r.label.toLowerCase());
+    if (!existing) {
+      fields.push({ ...r });
+      changed = true;
+    } else if (existing.value.trim() !== r.value.trim()) {
+      existing.value = r.value;
       changed = true;
     }
   }
@@ -289,8 +318,11 @@ export class Keeper {
     const entries = store.notebook.listEntries("partner").filter((e) => store.notebook.canSeeEntry("user", e.id));
 
     // 1. Is there anything?
+    // Entries the new posts mention come with their notes (so a contradiction
+    // can be seen); the rest, just a name.
+    const notebook = describeNotebook(entries, reading);
     const detect = await this.decider.askSeries(
-      `The notebook has: ${entries.map((e) => `${e.name} (${e.kind})`).join(", ") || "nothing yet"}.\n\nThe new messages of the story:\n\n${lines.join("\n\n")}`,
+      `The notebook:\n${notebook}\n\nThe new messages of the story:\n\n${lines.join("\n\n")}`,
       DETECT,
       threshold,
       { purpose: "Notebook keeper" },
@@ -305,7 +337,7 @@ export class Keeper {
 
     // 2. What exactly?
     const profile = pickProfile(store, channel, undefined, "summary");
-    const drafted = await this.draft(profile, settings.partnerName, entries, channel, lines, reading);
+    const drafted = await this.draft(profile, settings.partnerName, notebook, channel, lines);
     if (drafted.length === 0) {
       done();
       return report(channelId, "no-changes", `Jev: ${verdicts}; the writer found nothing to record.`);
@@ -361,22 +393,10 @@ export class Keeper {
   private async draft(
     profile: Profile,
     partnerName: string,
-    entries: EntryView[],
+    notebook: string,
     channel: Channel,
     lines: string[],
-    reading: SeqMessage[],
   ): Promise<KeeperChange[]> {
-    // Entries the new posts mention get their notes; the rest, a name.
-    const text = reading.map((m) => `${m.characters.join(" ")} ${m.content}`).join(" ").toLowerCase();
-    const mentioned = (e: EntryView) => e.name.toLowerCase().split(/\s+/).some((word) => word.length > 2 && text.includes(word));
-    const notebook =
-      entries
-        .map((e) =>
-          mentioned(e)
-            ? `- ${e.name} (${e.kind}): ${e.fields.filter((f) => f.value.trim()).map((f) => `${f.label}: ${f.value.trim()}`).join("; ").slice(0, 1500) || "no notes yet"}`
-            : `- ${e.name} (${e.kind})`,
-        )
-        .join("\n") || "(empty)";
     const request = profileRequest(profile);
     const response = await createChatCompletion(this.api, {
       ...request,
@@ -406,18 +426,35 @@ export class Keeper {
 
     // Notes for an entry that exists (a "create" of one that exists is the same).
     if (!existing || existing.access.edit === "none") return null;
-    const fields = mergeFields(existing.fields, change.fields);
+    const fields = change.action === "replace" ? replaceFields(existing.fields, change.fields) : mergeFields(existing.fields, change.fields);
     if (!fields) return null;
     try {
-      const outcome = notebook.editEntry("partner", existing.id, { fields });
+      // Your own entries only change when you say so: notes on them are suggestions.
+      const outcome = notebook.editEntry("partner", existing.id, { fields }, { suggest: existing.owner === "user" });
       if ("suggestion" in outcome) return { summary: `suggested notes for ${existing.name}`, result: { suggested: existing.name } };
       existing.fields = outcome.entry.fields;
-      return { summary: `noted in ${existing.name}: ${change.fields.map((f) => f.label).join(", ")}`, result: { edited: existing.name } };
+      const verb = change.action === "replace" ? "corrected" : "noted in";
+      return { summary: `${verb} ${existing.name}: ${change.fields.map((f) => f.label).join(", ")}`, result: { edited: existing.name } };
     } catch (error) {
       console.warn(`[keeper] couldn't change ${existing.name}:`, error);
       return null;
     }
   }
+}
+
+/** The notebook for the keeper: notes for the entries the posts mention, names for the rest. */
+function describeNotebook(entries: EntryView[], reading: SeqMessage[]): string {
+  const text = reading.map((m) => `${m.characters.join(" ")} ${m.content}`).join(" ").toLowerCase();
+  const mentioned = (e: EntryView) => e.name.toLowerCase().split(/\s+/).some((word) => word.length > 2 && text.includes(word));
+  return (
+    entries
+      .map((e) =>
+        mentioned(e)
+          ? `- ${e.name} (${e.kind}): ${e.fields.filter((f) => f.value.trim()).map((f) => `${f.label}: ${f.value.trim()}`).join("; ").slice(0, 1500) || "no notes yet"}`
+          : `- ${e.name} (${e.kind})`,
+      )
+      .join("\n") || "(empty)"
+  );
 }
 
 function report(channelId: string, outcome: KeeperReport["outcome"], detail: string): KeeperReport {

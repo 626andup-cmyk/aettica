@@ -20,13 +20,14 @@ flowchart TD
   C -- confirmed --> A[4. Made as your partner]
 ```
 
-1. **Is there anything?** Jev reads the new posts and the notebook's names, and is asked two things, **each in two phrasings**: is someone or something new named that will matter again? Is there a lasting fact about something already in the notebook that its notes don't say? A question counts as yes only when **both** phrasings are confident yeses. Most of the time the answer is no, and that's all it costs.
-2. **What exactly?** On a yes, a writer model (the profile or roulette that writes summaries) drafts up to 4 changes as JSON. Each is a new entry (character or lore) or notes for an existing entry, and each comes with a one-sentence **claim** of what the story established. The writer sees the notes of entries the new posts mention, and only the names of the rest.
+1. **Is there anything?** Jev reads the new posts and the notebook (with the notes of entries the posts mention), and is asked three things, **each in two phrasings**: is someone or something new named that will matter again? Is there a lasting fact about something already in the notebook that its notes don't say? Does the story **contradict** something the notes say (an idea from Kitsikai's "does this take back the note?")? A question counts as yes only when **both** phrasings are confident yeses. Most of the time the answer is no, and that's all it costs.
+2. **What exactly?** On a yes, a writer model (the profile or roulette that writes summaries) drafts up to 4 changes as JSON. Each is a new entry (character or lore), notes to add to an existing entry, or a **correction** (a field rewritten because the story changed it). Each comes with a one-sentence **claim** of what the story established. The writer sees the notes of entries the new posts mention, and only the names of the rest.
 3. **Is it really in the text?** Jev checks every claim against **the messages alone**: "According to the story messages, is this true: ...?" and "Is this stated or clearly shown, rather than guessed or invented?", plus, for a new entry, whether it's likely to matter again. Every phrasing must be a confident yes, or the change is dropped.
 4. **Made as your partner:**
    - New entries are **shared** (joint), since either of you might have introduced them. They start from the kind's template, with the drafted notes filled in.
    - Notes for an existing entry go into its fields: an empty field is filled, a field that doesn't already say it gets the note added, and a new label becomes a new field.
-   - The notebook's permissions apply as for any of your partner's edits. Their entries, shared ones and your open ones change directly. Your suggest-only entries get a **suggestion** for you to review (in the inbox). Locked entries are left alone.
+   - A correction rewrites the fields it names ("⚙ Arlo corrected Ilse Marrow: Age").
+   - The notebook's permissions apply as for any of your partner's edits: their entries and shared ones change directly, and locked entries are left alone. **Your own entries only ever get suggestions** from the keeper (in the inbox), even the ones open to your partner: nothing of yours changes unless you say so.
 
 Every Jev call is in the **Jev log** (purposes "Notebook keeper" and "Notebook keeper (check)"). The changes are in the channel's **tool log** as `notebook_keeper`, with the draft, the result and Jev's check.
 

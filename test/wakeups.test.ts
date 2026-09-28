@@ -65,8 +65,8 @@ function jev(yes: number) {
 }
 
 /** Which requests went to Jev, and which to the writer. */
-const jevRequests = () => fake.requests.filter((r) => r.model === "typesafe/jev-1.13");
-const writerRequests = () => fake.requests.filter((r) => r.model !== "typesafe/jev-1.13");
+const jevRequests = () => fake.jevRequests;
+const writerRequests = () => fake.requests;
 
 async function wake(event: WakeEvent = "opened", detail = {}) {
   return wakeups.event(event, detail);
@@ -122,7 +122,8 @@ describe("helpers", () => {
 describe("coming back", () => {
   test("after being away, Jev says yes, and your partner writes in OOC", async () => {
     youWrote(6);
-    fake.replies.push(jev(0.95), { content: "Welcome back! How was your day?" });
+    fake.jevReplies.push(jev(0.95));
+    fake.replies.push({ content: "Welcome back! How was your day?" });
     const result = await wake();
     expect(result).toMatchObject({ outcome: "posted", reason: "away" });
     expect(result.messages[0]!.content).toBe("Welcome back! How was your day?");
@@ -137,13 +138,13 @@ describe("coming back", () => {
 
   test("Jev saying no, or being unsure, keeps your partner quiet", async () => {
     youWrote(6);
-    fake.replies.push(jev(0.1));
+    fake.jevReplies.push(jev(0.1));
     expect(await wake()).toMatchObject({ outcome: "declined" });
     expect(writerRequests()).toHaveLength(0);
 
     // Unsure: 60% isn't confident enough at the default 80%.
     app.store.wakeLog.recent(); // (the declined one doesn't start a cooldown)
-    fake.replies.push(jev(0.6));
+    fake.jevReplies.push(jev(0.6));
     const result = await wake();
     expect(result.outcome).toBe("declined");
     expect(result.detail).toContain("unsure");
@@ -153,13 +154,14 @@ describe("coming back", () => {
   test("a lower confidence setting lets a 60% yes through", async () => {
     settings({ decisionConfidence: 0.55 });
     youWrote(6);
-    fake.replies.push(jev(0.6), { content: "Hi again" });
+    fake.jevReplies.push(jev(0.6));
+    fake.replies.push({ content: "Hi again" });
     expect((await wake()).outcome).toBe("posted");
   });
 
   test("Jev failing means no wake-up (logged)", async () => {
     youWrote(6);
-    fake.replies.push({ status: 500, error: "down" });
+    fake.jevReplies.push({ status: 500, error: "down" });
     const result = await wake();
     expect(result.outcome).toBe("failed");
     expect(writerRequests()).toHaveLength(0);
@@ -179,7 +181,8 @@ describe("coming back", () => {
 
   test("do_nothing counts as quiet", async () => {
     youWrote(6);
-    fake.replies.push(jev(0.9), { toolCalls: [{ name: "do_nothing", arguments: {} }] });
+    fake.jevReplies.push(jev(0.9));
+    fake.replies.push({ toolCalls: [{ name: "do_nothing", arguments: {} }] });
     expect((await wake()).outcome).toBe("quiet");
     expect(app.store.lastMessage(ooc.id)!.author).toBe("user");
   });
@@ -187,7 +190,7 @@ describe("coming back", () => {
   test("just opening the app counts only when chatty, and not mid-conversation", async () => {
     youWrote(1);
     expect((await wake()).outcome).toBeNull(); // normal: "opened" doesn't count
-    expect(fake.requests).toHaveLength(0);
+    expect(fake.requests.length + fake.jevRequests.length).toBe(0);
 
     settings({ wakeups: "chatty" });
     youWrote(0.1);
@@ -196,7 +199,8 @@ describe("coming back", () => {
     expect(result.detail).toContain("talking just now");
 
     now = new Date(now.getTime() + HOUR);
-    fake.replies.push(jev(0.9), { content: "Oh hi" });
+    fake.jevReplies.push(jev(0.9));
+    fake.replies.push({ content: "Oh hi" });
     expect(await wake()).toMatchObject({ outcome: "posted", reason: "opened" });
   });
 });
@@ -206,7 +210,7 @@ describe("the rules", () => {
     settings({ wakeups: "off" });
     youWrote(48);
     expect((await wake()).outcome).toBeNull();
-    expect(fake.requests).toHaveLength(0);
+    expect(fake.requests.length + fake.jevRequests.length).toBe(0);
     expect(app.store.wakeLog.recent()).toHaveLength(0);
   });
 
@@ -220,7 +224,8 @@ describe("the rules", () => {
 
   test("never twice without you writing, and a cooldown", async () => {
     youWrote(6);
-    fake.replies.push(jev(0.9), { content: "Welcome back" });
+    fake.jevReplies.push(jev(0.9));
+    fake.replies.push({ content: "Welcome back" });
     expect((await wake()).outcome).toBe("posted");
 
     // Hours later, still no reply from you: they wait.
@@ -249,7 +254,8 @@ describe("a scene ending", () => {
     const { sceneBreak } = app.store.addSceneBreak(story.id, "user", "The Storm");
     app.store.summaries.save(story.id, "scene", sceneBreak.id, "Kestrel found the lighthouse in a storm.", 99);
     youWrote(0.2, ooc);
-    fake.replies.push(jev(0.9), { content: "That storm scene was great." });
+    fake.jevReplies.push(jev(0.9));
+    fake.replies.push({ content: "That storm scene was great." });
     const result = await wake("scene-ended", { channelId: story.id, breakId: sceneBreak.id });
     expect(result).toMatchObject({ outcome: "posted", reason: "scene-ended" });
     expect(jevRequests()[0]!.messages.at(-1)!.content).toContain("Kestrel found the lighthouse");
@@ -300,7 +306,7 @@ describe("the API", () => {
 
   test("GET /api/wakeups lists the log", async () => {
     youWrote(6);
-    fake.replies.push(jev(0.1));
+    fake.jevReplies.push(jev(0.1));
     await wake();
     const { data } = await call("GET", "/api/wakeups");
     expect(data.wakeups).toHaveLength(1);

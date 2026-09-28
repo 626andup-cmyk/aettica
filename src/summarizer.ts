@@ -24,6 +24,7 @@
 
 import { createChatCompletion, type ApiOptions } from "./nanogpt.ts";
 import { pickProfile, profileRequest } from "./partner.ts";
+import type { Judge } from "./judge.ts";
 import type { Store } from "./store.ts";
 import {
   chunkLines,
@@ -37,6 +38,10 @@ import {
 } from "./summaries.ts";
 import type { Channel, ChannelSummaries, Profile, Summary } from "./types.ts";
 
+/** Added to a rewrite after a summary didn't match its scene. */
+export const STRICT_NOTE =
+  "Your last summary of this scene included things that don't happen in it. Stick strictly to what the messages say: no invented events, names or details, and nothing from outside the scene.";
+
 /** A new digest is written once this many posts have been added since the last one. */
 export const DIGEST_EVERY = 8;
 
@@ -49,6 +54,8 @@ export class Summarizer {
   private readonly runs = new Map<string, Promise<void>>();
   private readonly running = new Set<string>();
   private readonly errors = new Map<string, string>();
+  /** Jev's double-checks (src/judge.ts): each scene summary is checked against its scene. */
+  judge: Judge | null = null;
   /** Told when a scene's summary is written (stage 8: a scene ending can wake your partner). */
   onSceneSummarized: ((channelId: string, breakId: string) => void) | null = null;
 
@@ -149,8 +156,8 @@ export class Summarizer {
     if (messages.length === 0) return;
     const scenes = splitScenes(messages, channel.kind);
     const profile = pickProfile(store, channel, undefined, "summary");
-    const write = (job: SummaryJob, notes: string, lines: string[], heading: string) =>
-      this.fold(profile, job, notes, lines, heading);
+    const write = (job: SummaryJob, notes: string, lines: string[], heading: string, extra = "") =>
+      this.fold(profile, job, notes, lines, heading, extra);
     const lines = (posts: SeqMessage[]) => transcript(posts, channel.kind, settings.partnerName);
 
     // 1. Finished scenes.
@@ -163,7 +170,13 @@ export class Summarizer {
       const current = store.summaries.get(channelId, "current", startId);
       const seed = current && !current.stale ? current : null;
       const posts = seed ? scene.posts.filter((p) => p.seq > seed.throughSeq) : scene.posts;
-      const content = await write("scene", seed?.content ?? "", lines(posts), sceneHeading(scene, scenes.indexOf(scene)));
+      let content = await write("scene", seed?.content ?? "", lines(posts), sceneHeading(scene, scenes.indexOf(scene)));
+      // Checked against the whole scene: one invented detail here would
+      // spread to the story so far, the digests and every prompt after.
+      if (this.judge && (await this.judge.faithfulSummary(lines(scene.posts), content)) === "no") {
+        console.warn(`[summaries] a summary of ${sceneHeading(scene, scenes.indexOf(scene))} didn't match the scene; rewriting it`);
+        content = await write("scene", "", lines(scene.posts), sceneHeading(scene, scenes.indexOf(scene)), STRICT_NOTE);
+      }
       store.summaries.save(channelId, "scene", scene.end.id, content, scene.end.seq);
       if (current) store.summaries.remove(channelId, "current", startId);
       try {
@@ -239,7 +252,7 @@ export class Summarizer {
    * Ask the model for notes on some material, in chunks if it's long: each
    * chunk is folded into the notes from the ones before.
    */
-  private async fold(profile: Profile, job: SummaryJob, notes: string, lines: string[], heading: string): Promise<string> {
+  private async fold(profile: Profile, job: SummaryJob, notes: string, lines: string[], heading: string, extra = ""): Promise<string> {
     let result = notes;
     for (const chunk of chunkLines(lines)) {
       const request = profileRequest(profile);
@@ -248,7 +261,7 @@ export class Summarizer {
         // Summaries want care more than flair, and room to finish.
         temperature: Math.min(request.temperature, 0.7),
         maxTokens: Math.max(request.maxTokens, 1024),
-        messages: summaryRequest(job, result, chunk, heading),
+        messages: summaryRequest(job, result, chunk, heading, extra),
       });
       result = cleanSummary(response.content);
       console.log(`[summaries] wrote a ${job} summary (${result.length} characters) with "${profile.name}"`);
