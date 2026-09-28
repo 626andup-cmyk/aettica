@@ -150,7 +150,7 @@ function currentChannel() {
  * with an error, this throws an Error carrying the server's message.
  */
 async function api(method, path, body) {
-  const response = await fetch(path, {
+  const response = await fetch(scoped(path), {
     method,
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -160,6 +160,17 @@ async function api(method, path, body) {
     throw new Error(data.error || `Request failed (HTTP ${response.status})`);
   }
   return data;
+}
+
+/**
+ * Each partner is their own app on the server (src/hub.ts): their API is at
+ * /p/<partner>/api/..., and so are their custom emojis. The hub's own API
+ * (/api/hub) and themes are shared.
+ */
+function scoped(path) {
+  if (!state.partnerId || path.startsWith("/api/hub")) return path;
+  if (path.startsWith("/api/") || path.startsWith("/emojis/")) return `/p/${encodeURIComponent(state.partnerId)}${path}`;
+  return path;
 }
 
 /** The API path for something in the open channel, e.g. channelPath("turn"). */
@@ -238,6 +249,8 @@ function isUnread(channel) {
 async function checkLive() {
   if (document.visibilityState !== "visible") return;
   sendPresence();
+  // Other partners' and servers' news, for the dots in the rail and sidebar.
+  loadHub().then(() => renderSidebar());
   // Not while texts are still being revealed, or waiting for you to pause.
   if (state.busy.size > 0 || state.reveal || state.replyTimer) return;
   let data;
@@ -335,7 +348,7 @@ async function openChannel(channelId) {
   // Put the channel in the address bar without adding a history entry for
   // every switch. (Only if it isn't there already, to avoid a loop with the
   // hashchange handler.)
-  const hash = channelId ? `#/channel/${channelId}` : "";
+  const hash = channelId ? `#/p/${encodeURIComponent(state.partnerId)}/channel/${channelId}` : "";
   if (location.hash !== hash) history.replaceState(null, "", hash || location.pathname);
 
   if (channelId) {
@@ -360,9 +373,14 @@ async function openChannel(channelId) {
 
 /** The channel named in the address bar, if it exists. */
 function channelFromAddress() {
-  const match = location.hash.match(/^#\/channel\/(.+)$/);
-  const id = match && decodeURIComponent(match[1]);
-  return state.channels.some((c) => c.id === id) ? id : null;
+  const { channelId } = parseAddress();
+  return state.channels.some((c) => c.id === channelId) ? channelId : null;
+}
+
+/** The partner and channel in the address: #/p/<partner>/channel/<id> (or the older #/channel/<id>). */
+function parseAddress() {
+  const match = location.hash.match(/^#(?:\/p\/([^/]+))?\/channel\/(.+)$/);
+  return { partnerId: match?.[1] ? decodeURIComponent(match[1]) : null, channelId: match ? decodeURIComponent(match[2]) : null };
 }
 
 async function createChannel(event) {
@@ -878,7 +896,9 @@ function renderSidebar() {
       items.push(renderChannelItem(channel, category));
     }
   }
-  els.channelList.replaceChildren(...items);
+  // Other partners in this server: their channels, under their names.
+  const others = otherPartnerItems();
+  els.channelList.replaceChildren(...others.before, ...(others.header ? [others.header] : []), ...items, ...others.after);
 
   // The indicator goes back in after the links, and moves to the open one.
   els.channelList.append(els.channelIndicator);
@@ -886,7 +906,8 @@ function renderSidebar() {
 
   const partnerName = state.settings?.partnerName ?? "Partner";
   els.partnerName.textContent = partnerName;
-  els.partnerAvatar.textContent = initial(partnerName);
+  paintAvatar(els.partnerAvatar, { name: partnerName, avatar: state.settings?.partnerAvatar, color: state.settings?.partnerColor });
+  renderRail();
 }
 
 /** One channel in the sidebar. */
@@ -1660,6 +1681,13 @@ function renderMessage(message, { continued = false, regenerate: showRegenerate 
   if (message.characters.length > 0) {
     root.classList.add("has-character");
     root.style.setProperty("--avatar-hue", String(hueFor(name)));
+  } else if (message.author === "partner") {
+    // Your partner as themselves: their avatar and colour (the Partner menu).
+    if (state.settings.partnerAvatar) avatar.textContent = state.settings.partnerAvatar;
+    if (state.settings.partnerColor >= 0) {
+      root.classList.add("has-character");
+      root.style.setProperty("--avatar-hue", String(state.settings.partnerColor));
+    }
   }
 
   const meta = document.createElement("div");
@@ -1868,7 +1896,7 @@ function withCustomEmojis(html) {
   const byName = new Map(state.emojis.map((e) => [e.name, e]));
   return html.replace(/:([a-z0-9_]{2,32}):/g, (whole, name) => {
     const emoji = byName.get(name);
-    return emoji ? `<img class="custom-emoji" src="/emojis/${emoji.file}" alt=":${name}:" title=":${name}:" />` : whole;
+    return emoji ? `<img class="custom-emoji" src="${scoped(`/emojis/${emoji.file}`)}" alt=":${name}:" title=":${name}:" />` : whole;
   });
 }
 
@@ -2477,15 +2505,10 @@ function readAsBase64(file) {
 
 // ---------------------------------------------------------------- dialogs
 
-/** The partner prompts: who they are, and how they write in each kind of channel. */
-const PROMPT_SETTINGS = ["partnerPrompt", "literaryPrompt", "casualPrompt", "oocPrompt"];
-
 /** Server-wide settings: fill the form from `state.settings` and open it. */
 function openSettings() {
   const s = state.settings;
   const form = els.settingsForm.elements;
-  form.partnerName.value = s.partnerName;
-  for (const key of PROMPT_SETTINGS) form[key].value = s[key];
   fillAssignmentSelect(form.rpAssignment, s.rpAssignment);
   fillAssignmentSelect(form.oocAssignment, s.oocAssignment);
   form.historyLimit.value = s.historyLimit;
@@ -2503,10 +2526,6 @@ function openSettings() {
   fillFallbackSelect(form.decisionFallback, s.decisionFallback);
   form.notebookKeeper.checked = s.notebookKeeper;
   form.jevChecks.checked = s.jevChecks;
-  form.oocBubbles.checked = s.oocBubbles;
-  form.replyDelaySeconds.value = s.replyDelayMs / 1000;
-  form.typingPerCharMs.value = s.typingPerCharMs;
-  updateTextingOnly();
   form.heartbeatHours.value = String(s.heartbeatHours);
   // A custom value (set some other way) still shows.
   if (form.heartbeatHours.value !== String(s.heartbeatHours)) {
@@ -2530,8 +2549,6 @@ async function saveSettings(event) {
   const form = els.settingsForm.elements;
   try {
     const data = await api("PUT", "/api/settings", {
-      partnerName: form.partnerName.value,
-      ...Object.fromEntries(PROMPT_SETTINGS.map((key) => [key, form[key].value])),
       rpAssignment: form.rpAssignment.value,
       oocAssignment: form.oocAssignment.value,
       // Number boxes give text; the server wants numbers.
@@ -2549,9 +2566,6 @@ async function saveSettings(event) {
       decisionFallback: form.decisionFallback.value,
       notebookKeeper: form.notebookKeeper.checked,
       jevChecks: form.jevChecks.checked,
-      oocBubbles: form.oocBubbles.checked,
-      replyDelayMs: Math.round(Number(form.replyDelaySeconds.value) * 1000),
-      typingPerCharMs: Number(form.typingPerCharMs.value),
       heartbeatHours: Number(form.heartbeatHours.value),
       keeperEvery: Number(form.keeperEvery.value),
     });
@@ -4861,6 +4875,9 @@ $("error-dismiss").addEventListener("click", hideError);
 
 // Clicking a channel link changes the address; this opens that channel.
 window.addEventListener("hashchange", () => {
+  // Another partner's channel (from their section, or a notification): switch to them.
+  const address = parseAddress();
+  if (address.partnerId && address.partnerId !== state.partnerId) return switchPartner(address.partnerId, address.channelId);
   const id = channelFromAddress();
   if (id && id !== state.channelId) openChannel(id);
   closeSidebar();
@@ -5023,7 +5040,7 @@ function emojiNode(emoji) {
   }
   const img = document.createElement("img");
   img.className = "custom-emoji";
-  img.src = `/emojis/${found.file}`;
+  img.src = scoped(`/emojis/${found.file}`);
   img.alt = emoji;
   return img;
 }
@@ -5338,14 +5355,224 @@ function stopReveal() {
 
 els.status.addEventListener("dblclick", finishReveal);
 
+// ------------------------------------------------------ partners and servers
+
+/*
+ * Each partner is their own space, with their own memory (src/hub.ts);
+ * servers group them in the rail on the left. The page works on one
+ * partner at a time (`state.partnerId`): opening another partner's channel,
+ * or another server, switches to them.
+ */
+
+const PARTNER_KEY = "aettica.partner";
+
+/** The servers and their partners (with each partner's channels and news), from the hub. */
+async function loadHub() {
+  try {
+    state.hub = (await api("GET", "/api/hub")).servers;
+  } catch {
+    state.hub = state.hub ?? [];
+  }
+}
+
+const allPartners = () => (state.hub ?? []).flatMap((s) => s.partners.map((p) => ({ ...p, serverId: s.id })));
+const currentServer = () => (state.hub ?? []).find((s) => s.partners.some((p) => p.id === state.partnerId)) ?? null;
+const serverName = (server) => server.name || server.partners[0]?.name || "Server";
+
+/** Which partner to open: the address, then the last one you had open, then the first. */
+function pickPartner() {
+  const partners = allPartners();
+  const wanted = [parseAddress().partnerId, readLocal(PARTNER_KEY)];
+  return wanted.find((id) => id && partners.some((p) => p.id === id)) ?? partners[0]?.id ?? null;
+}
+
+/** Open another partner (and one of their channels): the page starts over as theirs. */
+function switchPartner(partnerId, channelId = null) {
+  writeLocal(PARTNER_KEY, partnerId);
+  const hash = `#/p/${encodeURIComponent(partnerId)}${channelId ? `/channel/${encodeURIComponent(channelId)}` : ""}`;
+  history.replaceState(null, "", hash);
+  location.reload();
+}
+
+/** An avatar: an emoji or an initial, in the partner's colour. */
+function paintAvatar(element, { name, avatar, color }) {
+  element.textContent = avatar || initial(name ?? "?");
+  element.classList.toggle("emoji-avatar", Boolean(avatar));
+  if (color >= 0) element.style.setProperty("--partner-hue", String(color));
+  else element.style.removeProperty("--partner-hue");
+  element.classList.toggle("colored-avatar", color >= 0);
+}
+
+/** Whether a partner (not the open one) has news in any channel. */
+function partnerHasNews(partner) {
+  const seen = seenMessages();
+  return partner.channels.some((c) => {
+    const a = partner.activity[c.id];
+    return a && a.author === "partner" && c.id !== state.channelId && seen[c.id] !== a.lastId;
+  });
+}
+
+/** The rail: one button per server, and + for a new one. */
+function renderRail() {
+  const rail = $("server-rail");
+  if (!rail || !state.hub) return;
+  const current = currentServer();
+  const buttons = state.hub.map((server) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "server-button";
+    if (server === current) button.setAttribute("aria-current", "true");
+    button.title = serverName(server);
+    button.setAttribute("aria-label", serverName(server));
+    const first = server.partners[0];
+    const face = document.createElement("span");
+    face.className = "avatar server-face";
+    if (server.partners.length === 1 || !server.name) paintAvatar(face, first);
+    else paintAvatar(face, { name: server.name, avatar: "", color: first?.color ?? -1 });
+    button.append(face);
+    if (server.partners.some((p) => p.id !== state.partnerId && partnerHasNews(p))) {
+      const dot = document.createElement("span");
+      dot.className = "server-unread";
+      button.append(dot);
+    }
+    button.addEventListener("click", () => {
+      if (server === current) return openServerSettings();
+      const last = readLocal(`aettica.partner.${server.id}`);
+      switchPartner(server.partners.find((p) => p.id === last)?.id ?? first.id);
+    });
+    return button;
+  });
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "server-button server-add";
+  add.title = "New server, with a new partner";
+  add.setAttribute("aria-label", "New server");
+  add.textContent = "+";
+  add.addEventListener("click", () => openNewPartner(null));
+  rail.replaceChildren(...buttons, add);
+  $("server-name").textContent = current ? serverName(current) : "Aettica";
+  if (current) writeLocal(`aettica.partner.${current.id}`, state.partnerId);
+}
+
+/**
+ * In a server with several partners, the sidebar shows each one's channels
+ * under their name. The open partner's are the real, draggable list; the
+ * others' are links that switch to them.
+ */
+function otherPartnerItems() {
+  const server = currentServer();
+  if (!server || server.partners.length < 2) return { before: [], after: [], header: null };
+  const index = server.partners.findIndex((p) => p.id === state.partnerId);
+  const section = (partner) => {
+    const header = document.createElement("li");
+    header.className = "partner-section";
+    const face = document.createElement("span");
+    face.className = "avatar";
+    paintAvatar(face, partner);
+    const name = document.createElement("span");
+    name.textContent = partner.name;
+    header.append(face, name);
+    return header;
+  };
+  const items = (partner) => {
+    const categories = new Map(partner.categories.map((c) => [c.id, c.position]));
+    const order = (c) => [c.categoryId ? 1 + (categories.get(c.categoryId) ?? 0) : 0, c.position];
+    return [...partner.channels]
+      .sort((a, b) => order(a)[0] - order(b)[0] || order(a)[1] - order(b)[1])
+      .map((channel) => {
+        const item = document.createElement("li");
+        item.className = "remote-channel";
+        const link = document.createElement("a");
+        link.className = "channel-link";
+        link.href = `#/p/${encodeURIComponent(partner.id)}/channel/${channel.id}`;
+        link.draggable = false;
+        const label = document.createElement("span");
+        label.className = "channel-link-name";
+        label.textContent = channel.name;
+        link.append(channelIcon(channel.kind), label);
+        const a = partner.activity[channel.id];
+        if (a && a.author === "partner" && seenMessages()[channel.id] !== a.lastId) {
+          const dot = document.createElement("span");
+          dot.className = "channel-unread";
+          link.append(dot);
+        }
+        item.append(link);
+        return item;
+      });
+  };
+  const before = server.partners.slice(0, index).flatMap((p) => [section(p), ...items(p)]);
+  const after = server.partners.slice(index + 1).flatMap((p) => [section(p), ...items(p)]);
+  return { before, after, header: section({ ...server.partners[index], ...currentPartnerLook() }) };
+}
+
+const currentPartnerLook = () => ({ name: state.settings.partnerName, avatar: state.settings.partnerAvatar, color: state.settings.partnerColor });
+
+// ------------------------------------------------------------ the partner menu
+
+function openPartner() {
+  const s = state.settings;
+  const form = $("partner-form").elements;
+  paintAvatar($("partner-dialog-avatar"), currentPartnerLook());
+  $("partner-dialog-title").textContent = s.partnerName;
+  form.partnerName.value = s.partnerName;
+  form.partnerAvatar.value = s.partnerAvatar;
+  form.themeColor.checked = s.partnerColor < 0;
+  form.partnerColor.value = s.partnerColor < 0 ? 260 : s.partnerColor;
+  form.partnerColor.disabled = s.partnerColor < 0;
+  for (const key of ["partnerPrompt", "literaryPrompt", "casualPrompt", "oocPrompt"]) form[key].value = s[key];
+  form.oocBubbles.checked = s.oocBubbles;
+  form.replyDelaySeconds.value = s.replyDelayMs / 1000;
+  form.typingPerCharMs.value = s.typingPerCharMs;
+  updateTextingOnly();
+  $("surprise-result").textContent = "Reroll who they are from a few random ingredients. Nothing changes until you press Save.";
+  $("partner-move").hidden = (currentServer()?.partners.length ?? 1) < 2;
+  hideFormError($("partner-form"));
+  $("partner-dialog").showModal();
+}
+
+async function savePartner(event) {
+  event.preventDefault();
+  const form = $("partner-form").elements;
+  try {
+    const { settings } = await api("PUT", "/api/settings", {
+      partnerName: form.partnerName.value,
+      partnerAvatar: form.partnerAvatar.value,
+      partnerColor: form.themeColor.checked ? -1 : Number(form.partnerColor.value),
+      partnerPrompt: form.partnerPrompt.value,
+      literaryPrompt: form.literaryPrompt.value,
+      casualPrompt: form.casualPrompt.value,
+      oocPrompt: form.oocPrompt.value,
+      oocBubbles: form.oocBubbles.checked,
+      replyDelayMs: Math.round(Number(form.replyDelaySeconds.value) * 1000),
+      typingPerCharMs: Number(form.typingPerCharMs.value),
+    });
+    state.settings = settings;
+    $("partner-dialog").close();
+    await loadHub();
+    renderAll();
+  } catch (error) {
+    showFormError($("partner-form"), error.message);
+  }
+}
+
 /** Show the texting numbers only when texting is on. */
 function updateTextingOnly() {
-  const on = els.settingsForm.elements.oocBubbles.checked;
-  for (const element of els.settingsForm.querySelectorAll(".texting-only")) element.hidden = !on;
+  const form = $("partner-form");
+  for (const element of form.querySelectorAll(".texting-only")) element.hidden = !form.elements.oocBubbles.checked;
 }
-els.settingsForm.elements.oocBubbles.addEventListener("change", updateTextingOnly);
 
-/** Settings → "Surprise me": a new partner, filled in but not saved. */
+/** The partner menu's avatar follows what you type and pick. */
+function previewPartnerLook() {
+  const form = $("partner-form").elements;
+  form.partnerColor.disabled = form.themeColor.checked;
+  paintAvatar($("partner-dialog-avatar"), {
+    name: form.partnerName.value,
+    avatar: form.partnerAvatar.value.trim(),
+    color: form.themeColor.checked ? -1 : Number(form.partnerColor.value),
+  });
+}
+
+/** Partner menu → "Surprise me": reroll who they are, filled in but not saved. */
 async function surprisePartner() {
   const button = $("surprise-partner");
   const result = $("surprise-result");
@@ -5353,9 +5580,10 @@ async function surprisePartner() {
   result.textContent = "Rolling…";
   try {
     const { name, prompt, seeds } = await api("POST", "/api/partner/random", {});
-    const form = els.settingsForm.elements;
+    const form = $("partner-form").elements;
     form.partnerName.value = name;
     form.partnerPrompt.value = prompt;
+    previewPartnerLook();
     result.textContent = `Meet ${name} (${seeds}). Press Save to keep them, or roll again.`;
   } catch (error) {
     result.textContent = `✗ ${error.message}`;
@@ -5363,7 +5591,159 @@ async function surprisePartner() {
     button.disabled = false;
   }
 }
+
+async function deletePartner() {
+  const name = state.settings.partnerName;
+  if (!confirm(`Delete ${name}? Their notebook, channels and everything they remember go too. (Their files are kept in the data folder's trash, just in case.)`)) return;
+  if (prompt(`Type ${name} to confirm.`)?.trim() !== name) return;
+  try {
+    await api("DELETE", `/api/hub/partners/${encodeURIComponent(state.partnerId)}`, {});
+    writeLocal(PARTNER_KEY, "");
+    history.replaceState(null, "", location.pathname);
+    location.reload();
+  } catch (error) {
+    showFormError($("partner-form"), error.message);
+  }
+}
+
+/** Give the open partner a server of their own. */
+async function movePartnerOut() {
+  try {
+    await api("POST", `/api/hub/partners/${encodeURIComponent(state.partnerId)}/move`, {});
+    await loadHub();
+    $("partner-dialog").close();
+    renderAll();
+  } catch (error) {
+    showFormError($("partner-form"), error.message);
+  }
+}
+
+// -------------------------------------------------------- new partners
+
+/** A new partner: in a new server (`serverId` null), or in that server. */
+function openNewPartner(serverId) {
+  state.newPartnerServer = serverId;
+  const form = $("new-partner-form");
+  form.reset();
+  const server = serverId && state.hub.find((s) => s.id === serverId);
+  $("new-partner-title").textContent = server ? `A new partner in ${serverName(server)}` : "New server";
+  $("new-partner-note").textContent = server
+    ? "Another partner here, with their own notebook, channels and memory. Their channels show under their name."
+    : "A new partner, with a server of their own. They start fresh: their own notebook, channels and memory, with your connection profiles and preferences.";
+  $("new-server-name-row").hidden = Boolean(server);
+  $("new-partner-surprise-result").textContent = "";
+  hideFormError(form);
+  $("new-partner-dialog").showModal();
+}
+
+async function surpriseNewPartner() {
+  const button = $("new-partner-surprise");
+  const result = $("new-partner-surprise-result");
+  button.disabled = true;
+  result.textContent = "Rolling…";
+  try {
+    const { name, prompt, seeds } = await api("POST", "/api/partner/random", {});
+    const form = $("new-partner-form").elements;
+    form.name.value = name;
+    form.prompt.value = prompt;
+    result.textContent = `Meet ${name} (${seeds}). Roll again, or Create.`;
+  } catch (error) {
+    result.textContent = `✗ ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function createPartner(event) {
+  event.preventDefault();
+  const form = $("new-partner-form").elements;
+  const body = { name: form.name.value, avatar: form.avatar.value, copyFrom: state.partnerId };
+  if (form.prompt.value.trim()) body.prompt = form.prompt.value;
+  const button = $("new-partner-create");
+  button.disabled = true;
+  try {
+    const serverId = state.newPartnerServer;
+    const data = serverId
+      ? await api("POST", `/api/hub/servers/${encodeURIComponent(serverId)}/partners`, body)
+      : await api("POST", "/api/hub/servers", { ...body, serverName: form.serverName.value });
+    switchPartner(data.partnerId);
+  } catch (error) {
+    showFormError($("new-partner-form"), error.message);
+    button.disabled = false;
+  }
+}
+
+// ------------------------------------------------------------- servers
+
+function openServerSettings() {
+  const server = currentServer();
+  if (!server) return;
+  $("server-name-input").value = server.name;
+  $("server-partner-list").replaceChildren(
+    ...server.partners.map((partner) => {
+      const item = document.createElement("li");
+      const face = document.createElement("span");
+      face.className = "avatar";
+      paintAvatar(face, partner.id === state.partnerId ? currentPartnerLook() : partner);
+      const name = document.createElement("span");
+      name.textContent = partner.id === state.partnerId ? `${partner.name} (open)` : partner.name;
+      item.append(face, name);
+      return item;
+    }),
+  );
+  $("server-delete").hidden = state.hub.length < 2;
+  hideFormError($("server-form"));
+  $("server-dialog").showModal();
+}
+
+async function saveServer(event) {
+  event.preventDefault();
+  try {
+    const data = await api("PATCH", `/api/hub/servers/${encodeURIComponent(currentServer().id)}`, { name: $("server-name-input").value });
+    state.hub = data.servers;
+    $("server-dialog").close();
+    renderRail();
+  } catch (error) {
+    showFormError($("server-form"), error.message);
+  }
+}
+
+async function deleteServer() {
+  const server = currentServer();
+  const names = server.partners.map((p) => p.name).join(", ");
+  if (!confirm(`Delete the server "${serverName(server)}", and ${names} with it? Everything they remember goes too. (Their files are kept in the data folder's trash.)`)) return;
+  if (prompt(`Type ${serverName(server)} to confirm.`)?.trim() !== serverName(server)) return;
+  try {
+    await api("DELETE", `/api/hub/servers/${encodeURIComponent(server.id)}`, {});
+    writeLocal(PARTNER_KEY, "");
+    history.replaceState(null, "", location.pathname);
+    location.reload();
+  } catch (error) {
+    showFormError($("server-form"), error.message);
+  }
+}
+
+$("partner-card").addEventListener("click", openPartner);
+$("partner-card").addEventListener("keydown", (event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), openPartner()));
+$("open-partner-from-settings").addEventListener("click", () => {
+  els.settingsDialog.close();
+  openPartner();
+});
+$("partner-form").addEventListener("submit", savePartner);
+$("partner-form").addEventListener("input", previewPartnerLook);
+$("partner-form").elements.oocBubbles.addEventListener("change", updateTextingOnly);
 $("surprise-partner").addEventListener("click", surprisePartner);
+$("partner-delete").addEventListener("click", deletePartner);
+$("partner-move").addEventListener("click", movePartnerOut);
+$("new-partner-form").addEventListener("submit", createPartner);
+$("new-partner-surprise").addEventListener("click", surpriseNewPartner);
+$("server-name").addEventListener("click", openServerSettings);
+$("server-form").addEventListener("submit", saveServer);
+$("server-delete").addEventListener("click", deleteServer);
+$("server-add-partner").addEventListener("click", () => {
+  $("server-dialog").close();
+  openNewPartner(currentServer().id);
+});
 
 // Every "Cancel" / "Close" button closes the dialog it's in.
 for (const button of document.querySelectorAll("[data-close]")) {
@@ -5383,7 +5763,13 @@ if ("serviceWorker" in navigator) {
 // default look while the server answers. (applyThemes corrects it after.)
 if (readLocal(LAST_THEME_KEY)) setStylesheet("theme-app", `/themes/${readLocal(LAST_THEME_KEY)}/theme.css?v=0`);
 
-Promise.all([loadState(), loadThemes(), loadNotebook()])
+// Which partner first (the hub knows who there is), then their state.
+loadHub()
+  .then(() => {
+    state.partnerId = pickPartner();
+    if (state.partnerId) writeLocal(PARTNER_KEY, state.partnerId);
+    return Promise.all([loadState(), loadThemes(), loadNotebook()]);
+  })
   .then(() => {
     // A turn may already be running (from another tab, or from before a
     // reload): keep an eye on it.

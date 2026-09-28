@@ -369,6 +369,10 @@ export interface Settings {
    * (roughly: each gap varies by ±20%). 0 turns it off. See src/heartbeat.ts.
    */
   heartbeatHours: number;
+  /** Your partner's avatar: an emoji, or "" for their initial. */
+  partnerAvatar: string;
+  /** Their colour, as a hue (0–359), or -1 for the theme's accent. */
+  partnerColor: number;
   /** OOC: your partner texts in short bubbles (split at `<cht>`), shown one at a time. */
   oocBubbles: boolean;
   /** How long a bubble takes to "type": `typingBaseMs + characters × typingPerCharMs` (as in Kitsikai). */

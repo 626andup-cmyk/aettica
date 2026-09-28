@@ -251,7 +251,7 @@ export function appVersion(publicDir: string): string {
  * request handler. Nothing is listening yet; `main()` does that.
  */
 export function createApp(config: Config): App {
-  const store = new Store(config.dataDir);
+  const store = new Store(config.dataDir, { example: config.example ?? true });
   const api: ApiOptions = {
     apiKey: config.apiKey,
     baseUrl: config.apiBaseUrl,
@@ -285,7 +285,7 @@ export function createApp(config: Config): App {
   wakeups.onPosted = (channel, messages) => {
     if (presence.isVisible() || !notifier.available()) return;
     const text = messages.map((m) => m.content).join("\n");
-    notifier.notify({ title: `${store.getSettings().partnerName} in #${channel.name}`, text, channelId: channel.id });
+    notifier.notify({ title: `${store.getSettings().partnerName} in #${channel.name}`, text, channelId: channel.id, partnerId: config.partnerId });
   };
   partner.judge = judge;
   summarizer.judge = judge;
@@ -321,7 +321,7 @@ export function createApp(config: Config): App {
   const version = appVersion(config.publicDir);
   const themes = new ThemeLibrary(
     config.themesDir,
-    join(config.dataDir, "themes"),
+    config.userThemesDir ?? join(config.dataDir, "themes"),
     readFileSync(join(config.publicDir, "style.css"), "utf8"),
   );
 
@@ -1381,28 +1381,27 @@ async function serveStatic(publicDir: string, pathname: string): Promise<Respons
 // --------------------------------------------------------------- start up
 
 /** Start listening. Only runs when this file is executed directly. */
-function main(): void {
+async function main(): Promise<void> {
   const config = loadConfig();
-  const app = createApp(config);
+  // One app per partner, grouped into servers (src/hub.ts).
+  const { createHub } = await import("./hub.ts");
+  const hub = createHub(config);
 
   const server = Bun.serve({
     hostname: config.host,
     port: config.port,
-    fetch: app.fetch,
+    fetch: hub.fetch,
     // Model replies can take a while; don't let Bun close the connection on
     // a slow generation. (Bun's limit is in seconds, 255 at most; 0 = never.)
     idleTimeout: 0,
   });
 
-  // Catch up on any summaries that were due when the server last stopped.
-  app.summarizer.scheduleAll(15_000);
-  // The heartbeat checks every 10 minutes whether a beat is due, and keeps
-  // the phone from putting the server to sleep while it's on.
-  app.heartbeat.start();
-  if (app.store.getSettings().heartbeatHours > 0) keepAwake();
+  // Catch up on summaries that were due when the server last stopped, and
+  // start each partner's heartbeat (which also keeps the phone awake while on).
+  hub.start();
 
   console.log(`Aettica is running at http://${server.hostname}:${server.port}`);
-  console.log(`Saving your data in ${config.dataDir}`);
+  console.log(`Saving your data in ${config.dataDir} (${hub.apps.size} partner${hub.apps.size === 1 ? "" : "s"})`);
   if (!config.apiKey) {
     console.warn("Warning: NANOGPT_API_KEY is not set, so your partner can't reply yet. See .env.example.");
   }
@@ -1411,5 +1410,5 @@ function main(): void {
 // `import.meta.main` is true when this file is run with `bun run src/server.ts`,
 // and false when the tests import it. That way importing doesn't start a server.
 if (import.meta.main) {
-  main();
+  void main();
 }

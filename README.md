@@ -6,6 +6,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 
 ## What it can do
 
+- **Partners and servers**: as many partners as you like, each a different person with their own memory (notebook, secrets, channels, ideas, settings) and usually a server of their own, in a rail on the left. A server can hold several partners. Each partner has their own menu (tap the partner card): name, emoji avatar, colour, who they are, how they write, and 🎲 Surprise me. See [partners and servers](docs/partners.md).
 - **Channels**: create, rename and delete them from the sidebar, group them into collapsible **categories**, and **drag** to rearrange (press and hold on a phone). See [categories](docs/categories.md).
   - **Roleplay** channels are storylines. Each has its own cast: characters and lore pinned from the notebook.
   - **Out-of-character** channels are for talking with your partner as themselves. They know which storylines exist.
@@ -29,7 +30,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - **Reactions**: react to messages with emojis, and your partner reacts too. Upload **custom emojis** and use them as `:name:`. See [reactions](docs/reactions.md).
 - **Comments**: select text in a message to comment on it; your partner replies in the thread.
 - **Inbox** (the tray at the top of the channel list): your partner's proposals and suggested changes, to approve or reject.
-- **Texting in OOC**: your partner texts in short bursts that arrive one at a time with "typing…", and waits for you to pause before answering. **🎲 Surprise me** in Settings invents a new partner. See [texting](docs/texting.md).
+- **Texting in OOC**: your partner texts in short bursts that arrive one at a time with "typing…", and waits for you to pause before answering. **🎲 Surprise me** invents a new partner (in the partner menu, or when you make one). See [texting](docs/texting.md).
 - **Heartbeat** (off by default): now and then, even with the app closed, your partner comes up with ideas, Jev grades them, and they text you the best one, with a phone notification. The rest wait in their **idea drawer** for a better moment. See [the heartbeat](docs/heartbeat.md).
 - **Your partner reaches out**: when you come back after a while, when a scene ends, or when a suggestion is waiting for them, your partner may write to you in OOC first. Jev, a small decision model, checks it's the moment first, and chattiness, quiet hours and a cooldown keep it from being too much (Settings → Your partner reaching out, with a log of every wake-up). A dot marks channels with messages you haven't seen.
 - **Partner's turn**: let your partner write without a new message from you, including opening an empty channel.
@@ -88,7 +89,7 @@ Everything else (prompt, model, characters and so on) is changed in the app.
 
 ## Your data
 
-Everything is saved in the `data/` folder: your chat and settings in an SQLite database, `data/aettica.db`, and your own themes in `data/themes/`. To back up, stop the server and copy the whole `data/` folder. (While the server is running, the database's recent changes are also in `aettica.db-wal` and `aettica.db-shm`, so copy those too.) The `data/` folder and `.env` are never committed to git.
+Everything is saved in the `data/` folder. Your first partner's chat and settings are in an SQLite database, `data/aettica.db`. Each other partner has their own folder, `data/partners/<id>/`. Your own themes are in `data/themes/`, and the list of servers is `data/hub.json` (see [partners and servers](docs/partners.md)). To back up, stop the server and copy the whole `data/` folder. (While the server is running, the database's recent changes are also in `aettica.db-wal` and `aettica.db-shm`, so copy those too.) The `data/` folder and `.env` are never committed to git.
 
 Aettica has no login. Keep `HOST` at `127.0.0.1` so that nobody else on your Wi-Fi can open your chat.
 
@@ -118,6 +119,7 @@ src/
   jev.ts       Asking Jev, the decision model, yes-or-no questions (and series of them)
   keeper.ts    The notebook keeper: noting what the story establishes
   judge.ts     Jev's double-checks on the guesses Aettica makes
+  hub.ts       Partners and servers: one app per partner, each with their own memory
   heartbeat.ts The heartbeat: ideas, graded, and shared at the right moment
   ideas.ts     The idea drawer
   notify.ts    Phone notifications (Termux)

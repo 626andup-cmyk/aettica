@@ -44,6 +44,8 @@ const settings: Settings = {
   keeperEvery: 6,
   jevChecks: true,
   heartbeatHours: 0,
+  partnerAvatar: "",
+  partnerColor: -1,
   oocBubbles: false,
   typingBaseMs: 600,
   typingPerCharMs: 40,
