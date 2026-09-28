@@ -542,6 +542,42 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "react_to_message",
+    description:
+      "React to a message in this channel with an emoji, like a quick 👍, 😂 or ❤️: to the user's latest message, or the one you quote. A reaction says a lot without a reply; use one when it's what you'd naturally do.",
+    parameters: object(
+      {
+        emoji: str('One emoji, like "😂", or a custom one by name, like ":blob_wave:".'),
+        quote: str("A few words copied exactly from the message. Leave out to react to the user's latest message."),
+      },
+      ["emoji"],
+    ),
+    available: (ctx) => ctx.mode === "post",
+    run: ({ store, channel }, args) => {
+      const quote = maybe(args, "quote");
+      const posts = store
+        .getMessages(channel.id)
+        .filter((m) => m.kind === "post")
+        .reverse();
+      const message = quote
+        ? posts.find((m) => plain(m.content).includes(plain(quote)))
+        : posts.find((m) => m.author === "user");
+      if (!message) {
+        throw new ToolError(quote ? `No recent message in this channel contains "${quote}". Quote a few words exactly.` : "The user hasn't written here yet.");
+      }
+      let emoji: string;
+      try {
+        emoji = store.reactions.cleanEmoji(need(args, "emoji"));
+        store.reactions.add(message.id, "partner", emoji);
+      } catch (error) {
+        const custom = store.reactions.listEmojis().map((e) => `:${e.name}:`);
+        throw new ToolError(`${error instanceof Error ? error.message : error}${custom.length ? ` Custom emojis: ${custom.join(" ")}.` : ""}`);
+      }
+      const snippet = message.content.replace(/\s+/g, " ").slice(0, 50);
+      return { result: { reacted: emoji }, summary: `reacted ${emoji} to "${snippet}${message.content.length > 50 ? "…" : ""}"` };
+    },
+  },
+  {
     name: "reply_to_comment",
     description: "Reply in a comment thread, by the thread's id.",
     parameters: object({ thread: str("The thread's id."), note: str("Your reply.") }, ["thread", "note"]),

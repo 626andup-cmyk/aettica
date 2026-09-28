@@ -653,6 +653,34 @@
       </div>
     </dialog>
 
+    <!-- Custom emojis: images used as :name:, in reactions and messages. -->
+    <dialog id="emoji-dialog" class="dialog surface">
+      <form id="emoji-form" method="dialog">
+        <h2 class="dialog-title">Custom emojis</h2>
+        <p class="hint">
+          Small images you and your partner can react with, and write in messages as <code>:name:</code>. PNG, GIF
+          (animated too), JPEG or WebP, up to 512 KB.
+        </p>
+        <ul id="emoji-list" class="emoji-list"></ul>
+        <div class="grid assignment-grid">
+          <div>
+            <label for="emoji-file">Image</label>
+            <input id="emoji-file" type="file" accept="image/png,image/gif,image/jpeg,image/webp" />
+          </div>
+          <div>
+            <label for="emoji-name">Name</label>
+            <input id="emoji-name" autocomplete="off" maxlength="32" placeholder="blob_wave" />
+          </div>
+        </div>
+        <p class="form-error" role="alert" hidden></p>
+        <div class="dialog-buttons">
+          <button type="submit" class="button">Add emoji</button>
+          <span class="spacer"></span>
+          <button type="button" class="button button-primary" data-close>Done</button>
+        </div>
+      </form>
+    </dialog>
+
     <!-- The reference library: long texts your partner can search (scripts, books). -->
     <dialog id="library-dialog" class="dialog surface library">
       <h2 class="dialog-title">Library</h2>

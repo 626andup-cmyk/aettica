@@ -110,6 +110,7 @@ function msg(author: Author, content: string, extra: Partial<Message> = {}): Mes
     content,
     characters: [],
     attachments: [],
+    reactions: [],
     createdAt: new Date(0).toISOString(),
     ...extra,
   };

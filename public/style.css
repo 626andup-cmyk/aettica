@@ -2138,3 +2138,141 @@ button.attach-chip {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ---------------------------------------------------------- reactions */
+
+.message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 1px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--channel-link-active-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.reaction:hover {
+  border-color: var(--text-muted);
+}
+
+/* Yours: in the accent colour. */
+.reaction.mine {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.reaction-emoji {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.reaction-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A custom emoji: text-sized in messages, a little larger on its own. */
+.custom-emoji {
+  width: 1.375em;
+  height: 1.375em;
+  object-fit: contain;
+  vertical-align: -0.3em;
+}
+
+.reaction .custom-emoji {
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+}
+
+.reaction-picker {
+  position: fixed;
+  z-index: 50;
+  width: min(300px, calc(100vw - 16px));
+  padding: 10px;
+  border: var(--dialog-border);
+  border-radius: var(--radius-md);
+  background: var(--dialog-bg);
+  box-shadow: var(--dialog-shadow);
+  backdrop-filter: var(--dialog-backdrop);
+  color: var(--text);
+}
+
+.reaction-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.reaction-picker-grid button {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.reaction-picker-grid button:hover {
+  background: var(--message-hover-bg);
+}
+
+.reaction-picker-grid .custom-emoji {
+  width: 26px;
+  height: 26px;
+}
+
+.reaction-picker-other {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.reaction-picker-other input {
+  flex: 1;
+  min-width: 0;
+}
+
+.emoji-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 6px 12px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.emoji-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.emoji-list code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.emoji-list .custom-emoji {
+  width: 28px;
+  height: 28px;
+}

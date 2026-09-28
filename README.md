@@ -25,6 +25,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - **Notebook keeper**: every few posts, your partner notes new characters, places and lasting facts in the notebook, after Jev checks each one against the messages. See [the notebook keeper](docs/notebook-keeper.md).
 - **Reference library** (Notebook → Library): upload long texts like a film's script or a book for a fandom. Your partner searches them and reads the passages they need, instead of guessing; nothing is sent whole. See [the library](docs/library.md).
 - **Attach notes** to a message with the paperclip, or write `[[Name]]` in it: your partner gets those entries in full.
+- **Reactions**: react to messages with emojis, and your partner reacts too. Upload **custom emojis** and use them as `:name:`. See [reactions](docs/reactions.md).
 - **Comments**: select text in a message to comment on it; your partner replies in the thread.
 - **Inbox** (the tray at the top of the channel list): your partner's proposals and suggested changes, to approve or reject.
 - **Your partner reaches out**: when you come back after a while, when a scene ends, or when a suggestion is waiting for them, your partner may write to you in OOC first. Jev, a small decision model, checks it's the moment first, and chattiness, quiet hours and a cooldown keep it from being too much (Settings → Your partner reaching out, with a log of every wake-up). A dot marks channels with messages you haven't seen.
@@ -113,6 +114,7 @@ src/
   keeper.ts    The notebook keeper: noting what the story establishes
   jevlog.ts    The Jev log: every call from the last 36 hours
   json.ts      Finding JSON in a model's reply
+  reactions.ts Emoji reactions and custom emojis
   library.ts   The reference library: splitting long texts into passages, and searching them
   notebook.ts  The notebook: entries, folders, suggestions and each channel's cast
   permissions.ts  Who can see, edit and manage each notebook entry
