@@ -334,7 +334,13 @@ export class Notebook {
    * prefix is the exception: it's only a shortcut for your own posts, so you
    * set it directly, even on shared characters.
    */
-  editEntry(actor: Author, id: string, input: Record<string, unknown>): { entry: EntryView } | { suggestion: Suggestion } {
+  editEntry(
+    actor: Author,
+    id: string,
+    input: Record<string, unknown>,
+    /** `suggest`: make a suggestion even where the actor could edit directly (your partner, on your entries, unless you asked). */
+    options: { suggest?: boolean } = {},
+  ): { entry: EntryView } | { suggestion: Suggestion } {
     const current = this.getEntry(actor, id);
     const change = contentChanges(input);
     const hasChange = Object.keys(change).length > 0;
@@ -345,7 +351,7 @@ export class Notebook {
       ? this.checkPrefix(proxyPrefix(input.proxyPrefix), current.kind, current.owner, id)
       : current.proxyPrefix;
 
-    if (current.access.edit === "suggest") {
+    if (current.access.edit === "suggest" || (options.suggest && hasChange)) {
       if (!hasChange && !setsPrefix) throw new ValidationError("There's nothing to suggest.");
       if (setsPrefix) this.applyChange(id, {}, prefix);
       return hasChange ? { suggestion: this.addSuggestion(actor, id, change) } : { entry: this.getEntry(actor, id) };

@@ -84,6 +84,7 @@ export function defaultSettings(): Settings {
     quietEnd: 8,
     notebookKeeper: true,
     keeperEvery: 6,
+    jevChecks: true,
     appTheme: "classic",
   };
 }
@@ -174,6 +175,10 @@ export function validateSettings(input: unknown): Partial<Settings> {
   }
   for (const key of ["quietStart", "quietEnd"] as const) {
     if (raw[key] !== undefined) clean[key] = numberInRange(raw[key], key, LIMITS.hour, true);
+  }
+  if (raw.jevChecks !== undefined) {
+    if (typeof raw.jevChecks !== "boolean") throw new ValidationError("jevChecks must be true or false");
+    clean.jevChecks = raw.jevChecks;
   }
   if (raw.notebookKeeper !== undefined) {
     if (typeof raw.notebookKeeper !== "boolean") throw new ValidationError("notebookKeeper must be true or false");

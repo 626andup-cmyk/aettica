@@ -362,6 +362,8 @@ export interface Settings {
   notebookKeeper: boolean;
   /** How many new posts in a roleplay channel before the keeper looks at them (a scene ending always counts). */
   keeperEvery: number;
+  /** Whether Jev double-checks guesses: comment replies, deleting entries, summaries, channel mentions (src/judge.ts). */
+  jevChecks: boolean;
 }
 
 /** How readily your partner reaches out on their own (see `Settings.wakeups`). */

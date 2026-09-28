@@ -117,6 +117,7 @@ import { Decider, testJev } from "./jev.ts";
 import { JEV_LOG_HOURS } from "./jevlog.ts";
 import { FRESH_SCENE_MINUTES, Wakeups } from "./wakeups.ts";
 import { Keeper } from "./keeper.ts";
+import { Judge } from "./judge.ts";
 import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
 import { ENTRY_TEMPLATES } from "./notebook.ts";
 import type { CastMember, Channel, Message } from "./types.ts";
@@ -164,6 +165,8 @@ export interface App {
   wakeups: Wakeups;
   /** Notes what the story establishes in the notebook, between turns. */
   keeper: Keeper;
+  /** Jev's double-checks on the guesses Aettica makes (src/judge.ts). */
+  judge: Judge;
 }
 
 /**
@@ -256,6 +259,9 @@ export function createApp(config: Config): App {
   );
   const wakeups = new Wakeups(store, partner, decider, Boolean(config.apiKey));
   const keeper = new Keeper(store, api, decider, config.keeperDelayMs);
+  const judge = new Judge(store, decider);
+  partner.judge = judge;
+  summarizer.judge = judge;
   const autoWake = config.autoWake ?? true;
 
   /**
@@ -319,7 +325,11 @@ export function createApp(config: Config): App {
     const thread = store.comments.thread(threadId);
     const message = store.getMessage(thread.messageId);
     const involved = message.author === "partner" || thread.comments.some((c) => c.author === "partner");
-    if (!involved) return { thread };
+    // On your own message, in a thread they're not in: Jev decides whether
+    // your comment invites their reply (src/judge.ts).
+    const invited =
+      !involved && (await judge.wantsReply(thread.quote, thread.comments.at(-1)?.note ?? "", message.content));
+    if (!involved && !invited) return { thread };
     const reply = await tryTurn(() => partner.replyToComment(threadId));
     return { thread: store.comments.thread(threadId), ...reply };
   }
@@ -1099,7 +1109,7 @@ export function createApp(config: Config): App {
     }
   }
 
-  return { fetch, store, partner, themes, summarizer, decider, wakeups, keeper };
+  return { fetch, store, partner, themes, summarizer, decider, wakeups, keeper, judge };
 }
 
 /**

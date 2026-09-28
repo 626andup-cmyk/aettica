@@ -34,6 +34,12 @@ export interface ToolContext {
   channel: Channel;
   /** `"post"` for a normal turn; `"comment"` when replying to a comment thread. */
   mode: "post" | "comment";
+  /**
+   * Make edits suggestions even where your partner could edit directly: set
+   * for an edit to one of your entries that Jev couldn't confirm you asked
+   * for (src/judge.ts).
+   */
+  suggestOnly?: boolean;
 }
 
 /** What running a tool produced. */
@@ -268,7 +274,7 @@ const TOOLS: ToolDefinition[] = [
       },
       ["name"],
     ),
-    run: ({ store }, args) => {
+    run: ({ store, suggestOnly }, args) => {
       const entry = findEntry(store, need(args, "name"));
       const change: Record<string, unknown> = {};
       const newName = maybe(args, "new_name");
@@ -276,11 +282,12 @@ const TOOLS: ToolDefinition[] = [
       if (args.fields !== undefined) change.fields = mergeFields(entry.fields, args.fields);
       if (args.notes !== undefined) change.notes = args.notes;
       if (Object.keys(change).length === 0) throw new ToolError("Nothing to change: give new_name, fields or notes.");
-      const outcome = store.notebook.editEntry("partner", entry.id, {
-        name: change.name,
-        fields: change.fields,
-        systemPrompt: change.notes,
-      });
+      const outcome = store.notebook.editEntry(
+        "partner",
+        entry.id,
+        { name: change.name, fields: change.fields, systemPrompt: change.notes },
+        { suggest: suggestOnly },
+      );
       return "suggestion" in outcome
         ? {
             result: { suggested: true, note: "The user will review your suggestion." },

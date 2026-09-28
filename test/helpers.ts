@@ -41,11 +41,22 @@ export interface FakeNanoGpt {
   }>;
   /** Queue replies; each request takes the next one. Defaults to "Reply N". */
   replies: FakeReply[];
+  /**
+   * Jev's requests (the ones with a "questions" response format), kept
+   * apart so its checks never take a reply meant for a model.
+   */
+  jevRequests: Array<{ model: string; messages: ChatMessage[]; response_format: { questions: Record<string, unknown> } }>;
+  /**
+   * Jev's replies, in order. When there are none, every question is
+   * answered "unsure" (50/50), which always takes the safe path: exactly
+   * what Aettica did before asking.
+   */
+  jevReplies: FakeReply[];
   stop: () => void;
 }
 
 export function startFakeNanoGpt(): FakeNanoGpt {
-  const fake: FakeNanoGpt = { baseUrl: "", requests: [], replies: [], stop: () => {} };
+  const fake: FakeNanoGpt = { baseUrl: "", requests: [], replies: [], jevRequests: [], jevReplies: [], stop: () => {} };
 
   const server = Bun.serve({
     port: 0, // let the OS pick a free port
@@ -57,9 +68,20 @@ export function startFakeNanoGpt(): FakeNanoGpt {
       }
 
       if (path === "/v1/chat/completions") {
-        const body = (await request.json()) as Omit<FakeNanoGpt["requests"][number], "auth">;
-        fake.requests.push({ ...body, auth: request.headers.get("authorization") });
-        const reply = fake.replies.shift() ?? { content: `Reply ${fake.requests.length}` };
+        const body = (await request.json()) as Omit<FakeNanoGpt["requests"][number], "auth"> & {
+          response_format?: { type?: string; questions?: Record<string, unknown> };
+        };
+        let reply: FakeReply;
+        if (body.response_format?.type === "questions") {
+          fake.jevRequests.push(body as FakeNanoGpt["jevRequests"][number]);
+          const unsure = Object.fromEntries(
+            Object.keys(body.response_format.questions ?? {}).map((id) => [id, { choice: "yes", probabilities: { yes: 0.5, no: 0.5 } }]),
+          );
+          reply = fake.jevReplies.shift() ?? { content: JSON.stringify({ answers: unsure }) };
+        } else {
+          fake.requests.push({ ...body, auth: request.headers.get("authorization") });
+          reply = fake.replies.shift() ?? { content: `Reply ${fake.requests.length}` };
+        }
 
         if ("status" in reply) {
           return Response.json({ error: { message: reply.error } }, { status: reply.status });
