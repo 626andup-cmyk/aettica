@@ -379,6 +379,32 @@ export const MIGRATIONS: Migration[] = [
     PRIMARY KEY (message_id, entry_id)
   );
   `,
+
+  // ---------------------------------------------------------------- 7
+  // Stage 7: summaries, so long stories fit in the context (see
+  // src/summaries.ts).
+  `
+  CREATE TABLE summaries (
+    channel_id  TEXT NOT NULL REFERENCES channels (id) ON DELETE CASCADE,
+    -- 'scene':   one finished scene, ended by the scene break scene_id.
+    -- 'story':   the story so far: every finished scene, folded together.
+    -- 'current': the older part of the scene still going (in OOC, of the
+    --            whole conversation), started by the scene break scene_id
+    --            ('' for the channel's first scene).
+    -- 'digest':  one or two lines about the channel, for OOC.
+    kind        TEXT NOT NULL CHECK (kind IN ('scene', 'story', 'current', 'digest')),
+    scene_id    TEXT NOT NULL DEFAULT '',
+    content     TEXT NOT NULL,
+    -- The newest message (its seq) the summary covers.
+    through_seq INTEGER NOT NULL DEFAULT 0,
+    -- 1 when messages it covers were edited or deleted: it's rewritten.
+    stale       INTEGER NOT NULL DEFAULT 0,
+    -- 1 when you wrote or edited it: it's kept as you left it.
+    edited      INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (channel_id, kind, scene_id)
+  );
+  `,
 ];
 
 /**

@@ -107,7 +107,7 @@ The prompt stack keeps its five layers, but layers 1 and 3 now depend on the cha
 | 3. Characters | This channel's character sheet | A list of the server's channels and who your partner plays in each |
 | 5. Messages | This channel's messages only | This channel's messages only |
 
-The OOC channel list is the first small piece of the **server digest** from the design doc. Stage 7 adds a short summary of each channel to it.
+The OOC channel list is the first small piece of the **server digest** from the design doc. [Stage 7](stage-7.md) adds a short summary of each channel to it.
 
 The "no new message" nudges also differ: in a roleplay channel your partner is asked to move the story forward; in OOC, to say what's on their mind.
 

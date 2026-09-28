@@ -19,6 +19,7 @@ import { Notebook } from "./notebook.ts";
 import { Profiles } from "./profiles.ts";
 import { Comments, Proposals, ToolLog } from "./activity.ts";
 import { parseSheet } from "./sheets.ts";
+import { Summaries } from "./summaries.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
   Author,
@@ -61,6 +62,9 @@ export function defaultSettings(): Settings {
     casualPrompt: readDefault("casual.md"),
     oocPrompt: readDefault("ooc.md"),
     historyLimit: 40,
+    summaries: true,
+    summaryEvery: 20,
+    summaryAssignment: "",
     appTheme: "classic",
   };
 }
@@ -83,6 +87,7 @@ function readDefault(fileName: string): string {
  */
 const LIMITS = {
   historyLimit: { min: 1, max: 1000 },
+  summaryEvery: { min: 2, max: 500 },
   /** Longest partner prompt, in characters. */
   longText: 100_000,
   /** Longest name (channel, partner), in characters. */
@@ -110,8 +115,18 @@ export function validateSettings(input: unknown): Partial<Settings> {
   // roulette exists.
   if (raw.rpAssignment !== undefined) clean.rpAssignment = assignment(raw.rpAssignment, "rpAssignment") ?? "";
   if (raw.oocAssignment !== undefined) clean.oocAssignment = assignment(raw.oocAssignment, "oocAssignment") ?? "";
+  if (raw.summaryAssignment !== undefined) {
+    clean.summaryAssignment = assignment(raw.summaryAssignment, "summaryAssignment") ?? "";
+  }
   if (raw.historyLimit !== undefined) {
     clean.historyLimit = numberInRange(raw.historyLimit, "historyLimit", LIMITS.historyLimit, true);
+  }
+  if (raw.summaryEvery !== undefined) {
+    clean.summaryEvery = numberInRange(raw.summaryEvery, "summaryEvery", LIMITS.summaryEvery, true);
+  }
+  if (raw.summaries !== undefined) {
+    if (typeof raw.summaries !== "boolean") throw new ValidationError("summaries must be true or false");
+    clean.summaries = raw.summaries;
   }
   // Only the id's form is checked here; the server checks the theme exists.
   if (raw.appTheme !== undefined) clean.appTheme = themeId(raw.appTheme, "appTheme");
@@ -363,6 +378,13 @@ export class Store {
   readonly comments: Comments;
   /** Things your partner asked you to approve. */
   readonly proposals: Proposals;
+  /** Scene summaries, the story so far and the digest (see `src/summaries.ts`). */
+  readonly summaries: Summaries;
+  /**
+   * Called after a channel's messages change (added, edited, deleted), so
+   * summaries can catch up (see src/summarizer.ts).
+   */
+  onMessagesChanged: ((channelId: string) => void) | null = null;
 
   /**
    * Open (or create) the database inside `dataDir`.
@@ -386,6 +408,7 @@ export class Store {
     this.toolLog = new ToolLog(this.db);
     this.comments = new Comments(this.db);
     this.proposals = new Proposals(this.db);
+    this.summaries = new Summaries(this.db);
 
     if (isNew) {
       const imported = !inMemory && importLegacyChat(this, dataDir);
@@ -644,6 +667,7 @@ export class Store {
       (input.characters ?? []).forEach((name, position) => insertCharacter.run({ id, name, position }));
     })();
 
+    this.onMessagesChanged?.(input.channelId);
     return this.getMessage(id);
   }
 
@@ -696,17 +720,22 @@ export class Store {
 
   /** Replace a message's text. Throws `NotFoundError` if it doesn't exist. */
   editMessage(id: string, content: string): Message {
+    this.summaries.messageChanging(this.getMessage(id), false);
     const result = this.db
       .query("UPDATE messages SET content = $content, edited_at = $editedAt WHERE id = $id")
       .run({ id, content, editedAt: new Date().toISOString() });
     if (result.changes === 0) throw new NotFoundError("message");
-    return this.getMessage(id);
+    const message = this.getMessage(id);
+    this.onMessagesChanged?.(message.channelId);
+    return message;
   }
 
   /** Delete one message. Throws `NotFoundError` if it doesn't exist. */
   deleteMessage(id: string): void {
-    const result = this.db.query("DELETE FROM messages WHERE id = $id").run({ id });
-    if (result.changes === 0) throw new NotFoundError("message");
+    const message = this.getMessage(id); // throws NotFoundError
+    this.summaries.messageChanging(message, true);
+    this.db.query("DELETE FROM messages WHERE id = $id").run({ id });
+    this.onMessagesChanged?.(message.channelId);
   }
 
   /**
@@ -740,5 +769,6 @@ export class Store {
   clearMessages(channelId: string): void {
     this.getChannel(channelId); // throws NotFoundError for an unknown channel
     this.db.query("DELETE FROM messages WHERE channel_id = $channelId").run({ channelId });
+    this.summaries.clear(channelId);
   }
 }

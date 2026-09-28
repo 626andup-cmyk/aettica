@@ -297,9 +297,34 @@
           <button type="button" class="link-button inline-link" id="open-models">Profiles and roulettes…</button>
         </p>
 
-        <label for="setting-history">History</label>
+        <h3 class="section-title">Memory</h3>
+        <label for="setting-history">Recent messages</label>
         <input id="setting-history" name="historyLimit" type="number" min="1" max="1000" step="1" />
-        <p class="hint">How many recent messages in a channel your partner can see.</p>
+        <p class="hint">How many of a channel's newest messages your partner always reads in full.</p>
+
+        <label class="check-option">
+          <input type="checkbox" name="summaries" />
+          <span
+            ><strong>Summaries</strong><br /><span class="hint"
+              >Your partner remembers older messages through summaries: of each scene when it ends, the story so
+              far, and a line or two per channel for OOC. Off: older messages are simply left out.</span
+            ></span
+          >
+        </label>
+        <div class="grid assignment-grid summaries-only">
+          <div>
+            <label for="setting-summary-every">Summarize every</label>
+            <input id="setting-summary-every" name="summaryEvery" type="number" min="2" max="500" step="1" />
+          </div>
+          <div>
+            <label for="setting-summary-assignment">Summaries written by</label>
+            <select id="setting-summary-assignment" name="summaryAssignment"></select>
+          </div>
+        </div>
+        <p class="hint summaries-only">
+          In a long scene (or OOC chat), once this many more messages have piled up beyond the recent ones, the
+          oldest are folded into a summary of it. A cheap, careful model is a good choice for summaries.
+        </p>
 
         <p class="form-error" role="alert" hidden></p>
 
@@ -360,6 +385,35 @@
           <label for="cast-add" class="visually-hidden">Pin from the notebook</label>
           <select id="cast-add" class="cast-add"></select>
         </div>
+
+        <!--
+          Memory: the channel's summaries (stage 7). Changes here are saved
+          straight away (they don't wait for Save).
+        -->
+        <details class="memory" id="channel-memory">
+          <summary>Memory</summary>
+          <p class="hint" id="memory-note"></p>
+          <div class="rp-only">
+            <label for="memory-story">The story so far</label>
+            <textarea id="memory-story" rows="7" placeholder="Written when the first scene ends."></textarea>
+            <p class="hint">
+              Updated from each scene's summary as scenes end. Edit it and press Save story to keep your own
+              words; empty it to have it written again.
+            </p>
+            <div class="memory-buttons">
+              <button type="button" class="button" id="memory-save-story">Save story</button>
+            </div>
+          </div>
+          <label id="memory-earlier-label">Earlier in this scene</label>
+          <p class="memory-text" id="memory-earlier"></p>
+          <label>In short</label>
+          <p class="memory-text" id="memory-digest"></p>
+          <p class="hint" id="memory-status" role="status"></p>
+          <div class="memory-buttons">
+            <button type="button" class="button" id="memory-update">Update now</button>
+            <button type="button" class="button" id="memory-rebuild">Rebuild all</button>
+          </div>
+        </details>
 
         <p class="form-error" role="alert" hidden></p>
 

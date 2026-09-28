@@ -39,7 +39,8 @@
 import { CancelledError, createChatCompletion, type ApiOptions, type ToolSpec } from "./nanogpt.ts";
 import { replyToMessages } from "./posts.ts";
 import { parseExtraParams } from "./profiles.ts";
-import { buildPromptStack, type PromptReview, type PromptThread } from "./prompt.ts";
+import { buildPromptStack, type PromptMemory, type PromptReview, type PromptThread } from "./prompt.ts";
+import { channelSummaryText, splitScenes, windowStart, type SeqMessage } from "./summaries.ts";
 import type { Store } from "./store.ts";
 import { extractTextToolCalls, parseArguments, type ParsedCall } from "./toolcalls.ts";
 import { runTool, toolSpecs, type ToolContext, type ToolOutcome } from "./tools.ts";
@@ -99,8 +100,10 @@ export class BusyError extends Error {
  *
  * OOC chat is an agentic job, so its roulettes prefer tool-capable profiles.
  */
-export function pickProfile(store: Store, channel: Channel, random?: number): Profile {
+export function pickProfile(store: Store, channel: Channel, random?: number, job: "turn" | "summary" = "turn"): Profile {
   const settings = store.getSettings();
+  // Summaries (stage 7) have their own assignment, or use roleplay's.
+  if (job === "summary") return store.profiles.pick(settings.summaryAssignment || settings.rpAssignment, false, random);
   const assignment = channel.assignment ?? (channel.kind === "ooc" ? settings.oocAssignment : settings.rpAssignment);
   return store.profiles.pick(assignment, channel.kind === "ooc", random);
 }
@@ -133,10 +136,22 @@ export function promptForChannel(store: Store, channelId: string, options: Promp
   // hidden from them never reach the prompt.
   const notebook = channel.kind === "rp" ? store.notebook.forPrompt(channelId) : undefined;
 
+  // Which messages are sent in full, and the summaries of those before
+  // them (stage 7).
+  const seqMessages = store.summaries.withSeq(channelId, messages);
+  const current = store.summaries.all(channelId).find((s) => s.kind === "current") ?? null;
+  const start = windowStart(seqMessages, channel.kind, {
+    historyLimit: settings.historyLimit,
+    summaryEvery: settings.summaryEvery,
+    enabled: settings.summaries,
+    current,
+  });
+  const memory = settings.summaries ? memoryFor(store, channel, seqMessages, start) : undefined;
+
   // Notes you attached to messages still in the conversation, unless
   // they're already in the prompt as the cast, lore or linked notes.
   const inPrompt = new Set([...(notebook?.pinned ?? []), ...(notebook?.linked ?? [])].map((p) => p.entry.id));
-  const window = messages.slice(-settings.historyLimit);
+  const window = messages.slice(start);
   const attached = store.notebook
     .forPromptEntries(window.flatMap((m) => m.attachments))
     .filter((p) => !inPrompt.has(p.entry.id));
@@ -149,6 +164,10 @@ export function promptForChannel(store: Store, channelId: string, options: Promp
     channel,
     channels,
     messages,
+    windowStart: start,
+    memory,
+    digests: channel.kind === "ooc" && settings.summaries ? digestsFor(store, channels) : undefined,
+    mentioned: channel.kind === "ooc" && settings.summaries ? mentionedChannels(store, channel, channels, window) : undefined,
     notebook,
     overview:
       channel.kind === "ooc"
@@ -172,6 +191,82 @@ export function promptForChannel(store: Store, channelId: string, options: Promp
         }
       : undefined,
   });
+}
+
+/** How many finished scenes' summaries are sent in full (besides the story so far). */
+export const RECENT_SCENES = 2;
+
+/**
+ * Layer 5's summaries for a channel whose prompt starts at `start`: only
+ * what covers messages that aren't sent in full.
+ *
+ * - The story so far, if anything before the recent messages is missing.
+ * - The last `RECENT_SCENES` finished scenes that aren't all in the
+ *   recent messages.
+ * - What happened earlier in the current scene (or OOC conversation), if
+ *   its oldest messages were folded into a summary.
+ */
+export function memoryFor(store: Store, channel: Channel, messages: SeqMessage[], start: number): PromptMemory {
+  if (start === 0) return {};
+  const scenes = splitScenes(messages, channel.kind);
+  const firstSent = messages[start]?.seq ?? Infinity;
+  const memory: PromptMemory = {};
+
+  const story = store.summaries.get(channel.id, "story");
+  if (story?.content) memory.story = story.content;
+
+  memory.scenes = scenes
+    .map((scene, index) => ({ scene, index }))
+    // Finished scenes with at least some of their messages not sent in full.
+    .filter(({ scene }) => scene.end && (scene.posts[0]?.seq ?? Infinity) < firstSent)
+    .map(({ scene, index }) => ({ index, title: scene.start?.content, summary: store.summaries.get(channel.id, "scene", scene.end!.id) }))
+    .filter((s) => s.summary?.content)
+    .slice(-RECENT_SCENES)
+    .map((s) => ({ heading: `Scene ${s.index + 1}${s.title ? `, "${s.title}"` : ""}`, summary: s.summary!.content }));
+
+  const scene = scenes.at(-1)!;
+  const current = store.summaries.get(channel.id, "current", scene.start?.id ?? "");
+  if (current?.content && !current.stale && current.throughSeq < firstSent) memory.earlier = current.content;
+  return memory;
+}
+
+/** Every channel's digest, by channel id (for OOC's overview). */
+function digestsFor(store: Store, channels: Channel[]): Record<string, string> {
+  const digests: Record<string, string> = {};
+  for (const channel of channels) {
+    const digest = store.summaries.get(channel.id, "digest");
+    if (digest?.content) digests[channel.id] = digest.content;
+  }
+  return digests;
+}
+
+/** How many of the newest OOC messages are checked for channels that come up. */
+const MENTION_WINDOW = 6;
+
+/**
+ * Channels that came up in the last few OOC messages (by `#name`, or by
+ * name as a word), with their fuller summary: the story so far, the last
+ * scene, and what's happened in the scene still going. At most two.
+ */
+export function mentionedChannels(store: Store, ooc: Channel, channels: Channel[], window: Message[]): { name: string; summary: string }[] {
+  const text = window
+    .filter((m) => m.kind === "post")
+    .slice(-MENTION_WINDOW)
+    .map((m) => m.content.toLowerCase())
+    .join("\n");
+  const escape = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const found: { name: string; summary: string }[] = [];
+  for (const channel of channels) {
+    if (channel.id === ooc.id || found.length >= 2) continue;
+    const name = channel.name.toLowerCase();
+    const named =
+      text.includes(`#${name}`) || (name.length >= 3 && new RegExp(`(^|[^\\w])${escape(name)}($|[^\\w])`).test(text));
+    if (!named) continue;
+    // (Its digest is already in the list of channels.)
+    const summary = channelSummaryText(store, channel, { withDigest: false });
+    if (summary) found.push({ name: channel.name, summary });
+  }
+  return found;
 }
 
 /** Unresolved threads on this channel's messages, newest ten, plus the one being replied to. */

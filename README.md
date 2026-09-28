@@ -2,7 +2,7 @@
 
 Aettica gives you an AI **RP partner**, not a character: a writer with their own style who plays characters alongside you. The full vision is in [DESIGN.md](DESIGN.md).
 
-**Status: stage 6 of 8.** A Discord-style server of channels with your partner, with scenes, literary or casual styles, themes, a shared notebook of characters and lore, a mix of models, and a partner who can act through tools, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels), [stage 3](docs/stage-3.md) (scenes, modes), [stage 3.5](docs/stage-3.5.md) (themes), [stage 4](docs/stage-4.md) (the notebook and permissions), [stage 5](docs/stage-5.md) (connection profiles and roulettes) and [stage 6](docs/stage-6.md) (tools, approvals, comments, and troubleshooting tool calls).
+**Status: stage 7 of 8.** A Discord-style server of channels with your partner, with scenes, literary or casual styles, themes, a shared notebook of characters and lore, a mix of models, and a partner who can act through tools, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels), [stage 3](docs/stage-3.md) (scenes, modes), [stage 3.5](docs/stage-3.5.md) (themes), [stage 4](docs/stage-4.md) (the notebook and permissions), [stage 5](docs/stage-5.md) (connection profiles and roulettes), [stage 6](docs/stage-6.md) (tools, approvals, comments, and troubleshooting tool calls) and [stage 7](docs/stage-7.md) (summaries and the server digest).
 
 ## What it can do
 
@@ -14,6 +14,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
   - You choose whether your partner can see each of your entries, and whether they can edit it, only suggest changes, or only read it. Folders pass these settings to the entries in them.
   - Your partner's secrets show as "??? (hidden)" in a cast: they know, you don't (yet).
 - **Scenes**: type `=====` (or `===== Title`) or press ⁂ to start a new scene. Scenes are divided by a titled line.
+- **Long stories**: your partner reads the newest messages in full and remembers the rest through summaries: of each scene when it ends (press **Summary** under a scene break), the story so far, and a line or two per channel that OOC reads. Read and edit them in channel settings → Memory. Summaries are written only from the messages, so nothing hidden from you is ever in them.
 - **Two styles** per roleplay channel. A change of style waits for the next scene, so a scene never mixes them.
   - **Literary**: your partner writes prose posts, shown as wide blocks of text.
   - **Casual**: short in-character bubbles, one character each, like a group chat. You post as your own characters (from the notebook) with proxy tags (`k: *waves*`) or the "Posting as" menu, like Tupperbox.
@@ -102,6 +103,8 @@ src/
   toolcalls.ts Reading tool calls, including broken or written-as-text ones
   profiles.ts  Connection profiles and roulettes
   activity.ts  The tool log, comment threads, and proposals
+  summaries.ts Summaries: storing them, splitting scenes, what the prompt still needs
+  summarizer.ts  Writes summaries in the background as channels change
   notebook.ts  The notebook: entries, folders, suggestions and each channel's cast
   permissions.ts  Who can see, edit and manage each notebook entry
   sheets.ts    Reads a plain-text character sheet into labelled fields

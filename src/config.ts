@@ -28,6 +28,11 @@ export interface Config {
   apiBaseUrl: string;
   /** How long to wait for one model reply, in milliseconds. */
   requestTimeoutMs: number;
+  /**
+   * How long after a channel changes its summaries are brought up to date,
+   * in milliseconds (default 4000). Negative: only when asked (for tests).
+   */
+  summaryDelayMs?: number;
 }
 
 /**

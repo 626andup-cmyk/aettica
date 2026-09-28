@@ -309,10 +309,24 @@ export interface Settings {
    */
   themeOptions: Record<string, Record<string, number>>;
   /**
-   * How many of the most recent messages in a channel are sent to the model.
-   * Older messages are left out until stage 7 adds scene summaries.
+   * How many of the most recent messages in a channel are always sent to
+   * the model in full. Older ones are remembered through summaries
+   * (stage 7, see src/summaries.ts).
    */
   historyLimit: number;
+  /** Whether summaries are written (stage 7). Off: older messages are simply left out. */
+  summaries: boolean;
+  /**
+   * How many messages may pile up beyond `historyLimit` before they're
+   * folded into the summary of the scene (or OOC conversation) they belong
+   * to. Until then they're sent in full, so nothing is ever left out.
+   */
+  summaryEvery: number;
+  /**
+   * Which profile or roulette writes summaries (see `rpAssignment`), or ""
+   * for the one that writes roleplay.
+   */
+  summaryAssignment: string;
 }
 
 /**
@@ -443,4 +457,45 @@ export interface Proposal {
   status: "pending" | "approved" | "denied";
   createdAt: string;
   resolvedAt: string | null;
+}
+
+// ------------------------------------------------------------ stage 7
+
+/**
+ * The kinds of summary (see src/summaries.ts):
+ *
+ * - `scene`: one finished scene, keyed by the scene break that ended it.
+ * - `story`: the story so far, folded together from the scene summaries.
+ * - `current`: the older part of the scene still going (in OOC, of the
+ *   whole conversation), keyed by the scene break that started it.
+ * - `digest`: one or two lines about the channel, for OOC.
+ */
+export type SummaryKind = "scene" | "story" | "current" | "digest";
+
+export interface Summary {
+  channelId: string;
+  kind: SummaryKind;
+  /** For `scene`, the break that ended it; for `current`, the break that started it ("" for the first scene). */
+  sceneId: string;
+  content: string;
+  /** The newest message (by its position, `seq`) it covers. */
+  throughSeq: number;
+  /** Messages it covers were edited or deleted since: it'll be rewritten. */
+  stale: boolean;
+  /** You wrote or edited it: it's kept as you left it. */
+  edited: boolean;
+  updatedAt: string;
+}
+
+/** A channel's summaries, as the app shows them. */
+export interface ChannelSummaries {
+  /** Scene summaries, by the id of the scene break that ended the scene. */
+  scenes: Record<string, Summary>;
+  story: Summary | null;
+  current: Summary | null;
+  digest: Summary | null;
+  /** Whether summaries are being written for the channel right now. */
+  running: boolean;
+  /** The last error writing them, if the last attempt failed. */
+  error: string | null;
 }
