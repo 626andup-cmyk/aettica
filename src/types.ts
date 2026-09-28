@@ -268,6 +268,8 @@ export interface Message {
    * your partner in full while the message is in the conversation.
    */
   attachments: string[];
+  /** Emoji reactions on it, from you and your partner, oldest first (see src/reactions.ts). */
+  reactions: Reaction[];
 }
 
 /**
@@ -537,4 +539,10 @@ export interface ChannelSummaries {
   running: boolean;
   /** The last error writing them, if the last attempt failed. */
   error: string | null;
+}
+
+/** An emoji reaction on a message: a Unicode emoji, or `:name:` of a custom one. */
+export interface Reaction {
+  emoji: string;
+  author: Author;
 }

@@ -138,6 +138,33 @@ export function isNothing(text: string): boolean {
 }
 
 /**
+ * Emoji reactions on the recent messages, newest last:
+ *
+ *   The user reacted ❤️ 😂 to your message: "*Ilse sets the lamp down.*..."
+ *   You reacted 👍 to the user's message: "want to try a heist next?"
+ *
+ * With tools, also the custom emojis your partner can react with.
+ */
+export function describeReactions(messages: Message[], customEmojis: string[]): string | null {
+  const lines: string[] = [];
+  for (const message of messages.filter((m) => m.kind === "post" && m.reactions.length > 0).slice(-8)) {
+    const snippet = message.content.replace(/\s+/g, " ").trim();
+    const quoted = `"${snippet.slice(0, 80)}${snippet.length > 80 ? "…" : ""}"`;
+    const whose = message.author === "partner" ? "your message" : "the user's message";
+    for (const author of ["user", "partner"] as const) {
+      const emojis = message.reactions.filter((r) => r.author === author).map((r) => r.emoji);
+      if (emojis.length === 0) continue;
+      lines.push(`${author === "user" ? "The user" : "You"} reacted ${emojis.join(" ")} to ${whose}: ${quoted}`);
+    }
+  }
+  if (customEmojis.length > 0) {
+    lines.push(`Custom emojis you can react with (react_to_message): ${customEmojis.map((n) => `:${n}:`).join(" ")}`);
+  }
+  if (lines.length === 0) return null;
+  return lines.join("\n");
+}
+
+/**
  * What's in the reference library: titles and descriptions only. The texts
  * themselves are read with tools, when a detail is worth looking up.
  */
@@ -282,6 +309,8 @@ export interface PromptInput {
   wake?: WakeContext;
   /** The reference library documents usable here (only mentioned with tools, which read them). */
   library?: { title: string; description: string; passages: number }[];
+  /** Custom emoji names (without colons), for reactions (only mentioned with tools). */
+  customEmojis?: string[];
 }
 
 /** Layer 5: the summaries of what came before the recent messages. */
@@ -335,6 +364,7 @@ export function buildPromptStack({
   replyingTo,
   wake,
   library,
+  customEmojis,
 }: PromptInput): ChatMessage[] {
   const isRp = channel.kind === "rp";
   const pinned = notebook?.pinned ?? [];
@@ -397,10 +427,18 @@ export function buildPromptStack({
     { title: isRp ? "Earlier in this scene" : "Earlier in this conversation", content: memory?.earlier ?? null },
   ];
 
-  const system: ChatMessage = { role: "system", content: renderLayers(layers) };
-
   // Layer 5, second part: the recent conversation, in full.
   const start = windowStart ?? Math.max(0, messages.length - settings.historyLimit);
+
+  // Reactions on the recent messages: quiet feedback, in both directions.
+  // (After the comment threads, so it's with the other things said about messages.)
+  const reactionsLayer = {
+    title: "Reactions",
+    content: describeReactions(messages.slice(start), tools ? (customEmojis ?? []) : []),
+  };
+  layers.splice(layers.findIndex((l) => l.title === "Comment threads") + 1, 0, reactionsLayer);
+  const system: ChatMessage = { role: "system", content: renderLayers(layers) };
+
   const history = toChatHistory(messages.slice(start));
 
   // If the conversation doesn't end on your message, add a nudge so the model

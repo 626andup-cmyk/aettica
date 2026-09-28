@@ -518,6 +518,27 @@ export const MIGRATIONS: Migration[] = [
   ALTER TABLE tool_calls_new RENAME TO tool_calls;
   CREATE INDEX tool_calls_by_channel ON tool_calls (channel_id, created_at);
   `,
+
+  // --------------------------------------------------------------- 11
+  // Emoji reactions, and custom emojis (src/reactions.ts).
+  `
+  CREATE TABLE reactions (
+    message_id TEXT NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+    author     TEXT NOT NULL CHECK (author IN ('user', 'partner')),
+    -- A Unicode emoji, or ':name:' of a custom one.
+    emoji      TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (message_id, author, emoji)
+  );
+
+  -- Images you uploaded, used as :name:. The files are in the data folder's
+  -- emojis/ folder.
+  CREATE TABLE custom_emojis (
+    name       TEXT PRIMARY KEY,
+    file       TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  `,
 ];
 
 /**

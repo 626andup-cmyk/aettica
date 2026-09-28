@@ -12,6 +12,7 @@
 
 import type { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openDatabase } from "./db.ts";
 import { NotFoundError, ValidationError } from "./errors.ts";
@@ -24,6 +25,7 @@ import { JevLog } from "./jevlog.ts";
 import { WakeLog } from "./wakeups.ts";
 import { Library } from "./library.ts";
 import { KeeperState } from "./keeper.ts";
+import { Reactions } from "./reactions.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
   Author,
@@ -352,6 +354,8 @@ interface MessageRow {
   characters: string;
   /** A JSON array of attached notebook entry ids, built by the query itself. */
   attachments: string;
+  /** A JSON array of {emoji, author}, built by the query itself. */
+  reactions: string;
 }
 
 function toChannel(row: ChannelRow): Channel {
@@ -379,6 +383,7 @@ function toMessage(row: MessageRow): Message {
     turnId: row.turn_id,
     characters: JSON.parse(row.characters) as string[],
     attachments: JSON.parse(row.attachments) as string[],
+    reactions: JSON.parse(row.reactions) as Message["reactions"],
     createdAt: row.created_at,
     // Only include optional fields when they have a value.
     ...(row.edited_at ? { editedAt: row.edited_at } : {}),
@@ -398,7 +403,9 @@ const SELECT_MESSAGES = `
     (SELECT json_group_array(character_name)
        FROM (SELECT character_name FROM message_characters
               WHERE message_id = m.id ORDER BY position)) AS characters,
-    (SELECT json_group_array(entry_id) FROM message_attachments WHERE message_id = m.id) AS attachments
+    (SELECT json_group_array(entry_id) FROM message_attachments WHERE message_id = m.id) AS attachments,
+    (SELECT json_group_array(json_object('emoji', emoji, 'author', author))
+       FROM (SELECT emoji, author FROM reactions WHERE message_id = m.id ORDER BY created_at, rowid)) AS reactions
   FROM messages m`;
 
 // ----------------------------------------------------------------- store
@@ -440,6 +447,8 @@ export class Store {
   readonly library: Library;
   /** How far the notebook keeper has read in each channel. */
   readonly keeper: KeeperState;
+  /** Emoji reactions on messages, and custom emojis. */
+  readonly reactions: Reactions;
   /** Your partner's recent wake-ups, and what came of them (see `src/wakeups.ts`). */
   readonly wakeLog: WakeLog;
   /**
@@ -490,6 +499,8 @@ export class Store {
     this.jevLog = new JevLog(this.db);
     this.library = new Library(this.db, (id) => this.hasChannel(id));
     this.keeper = new KeeperState(this.db);
+    // In memory (tests), custom emoji files go to a throwaway folder.
+    this.reactions = new Reactions(this.db, inMemory ? join(tmpdir(), `aettica-emojis-${crypto.randomUUID()}`) : dataDir, () => this.revision++);
     this.wakeLog = new WakeLog(this.db);
 
     if (isNew) {

@@ -18,6 +18,12 @@
  *   POST   /api/jev/test                       Ask Jev one tiny question, to see if it's reachable and understood
  *   GET    /api/jev/log                        Every Jev call from the last 36 hours, exactly as sent and received
  *
+ *   POST   /api/messages/:id/reactions         Add your emoji reaction to a message, or take it back
+ *   GET    /api/emojis                         Custom emojis
+ *   POST   /api/emojis                         Add a custom emoji: name, and the image as base64
+ *   DELETE /api/emojis/:name                   Delete one (and reactions with it)
+ *   (Custom emoji images are served at /emojis/<file>.)
+ *
  *   GET    /api/library                        The reference library's documents
  *   POST   /api/library                        Add a document: title, description, channelIds and its text
  *   GET    /api/library/search?q=...           Search passages (&doc=id for one document)
@@ -369,6 +375,7 @@ export function createApp(config: Config): App {
           proposals: store.proposals.pending(),
           busyChannels: partner.busyChannels(),
           appVersion: version,
+          emojis: store.reactions.listEmojis(),
           // For noticing messages the app didn't ask for (a wake-up): a
           // number that changes with any message, and each channel's newest.
           revision: store.revision,
@@ -755,6 +762,42 @@ export function createApp(config: Config): App {
       },
     },
 
+    // --------------------------------------------------------- reactions
+    {
+      // Add your reaction, or take it back if it's there.
+      method: "POST",
+      pattern: "/api/messages/:id/reactions",
+      handler: async (request, { id }) => {
+        const body = await readObject(request);
+        if (store.getMessage(id!).kind !== "post") throw new HttpError(400, "Only posts can have reactions.");
+        return json({ reactions: store.reactions.toggle(id!, "user", body.emoji) });
+      },
+    },
+    {
+      method: "GET",
+      pattern: "/api/emojis",
+      handler: () => json({ emojis: store.reactions.listEmojis() }),
+    },
+    {
+      method: "POST",
+      pattern: "/api/emojis",
+      handler: async (request) => {
+        // The image arrives as base64 text inside JSON, like theme files.
+        const body = await readObject(request);
+        if (typeof body.data !== "string") throw new HttpError(400, '"name" and "data" (base64) are required.');
+        const emoji = store.reactions.addEmoji(body.name, Buffer.from(body.data, "base64"));
+        return json({ emoji, emojis: store.reactions.listEmojis() });
+      },
+    },
+    {
+      method: "DELETE",
+      pattern: "/api/emojis/:name",
+      handler: (_request, { name }) => {
+        store.reactions.removeEmoji(name!);
+        return json({ emojis: store.reactions.listEmojis() });
+      },
+    },
+
     // ---------------------------------------------------------- comments
     {
       method: "POST",
@@ -1015,6 +1058,12 @@ export function createApp(config: Config): App {
    */
   async function fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+
+    // Custom emoji images: /emojis/<file>.
+    const emojiFile = url.pathname.match(/^\/emojis\/([^/]+)$/);
+    if (emojiFile && (request.method === "GET" || request.method === "HEAD")) {
+      return store.reactions.serve(emojiFile[1]!) ?? new Response("Not found", { status: 404 });
+    }
 
     // Theme files: /themes/<id>/<file>.
     const themeFile = url.pathname.match(/^\/themes\/([^/]+)\/([^/]+)$/);

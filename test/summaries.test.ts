@@ -96,6 +96,7 @@ describe("splitScenes and windowStart", () => {
       turnId: null,
       characters: [],
       attachments: [],
+      reactions: [],
       createdAt: "",
       seq: i + 1,
     })) as SeqMessage[];
