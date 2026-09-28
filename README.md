@@ -6,7 +6,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 
 ## What it can do
 
-- **Channels**: create, rename, reorder and delete them from the sidebar.
+- **Channels**: create, rename and delete them from the sidebar, group them into collapsible **categories**, and **drag** to rearrange (press and hold on a phone). See [categories](docs/categories.md).
   - **Roleplay** channels are storylines. Each has its own cast: characters and lore pinned from the notebook.
   - **Out-of-character** channels are for talking with your partner as themselves. They know which storylines exist.
 - **Notebook** (the book button): characters and lore, with labelled fields, notes for your partner, and `[[links]]` between entries.

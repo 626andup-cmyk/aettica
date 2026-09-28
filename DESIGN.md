@@ -255,7 +255,7 @@ These are parked until the core works.
 - **Idea drawer** (built): ideas that aren't shared are kept privately (dropped ones too, so they aren't had again), offered on later wake-ups, and marked shared when Jev sees a message brought one up. Visible and deletable in Settings.
 - **Controls:** chattiness setting, quiet hours, and cooldowns to limit spam and API cost. (Built in stage 8, for wake-ups; the heartbeat will use them too.)
 - **RNG partner creation.**
-- **Channel categories** and drag-and-drop reordering polish.
+- **Channel categories** and drag-and-drop reordering (built, see [docs/categories.md](docs/categories.md)): collapsible, Discord-style categories; drag channels and category headers with a mouse, or press-and-hold on a phone. Your partner can make categories and move channels into them.
 - **Multi-bubble OOC** with typing delays, reusing the Kitsikai extension ideas.
 - **Emoji reactions** (built, see [docs/reactions.md](docs/reactions.md)): on messages, from you and your partner (with the `react_to_message` tool), including custom emojis (uploaded images used as `:name:`, in reactions and messages). Your partner sees reactions on recent messages in both directions, as quiet feedback.
 - **Notebook keeper** (built, see [docs/notebook-keeper.md](docs/notebook-keeper.md)): every few roleplay posts, a Jev series (each question in two phrasings that must agree) asks whether something new was named or a lasting fact established. Only on a yes does a writer draft changes, each with a claim. Every claim is checked by Jev against the messages alone before it's made, as your partner (new entries shared; notes on your entries go through permissions and may become suggestions). It never sees entries hidden from you.

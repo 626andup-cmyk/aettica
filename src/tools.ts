@@ -139,6 +139,12 @@ function wholeNumber(value: unknown, key: string): number {
   return n;
 }
 
+/** A category by name (ignoring case), made if there isn't one. */
+function findOrMakeCategory(store: Store, name: string) {
+  const wanted = norm(name);
+  return store.listCategories().find((c) => norm(c.name) === wanted) ?? store.createCategory({ name: name.trim() });
+}
+
 /** How your partner sees an entry's owner. */
 function whose(owner: Owner): string {
   return owner === "partner" ? "yours" : owner === "joint" ? "shared" : "the user's";
@@ -387,6 +393,7 @@ const TOOLS: ToolDefinition[] = [
         kind: { type: "string", enum: ["roleplay", "ooc"] },
         style: { type: "string", enum: ["literary", "casual"], description: "For roleplay: prose posts, or chat bubbles." },
         cast: { type: "array", items: { type: "string" }, description: "For roleplay: notebook entries to pin." },
+        category: str("A category to put it in (made if there isn't one by that name). Leave out for none."),
       },
       ["name", "kind"],
     ),
@@ -394,10 +401,12 @@ const TOOLS: ToolDefinition[] = [
       const kind = args.kind === "ooc" ? "ooc" : args.kind === "roleplay" || args.kind === "rp" ? "rp" : null;
       if (!kind) throw new ToolError('"kind" must be roleplay or ooc.');
       const cast = Array.isArray(args.cast) ? args.cast.map((n) => findEntry(store, String(n))) : [];
+      const category = maybe(args, "category");
       const channel = store.createChannel({
         name: need(args, "name").replace(/^#/, ""),
         kind,
         ...(kind === "rp" && (args.style === "literary" || args.style === "casual") ? { mode: args.style } : {}),
+        categoryId: category ? findOrMakeCategory(store, category).id : null,
       });
       for (const entry of cast) store.notebook.pin("partner", channel.id, entry.id);
       return { result: { created: hash(channel) }, summary: `made ${hash(channel)}` };
@@ -415,18 +424,33 @@ const TOOLS: ToolDefinition[] = [
   },
   {
     name: "move_channel",
-    description: "Move a channel up or down the channel list.",
+    description: "Move a channel up or down the channel list, or into a category (or out of one).",
     parameters: object(
-      { channel: str("The channel."), position: { type: "integer", description: "Its new place: 1 is the top." } },
-      ["channel", "position"],
+      {
+        channel: str("The channel."),
+        position: { type: "integer", description: "Its new place: 1 is the top." },
+        category: str('A category to move it into (made if there isn\'t one by that name), or "none" to take it out of its category.'),
+      },
+      ["channel"],
     ),
     run: (ctx, args) => {
       const channel = findChannel(ctx, need(args, "channel"));
-      const ids = ctx.store.listChannels().map((c) => c.id).filter((id) => id !== channel.id);
-      const position = Math.min(Math.max(Math.round(Number(args.position) || 1), 1), ids.length + 1);
-      ids.splice(position - 1, 0, channel.id);
-      ctx.store.reorderChannels(ids);
-      return { result: { moved: hash(channel), position }, summary: `moved ${hash(channel)} to place ${position}` };
+      const category = maybe(args, "category");
+      if (args.position === undefined && !category) throw new ToolError('Give a "position", a "category", or both.');
+      const moves: string[] = [];
+      if (category) {
+        const target = norm(category) === "none" ? null : findOrMakeCategory(ctx.store, category);
+        ctx.store.updateChannel(channel.id, { categoryId: target?.id ?? null });
+        moves.push(target ? `into ${target.name}` : "out of its category");
+      }
+      if (args.position !== undefined) {
+        const ids = ctx.store.listChannels().map((c) => c.id).filter((id) => id !== channel.id);
+        const position = Math.min(Math.max(Math.round(Number(args.position) || 1), 1), ids.length + 1);
+        ids.splice(position - 1, 0, channel.id);
+        ctx.store.reorderChannels(ids);
+        moves.push(`to place ${position}`);
+      }
+      return { result: { moved: hash(channel) }, summary: `moved ${hash(channel)} ${moves.join(" and ")}` };
     },
   },
   {

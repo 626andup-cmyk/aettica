@@ -2276,3 +2276,114 @@ button.attach-chip {
   width: 28px;
   height: 28px;
 }
+
+/* --------------------------------------------------------- categories */
+
+/* A category's header: small capitals, a chevron that turns when open. */
+.category-item {
+  display: flex;
+  align-items: center;
+  margin-top: 14px;
+  margin-bottom: 2px;
+}
+
+.category-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 4px 4px 2px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.category-toggle:hover {
+  color: var(--text);
+}
+
+.category-chevron {
+  display: inline-block;
+  width: 12px;
+  font-size: 15px;
+  line-height: 1;
+  text-align: center;
+  transition: transform 0.15s ease;
+}
+
+.category-toggle[aria-expanded="true"] .category-chevron {
+  transform: rotate(90deg);
+}
+
+.category-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-menu {
+  width: 26px;
+  height: 26px;
+  opacity: 0;
+  font-size: 16px;
+}
+
+.category-item:hover .category-menu,
+.category-menu:focus-visible {
+  opacity: 1;
+}
+
+/* Touch screens have no hover: always show it. */
+@media (hover: none) {
+  .category-menu {
+    opacity: 0.7;
+  }
+}
+
+/* Dragging: the item left behind fades, a copy follows, a line shows where it lands. */
+.drag-source {
+  opacity: 0.35;
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 60;
+  margin: 0;
+  list-style: none;
+  pointer-events: none;
+  opacity: 0.92;
+  transform: scale(1.03);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-sm);
+  background: var(--sidebar-bg, var(--dialog-bg));
+}
+
+.drop-marker {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  z-index: 2;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.inline-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-row select {
+  flex: 1;
+  min-width: 0;
+}

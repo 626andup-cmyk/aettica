@@ -521,6 +521,10 @@
         <label for="channel-setting-name">Channel name</label>
         <input id="channel-setting-name" name="name" autocomplete="off" />
 
+        <label for="channel-setting-category">Category</label>
+        <p class="hint">Or drag the channel in the sidebar (press and hold on a phone).</p>
+        <select id="channel-setting-category" name="category"></select>
+
         <label for="channel-setting-assignment">Written by</label>
         <p class="hint">The connection profile or roulette that writes here.</p>
         <select id="channel-setting-assignment" name="assignment"></select>
@@ -641,6 +645,12 @@
         <label for="new-channel-name">Channel name</label>
         <input id="new-channel-name" name="name" autocomplete="off" placeholder="e.g. lighthouse" />
 
+        <label for="new-channel-category">Category</label>
+        <div class="inline-row">
+          <select id="new-channel-category" name="category"></select>
+          <button type="button" class="button" id="new-channel-new-category">New category…</button>
+        </div>
+
         <div class="rp-only">
           <label for="new-channel-mode">Style</label>
           <select id="new-channel-mode" name="mode">
@@ -690,6 +700,22 @@
         <span class="spacer"></span>
         <button type="button" class="button button-primary" data-close>Done</button>
       </div>
+    </dialog>
+
+    <!-- A channel category: its name (and deleting it). -->
+    <dialog id="category-dialog" class="dialog surface">
+      <form id="category-form" method="dialog">
+        <h2 class="dialog-title" id="category-title">Category</h2>
+        <label for="category-name">Name</label>
+        <input id="category-name" autocomplete="off" maxlength="100" placeholder="e.g. Fantasy" />
+        <p class="form-error" role="alert" hidden></p>
+        <div class="dialog-buttons">
+          <button type="button" class="button button-danger" id="category-delete">Delete</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Save</button>
+        </div>
+      </form>
     </dialog>
 
     <!-- Custom emojis: images used as :name:, in reactions and messages. -->
