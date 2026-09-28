@@ -626,6 +626,7 @@
         <button type="button" class="button" id="notebook-new-character">New character</button>
         <button type="button" class="button" id="notebook-new-lore">New lore</button>
         <button type="button" class="button" id="notebook-new-folder">New folder</button>
+        <button type="button" class="button" id="notebook-library">Library</button>
       </div>
 
       <section id="suggestion-list" class="suggestion-list" hidden></section>
@@ -636,6 +637,69 @@
       <div class="dialog-buttons">
         <span class="spacer"></span>
         <button type="button" class="button button-primary" data-close>Done</button>
+      </div>
+    </dialog>
+
+    <!-- The reference library: long texts your partner can search (scripts, books). -->
+    <dialog id="library-dialog" class="dialog surface library">
+      <h2 class="dialog-title">Library</h2>
+      <p class="hint">
+        Long texts for your partner to look things up in, like a film's script or a book for a fandom. They're never sent
+        whole: your partner searches them and reads the passages they need (with a profile that can use tools).
+      </p>
+      <div class="dialog-buttons notebook-actions">
+        <button type="button" class="button" id="library-add">Add a document</button>
+      </div>
+      <ul id="library-list" class="library-list"></ul>
+
+      <label for="library-search">Search the library</label>
+      <input id="library-search" type="search" placeholder='A name, a place, or "an exact line"' autocomplete="off" />
+      <ul id="library-results" class="library-results"></ul>
+
+      <p class="form-error" role="alert" hidden></p>
+      <div class="dialog-buttons">
+        <span class="spacer"></span>
+        <button type="button" class="button button-primary" data-close>Done</button>
+      </div>
+    </dialog>
+
+    <!-- Adding a document to the library, or changing one. -->
+    <dialog id="library-doc-dialog" class="dialog surface">
+      <form id="library-doc-form" method="dialog">
+        <h2 class="dialog-title" id="library-doc-title">Add a document</h2>
+        <div id="library-file-row">
+          <label for="library-file">Text file</label>
+          <input id="library-file" type="file" accept=".txt,.md,.markdown,.fountain,.srt,.text,text/*" />
+          <p class="hint" id="library-file-note">A plain text file (.txt, .md, .fountain…). Save a PDF or Word script as text first.</p>
+        </div>
+        <label for="library-doc-name">Title</label>
+        <input id="library-doc-name" autocomplete="off" maxlength="200" />
+        <label for="library-doc-description">What it is</label>
+        <p class="hint">For your partner: "The screenplay of the first film", "Season 2 episode transcripts".</p>
+        <input id="library-doc-description" autocomplete="off" maxlength="1000" />
+        <label>Channels</label>
+        <p class="hint">Where your partner can use it. None ticked means everywhere; OOC channels can always use it.</p>
+        <div id="library-doc-channels" class="library-channels"></div>
+        <p class="form-error" role="alert" hidden></p>
+        <div class="dialog-buttons">
+          <button type="button" class="button button-danger" id="library-doc-delete">Delete</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary" id="library-doc-save">Add</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- Reading a passage of a library document. -->
+    <dialog id="library-read-dialog" class="dialog surface">
+      <h2 class="dialog-title" id="library-read-title"></h2>
+      <p class="hint" id="library-read-where"></p>
+      <pre id="library-read-text" class="library-passage"></pre>
+      <div class="dialog-buttons">
+        <button type="button" class="button" id="library-read-prev">Previous</button>
+        <button type="button" class="button" id="library-read-next">Next</button>
+        <span class="spacer"></span>
+        <button type="button" class="button button-primary" data-close>Close</button>
       </div>
     </dialog>
 

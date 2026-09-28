@@ -260,7 +260,7 @@ These are parked until the core works.
 - **Emoji reactions** on messages, from you and your partner, including custom emojis.
 - **Notebook keeper:** Jev notices lasting facts and new characters or places, and your partner writes them into the notebook (or suggests them).
 - **Jev everywhere it helps:** the guesswork already in Aettica (which channel an OOC message mentions, whether to reply in a comment thread, whether a summary is faithful, which entries a message is about) goes through a series of Jev questions, several phrasings that must agree, to cut down mistakes.
-- **Reference library:** upload long texts (like movie scripts for a fandom). They're split into passages and indexed, and your partner can search and read them with a tool when they want to; they're never sent whole.
+- **Reference library** (built, see [docs/library.md](docs/library.md)): upload long texts (like movie scripts for a fandom). They're split into passages at scene headings and indexed with FTS5 (stemmed; speakers and headings weigh most), and your partner searches and reads them with `search_library` and `read_library` when they want to. The prompt only lists titles and descriptions; the texts are never sent whole. A document can be limited to some channels (OOC always sees all).
 
 ## Open questions
 

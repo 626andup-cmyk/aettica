@@ -22,6 +22,7 @@ import { parseSheet } from "./sheets.ts";
 import { Summaries } from "./summaries.ts";
 import { JevLog } from "./jevlog.ts";
 import { WakeLog } from "./wakeups.ts";
+import { Library } from "./library.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
   Author,
@@ -426,6 +427,8 @@ export class Store {
   readonly summaries: Summaries;
   /** Every call to Jev from the last 36 hours (see `src/jevlog.ts`). */
   readonly jevLog: JevLog;
+  /** The reference library: long texts your partner can search. */
+  readonly library: Library;
   /** Your partner's recent wake-ups, and what came of them (see `src/wakeups.ts`). */
   readonly wakeLog: WakeLog;
   /**
@@ -474,6 +477,7 @@ export class Store {
     this.proposals = new Proposals(this.db);
     this.summaries = new Summaries(this.db);
     this.jevLog = new JevLog(this.db);
+    this.library = new Library(this.db, (id) => this.hasChannel(id));
     this.wakeLog = new WakeLog(this.db);
 
     if (isNew) {
@@ -547,6 +551,11 @@ export class Store {
     const row = this.db.query("SELECT * FROM channels WHERE id = $id").get({ id }) as ChannelRow | null;
     if (!row) throw new NotFoundError("channel");
     return toChannel(row);
+  }
+
+  /** Whether a channel exists. */
+  hasChannel(id: string): boolean {
+    return this.db.query("SELECT 1 FROM channels WHERE id = $id").get({ id }) !== null;
   }
 
   /** Create a channel at the bottom of the sidebar. */
@@ -672,6 +681,7 @@ export class Store {
   deleteChannel(id: string): void {
     const result = this.db.query("DELETE FROM channels WHERE id = $id").run({ id });
     if (result.changes === 0) throw new NotFoundError("channel");
+    this.library.channelDeleted(id);
   }
 
   // -------------------------------------------------------------- messages
