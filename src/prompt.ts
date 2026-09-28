@@ -102,6 +102,82 @@ export const NUDGES: Record<ChannelKind, { continue: string; opening: string }> 
   },
 };
 
+// ------------------------------------------------------------ wake-ups
+
+/**
+ * Why your partner is taking a turn on their own (stage 8), without a new
+ * message from you: you opened the app, a scene ended, something is
+ * waiting for them, or (endgame) the heartbeat.
+ */
+export type WakeReason = "opened" | "away" | "scene-ended" | "review" | "heartbeat";
+
+/** What a wake-up turn is told about why it's happening. */
+export interface WakeContext {
+  reason: WakeReason;
+  /** How long since you last wrote anything, e.g. "2 days", or `null` if you never have. */
+  sinceUser: string | null;
+  /** Things waiting, for you or for your partner, as short lines. */
+  waiting: string[];
+  /** For "scene-ended": the scene that just ended, and its summary if it has one yet. */
+  scene?: { channel: string; title: string; summary: string | null };
+  /** Ideas your partner saved for later (the idea drawer), to bring up if one fits now. */
+  ideas?: string[];
+  /** An idea your partner decided to share (the heartbeat's generate-and-grade). */
+  idea?: string;
+}
+
+/**
+ * What your partner replies to take no turn, when their model can't call
+ * `do_nothing` (no tools). Such a reply is never posted.
+ */
+export const NOTHING = "[nothing]";
+
+/** Whether a reply means "nothing to say" (see `NOTHING`). */
+export function isNothing(text: string): boolean {
+  return /^\s*\[?\s*nothing\s*\]?\s*\.?\s*$/i.test(text);
+}
+
+/** The "Why you're up" section of a wake-up turn's prompt. */
+export function describeWake(wake: WakeContext, tools: boolean): string {
+  const since = wake.sinceUser ? `It's been ${wake.sinceUser} since the user last wrote anything.` : "The user hasn't written anything yet.";
+  const why: Record<WakeReason, string> = {
+    opened: "The user just opened the app.",
+    away: `The user just opened the app after being away for ${wake.sinceUser ?? "a while"}.`,
+    "scene-ended": `The user just ended a scene${wake.scene ? ` in #${wake.scene.channel}` : ""}.`,
+    review: "The user suggested a notebook change that's waiting for your review.",
+    heartbeat: "Nobody asked: you're checking in on your own, the way a friend texts out of nowhere.",
+  };
+  const parts = [`You're taking a turn on your own: the user hasn't sent you anything new. ${why[wake.reason]} ${since}`];
+  if (wake.scene) {
+    const title = wake.scene.title ? ` ("${wake.scene.title}")` : "";
+    parts.push(
+      wake.scene.summary
+        ? `The scene that ended${title}: ${wake.scene.summary}`
+        : `The scene that ended${title} hasn't been summarized yet; its end is in the recent messages of #${wake.scene.channel}.`,
+    );
+  }
+  if (wake.waiting.length > 0) parts.push(["Waiting:", ...wake.waiting.map((line) => `- ${line}`)].join("\n"));
+  if (wake.idea) parts.push(`You had an idea you're excited to share: ${wake.idea}`);
+  if (wake.ideas?.length) {
+    parts.push(
+      ["Ideas you've been saving for the right moment (bring one up only if it fits now):", ...wake.ideas.map((i) => `- ${i}`)].join("\n"),
+    );
+  }
+  parts.push(
+    `Reach out only if you genuinely want to: a thought, a question, a reaction, an idea for a story. Keep it short and natural, like a text from a friend, and don't pretend they said something they didn't. If there's nothing worth saying, don't write: ${
+      tools ? "call do_nothing (you can still act with your tools first)" : `reply with exactly ${NOTHING}`
+    }. Never send a message just to fill the silence.`,
+  );
+  return parts.join("\n\n");
+}
+
+/** The note that ends a wake-up turn's conversation, in place of a message from you. */
+export function wakeNudge(tools: boolean): string {
+  return `(No new message from me. This is a turn on your own; see "Why you're up". Write only if you want to${
+    tools ? ", or call do_nothing" : `, or reply ${NOTHING}`
+  }.)`;
+}
+
 /**
  * Layer 2: how to write in each channel mode. `characterName` is the
  * character your partner plays, used to show the casual bubble format.
@@ -188,6 +264,8 @@ export interface PromptInput {
    * thread instead of a post.
    */
   replyingTo?: { threadId: string; quote: string; note: string; onYourMessage: boolean };
+  /** A wake-up turn (stage 8): why your partner is taking a turn on their own. */
+  wake?: WakeContext;
 }
 
 /** Layer 5: the summaries of what came before the recent messages. */
@@ -239,6 +317,7 @@ export function buildPromptStack({
   recentActions,
   tools,
   replyingTo,
+  wake,
 }: PromptInput): ChatMessage[] {
   const isRp = channel.kind === "rp";
   const pinned = notebook?.pinned ?? [];
@@ -287,6 +366,8 @@ export function buildPromptStack({
     { title: "Waiting for your review", content: tools ? describeReviews(reviews ?? []) : null },
     { title: "What you did recently", content: (recentActions ?? []).map((line) => `- ${line}`).join("\n") },
     { title: "Tools", content: tools ? toolGuidance(channel.kind) : null },
+    // A wake-up (stage 8): why your partner is taking a turn on their own.
+    { title: "Why you're up", content: wake ? describeWake(wake, tools ?? false) : null },
     // Layer 4: the connection profile's notes on this model's habits.
     { title: "Model notes", content: modelNotes ?? null },
     // Layer 5, first part: summaries of what came before the recent messages.
@@ -311,6 +392,10 @@ export function buildPromptStack({
   if (replyingTo) {
     // A reply to a comment: whatever came last, ask for the reply.
     history.push({ role: "user", content: commentNudge(replyingTo) });
+  } else if (wake) {
+    // A wake-up: a turn on their own, whatever came last.
+    if (last?.role === "user") last.content += `\n\n${wakeNudge(tools ?? false)}`;
+    else history.push({ role: "user", content: wakeNudge(tools ?? false) });
   } else if (messages.at(-1)?.kind === "scene_break") {
     // The conversation ends on a scene break (already shown as an OOC
     // line): ask for the new scene's opening.

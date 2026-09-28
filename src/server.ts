@@ -13,6 +13,10 @@
  *
  * API overview (all request and response bodies are JSON):
  *
+ *   POST   /api/wake                           You opened the app: your partner may wake up (stage 8)
+ *   GET    /api/wakeups                        Recent wake-ups, and what came of them
+ *   POST   /api/jev/test                       Ask Jev one tiny question, to see if it's reachable and understood
+ *   GET    /api/jev/log                        Every Jev call from the last 36 hours, exactly as sent and received
  *   GET    /api/state                          Settings, channels, profiles, roulettes, proposals waiting,
  *                                              where the partner is writing, and the app version
  *   PUT    /api/settings                       Change settings (any subset of fields)
@@ -96,6 +100,9 @@ import { ApiError, CancelledError, listModels, type ApiOptions } from "./nanogpt
 import { BusyError, Partner, pickProfile, promptForChannel, testToolCalling, type TurnResult } from "./partner.ts";
 import { parseSceneBreak, postToMessages } from "./posts.ts";
 import { Summarizer } from "./summarizer.ts";
+import { Decider, testJev } from "./jev.ts";
+import { JEV_LOG_HOURS } from "./jevlog.ts";
+import { FRESH_SCENE_MINUTES, Wakeups } from "./wakeups.ts";
 import { DEFAULT_THEME, ThemeLibrary } from "./themes.ts";
 import { ENTRY_TEMPLATES } from "./notebook.ts";
 import type { CastMember, Channel, Message } from "./types.ts";
@@ -137,6 +144,10 @@ export interface App {
   themes: ThemeLibrary;
   /** Writes summaries in the background (stage 7). */
   summarizer: Summarizer;
+  /** Asks Jev, the decision model (stage 8). */
+  decider: Decider;
+  /** Decides whether your partner wakes up, and wakes them (stage 8). */
+  wakeups: Wakeups;
 }
 
 /**
@@ -212,6 +223,51 @@ export function createApp(config: Config): App {
   };
   const partner = new Partner(store, api);
   const summarizer = new Summarizer(store, api, config.summaryDelayMs);
+  const decider = new Decider(
+    api,
+    () => {
+      const settings = store.getSettings();
+      const [kind, id] = settings.decisionFallback.split(":");
+      let fallback = null;
+      try {
+        fallback = kind === "profile" && id ? store.profiles.get(id) : null;
+      } catch {
+        fallback = null; // deleted since
+      }
+      return { decisionModel: settings.decisionModel, fallback };
+    },
+    (call) => store.jevLog.add(call, new Date()),
+  );
+  const wakeups = new Wakeups(store, partner, decider, Boolean(config.apiKey));
+  const autoWake = config.autoWake ?? true;
+
+  /**
+   * A scene you ended was just summarized: that's a wake-up (if it's the
+   * newest scene break, and fresh, not an old one being rewritten).
+   */
+  summarizer.onSceneSummarized = (channelId, breakId) => {
+    const sceneBreak = store.getMessage(breakId);
+    const newest = store.getMessages(channelId).filter((m) => m.kind === "scene_break").at(-1);
+    const fresh = Date.now() - new Date(sceneBreak.createdAt).getTime() < FRESH_SCENE_MINUTES * 60_000;
+    if (autoWake && sceneBreak.author === "user" && newest?.id === breakId && fresh) {
+      void wakeups.event("scene-ended", { channelId, breakId });
+    }
+  };
+
+  /** You ended a scene: with summaries off, that's a wake-up straight away (otherwise, once it's summarized). */
+  function sceneEnded(result: { sceneBreak: Message; channel: Channel }) {
+    if (!store.getSettings().summaries && autoWake) {
+      void wakeups.event("scene-ended", { channelId: result.channel.id, breakId: result.sceneBreak.id });
+    }
+    return result;
+  }
+
+  /** You made a suggestion for your partner to review: that's a wake-up. */
+  function maybeReview<T>(result: T): T {
+    const suggestion = (result as { suggestion?: Parameters<typeof store.notebook.reviewerOf>[0] }).suggestion;
+    if (autoWake && suggestion && store.notebook.reviewerOf(suggestion) === "partner") void wakeups.event("review");
+    return result;
+  }
   const version = appVersion(config.publicDir);
   const themes = new ThemeLibrary(
     config.themesDir,
@@ -302,6 +358,47 @@ export function createApp(config: Config): App {
           proposals: store.proposals.pending(),
           busyChannels: partner.busyChannels(),
           appVersion: version,
+          // For noticing messages the app didn't ask for (a wake-up): a
+          // number that changes with any message, and each channel's newest.
+          revision: store.revision,
+          activity: Object.fromEntries(
+            store.listChannels().map((c) => {
+              const last = store.lastMessage(c.id);
+              return [c.id, last ? { lastId: last.id, author: last.author, at: last.createdAt } : null];
+            }),
+          ),
+        }),
+    },
+    {
+      // You opened the app (or came back to it). Your partner may wake up;
+      // the answer doesn't wait for that (the app notices new messages).
+      method: "POST",
+      pattern: "/api/wake",
+      handler: async (request) => {
+        const body = (await readJson(request)) as { event?: unknown } | null;
+        if (body?.event !== "opened") throw new HttpError(400, '"event" must be "opened".');
+        if (autoWake) void wakeups.event("opened");
+        return json({ ok: true });
+      },
+    },
+    {
+      method: "GET",
+      pattern: "/api/wakeups",
+      handler: () => json({ wakeups: store.wakeLog.recent() }),
+    },
+    {
+      // Ask Jev one tiny question, to see if it's reachable and understood.
+      method: "POST",
+      pattern: "/api/jev/test",
+      handler: async () => json(await testJev(decider)),
+    },
+    {
+      method: "GET",
+      pattern: "/api/jev/log",
+      handler: (request) =>
+        json({
+          calls: store.jevLog.recent(new Date(), { errorsOnly: new URL(request.url).searchParams.get("errors") === "1" }),
+          hours: JEV_LOG_HOURS,
         }),
     },
     {
@@ -310,7 +407,7 @@ export function createApp(config: Config): App {
       handler: async (request) => {
         const update = validateSettings(await readJson(request));
         ensureTheme(update.appTheme);
-        for (const assignment of [update.rpAssignment, update.oocAssignment, update.summaryAssignment]) {
+        for (const assignment of [update.rpAssignment, update.oocAssignment, update.summaryAssignment, update.decisionFallback]) {
           if (assignment) store.profiles.checkAssignment(assignment);
         }
         const settings = store.updateSettings(update);
@@ -478,7 +575,7 @@ export function createApp(config: Config): App {
         // `=====` (with an optional title) in an RP channel is a scene break,
         // not a post, and the partner doesn't reply to it.
         const sceneTitle = channel.kind === "rp" ? parseSceneBreak(content) : null;
-        if (sceneTitle !== null) return json(sceneBreakResult(store.addSceneBreak(id!, "user", sceneTitle)));
+        if (sceneTitle !== null) return json(sceneBreakResult(sceneEnded(store.addSceneBreak(id!, "user", sceneTitle))));
 
         const yourCharacters = store.notebook.postableCharacters();
         const postingAs = readPostingAs(body, yourCharacters);
@@ -529,7 +626,7 @@ export function createApp(config: Config): App {
         // Waits for a turn in progress, so the break can't land in the middle
         // of a reply.
         ensureIdle(id!);
-        return json(sceneBreakResult(store.addSceneBreak(id!, "user", title)));
+        return json(sceneBreakResult(sceneEnded(store.addSceneBreak(id!, "user", title))));
       },
     },
     {
@@ -735,7 +832,7 @@ export function createApp(config: Config): App {
       method: "PATCH",
       pattern: "/api/notebook/entries/:id",
       // Returns { entry } if saved, or { suggestion } if you can only suggest changes.
-      handler: async (request, { id }) => json(store.notebook.editEntry("user", id!, await readObject(request))),
+      handler: async (request, { id }) => json(maybeReview(store.notebook.editEntry("user", id!, await readObject(request)))),
     },
     {
       method: "PUT",
@@ -747,7 +844,7 @@ export function createApp(config: Config): App {
       method: "DELETE",
       pattern: "/api/notebook/entries/:id",
       // Returns { deleted: true }, or { suggestion } for shared lore.
-      handler: (_request, { id }) => json(store.notebook.deleteEntry("user", id!)),
+      handler: (_request, { id }) => json(maybeReview(store.notebook.deleteEntry("user", id!))),
     },
     {
       method: "POST",
@@ -899,7 +996,7 @@ export function createApp(config: Config): App {
     }
   }
 
-  return { fetch, store, partner, themes, summarizer };
+  return { fetch, store, partner, themes, summarizer, decider, wakeups };
 }
 
 /**
@@ -935,7 +1032,7 @@ function turnResult(result: TurnResult) {
  * Basic protection against other websites using your server.
  *
  * Any web page open in your phone's browser could try to send requests to
- * `http://127.0.0.1:3000`. Browsers block such pages from *reading* the
+ * `http://127.0.0.1:4747`. Browsers block such pages from *reading* the
  * answers, but a simple form-style POST could still make your partner take a
  * turn (and spend your nanoGPT balance). Requiring a JSON content type on
  * every request that changes something stops that: browsers won't send a

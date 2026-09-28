@@ -20,6 +20,8 @@ import { Profiles } from "./profiles.ts";
 import { Comments, Proposals, ToolLog } from "./activity.ts";
 import { parseSheet } from "./sheets.ts";
 import { Summaries } from "./summaries.ts";
+import { JevLog } from "./jevlog.ts";
+import { WakeLog } from "./wakeups.ts";
 import { importLegacyChat } from "./legacy.ts";
 import type {
   Author,
@@ -37,6 +39,9 @@ export { NotFoundError, ValidationError };
 
 /** Where the starting partner prompt and character sheet are kept. */
 const DEFAULTS_DIR = resolve(import.meta.dir, "..", "defaults");
+
+/** Jev's model on nanoGPT, pinned: upgrade on purpose, not by surprise (see src/jev.ts). */
+export const DEFAULT_DECISION_MODEL = "typesafe/jev-1.13";
 
 
 
@@ -65,6 +70,14 @@ export function defaultSettings(): Settings {
     summaries: true,
     summaryEvery: 20,
     summaryAssignment: "",
+    decisionModel: DEFAULT_DECISION_MODEL,
+    decisionFallback: "",
+    decisionConfidence: 0.8,
+    wakeups: "normal",
+    awayHours: 4,
+    wakeCooldownMinutes: 60,
+    quietStart: -1,
+    quietEnd: 8,
     appTheme: "classic",
   };
 }
@@ -88,6 +101,10 @@ function readDefault(fileName: string): string {
 const LIMITS = {
   historyLimit: { min: 1, max: 1000 },
   summaryEvery: { min: 2, max: 500 },
+  decisionConfidence: { min: 0.5, max: 0.99 },
+  awayHours: { min: 0.25, max: 720 },
+  wakeCooldownMinutes: { min: 1, max: 10_080 },
+  hour: { min: -1, max: 23 },
   /** Longest partner prompt, in characters. */
   longText: 100_000,
   /** Longest name (channel, partner), in characters. */
@@ -123,6 +140,33 @@ export function validateSettings(input: unknown): Partial<Settings> {
   }
   if (raw.summaryEvery !== undefined) {
     clean.summaryEvery = numberInRange(raw.summaryEvery, "summaryEvery", LIMITS.summaryEvery, true);
+  }
+  if (raw.decisionModel !== undefined) {
+    if (typeof raw.decisionModel !== "string" || raw.decisionModel.trim().length > 200) {
+      throw new ValidationError("decisionModel must be a model id");
+    }
+    clean.decisionModel = raw.decisionModel.trim();
+  }
+  if (raw.decisionFallback !== undefined) {
+    const value = assignment(raw.decisionFallback, "decisionFallback") ?? "";
+    if (value.startsWith("roulette:")) throw new ValidationError("decisionFallback must be a profile, not a roulette");
+    clean.decisionFallback = value;
+  }
+  if (raw.decisionConfidence !== undefined) {
+    clean.decisionConfidence = numberInRange(raw.decisionConfidence, "decisionConfidence", LIMITS.decisionConfidence, false);
+  }
+  if (raw.wakeups !== undefined) {
+    if (!["off", "quiet", "normal", "chatty"].includes(raw.wakeups as string)) {
+      throw new ValidationError('wakeups must be "off", "quiet", "normal" or "chatty"');
+    }
+    clean.wakeups = raw.wakeups as Settings["wakeups"];
+  }
+  if (raw.awayHours !== undefined) clean.awayHours = numberInRange(raw.awayHours, "awayHours", LIMITS.awayHours, false);
+  if (raw.wakeCooldownMinutes !== undefined) {
+    clean.wakeCooldownMinutes = numberInRange(raw.wakeCooldownMinutes, "wakeCooldownMinutes", LIMITS.wakeCooldownMinutes, true);
+  }
+  for (const key of ["quietStart", "quietEnd"] as const) {
+    if (raw[key] !== undefined) clean[key] = numberInRange(raw[key], key, LIMITS.hour, true);
   }
   if (raw.summaries !== undefined) {
     if (typeof raw.summaries !== "boolean") throw new ValidationError("summaries must be true or false");
@@ -380,11 +424,31 @@ export class Store {
   readonly proposals: Proposals;
   /** Scene summaries, the story so far and the digest (see `src/summaries.ts`). */
   readonly summaries: Summaries;
+  /** Every call to Jev from the last 36 hours (see `src/jevlog.ts`). */
+  readonly jevLog: JevLog;
+  /** Your partner's recent wake-ups, and what came of them (see `src/wakeups.ts`). */
+  readonly wakeLog: WakeLog;
   /**
-   * Called after a channel's messages change (added, edited, deleted), so
-   * summaries can catch up (see src/summarizer.ts).
+   * Goes up by one whenever any message changes (added, edited, deleted).
+   * The app checks it to notice new messages it didn't ask for, like a
+   * wake-up (stage 8).
    */
-  onMessagesChanged: ((channelId: string) => void) | null = null;
+  revision = 0;
+  private readonly messageWatchers: ((channelId: string) => void)[] = [];
+
+  /**
+   * Be told whenever a channel's messages change (added, edited, deleted):
+   * summaries catch up (src/summarizer.ts), the notebook keeper looks at
+   * new messages.
+   */
+  watchMessages(watcher: (channelId: string) => void): void {
+    this.messageWatchers.push(watcher);
+  }
+
+  private messagesChanged(channelId: string): void {
+    this.revision++;
+    for (const watcher of this.messageWatchers) watcher(channelId);
+  }
 
   /**
    * Open (or create) the database inside `dataDir`.
@@ -409,6 +473,8 @@ export class Store {
     this.comments = new Comments(this.db);
     this.proposals = new Proposals(this.db);
     this.summaries = new Summaries(this.db);
+    this.jevLog = new JevLog(this.db);
+    this.wakeLog = new WakeLog(this.db);
 
     if (isNew) {
       const imported = !inMemory && importLegacyChat(this, dataDir);
@@ -667,7 +733,7 @@ export class Store {
       (input.characters ?? []).forEach((name, position) => insertCharacter.run({ id, name, position }));
     })();
 
-    this.onMessagesChanged?.(input.channelId);
+    this.messagesChanged(input.channelId);
     return this.getMessage(id);
   }
 
@@ -726,7 +792,7 @@ export class Store {
       .run({ id, content, editedAt: new Date().toISOString() });
     if (result.changes === 0) throw new NotFoundError("message");
     const message = this.getMessage(id);
-    this.onMessagesChanged?.(message.channelId);
+    this.messagesChanged(message.channelId);
     return message;
   }
 
@@ -735,7 +801,7 @@ export class Store {
     const message = this.getMessage(id); // throws NotFoundError
     this.summaries.messageChanging(message, true);
     this.db.query("DELETE FROM messages WHERE id = $id").run({ id });
-    this.onMessagesChanged?.(message.channelId);
+    this.messagesChanged(message.channelId);
   }
 
   /**
@@ -770,5 +836,6 @@ export class Store {
     this.getChannel(channelId); // throws NotFoundError for an unknown channel
     this.db.query("DELETE FROM messages WHERE channel_id = $channelId").run({ channelId });
     this.summaries.clear(channelId);
+    this.messagesChanged(channelId);
   }
 }

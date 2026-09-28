@@ -39,7 +39,7 @@
 import { CancelledError, createChatCompletion, type ApiOptions, type ToolSpec } from "./nanogpt.ts";
 import { replyToMessages } from "./posts.ts";
 import { parseExtraParams } from "./profiles.ts";
-import { buildPromptStack, type PromptMemory, type PromptReview, type PromptThread } from "./prompt.ts";
+import { buildPromptStack, isNothing, type PromptMemory, type PromptReview, type PromptThread, type WakeContext } from "./prompt.ts";
 import { channelSummaryText, splitScenes, windowStart, type SeqMessage } from "./summaries.ts";
 import type { Store } from "./store.ts";
 import { extractTextToolCalls, parseArguments, type ParsedCall } from "./toolcalls.ts";
@@ -50,10 +50,10 @@ import type { ApiMessage, ApiToolCall, Channel, ChatMessage, CommentThread, Mess
 export const MAX_ROUNDS = 6;
 
 /**
- * What caused a turn. Used for the server log, and where the stage 8 event
- * triggers ("app-opened", "scene-ended", ...) will go.
+ * What caused a turn. Used for the server log. "wake" is a turn on their
+ * own (stage 8, see src/wakeups.ts).
  */
-export type TurnTrigger = "user-message" | "continue" | "regenerate" | "comment";
+export type TurnTrigger = "user-message" | "continue" | "regenerate" | "comment" | "wake";
 
 /** Extra options for a turn. */
 export interface TurnOptions {
@@ -69,6 +69,8 @@ export interface TurnOptions {
    * channel's assignment ("Regenerate with...").
    */
   profileId?: string;
+  /** A wake-up (stage 8): why your partner is taking a turn on their own. */
+  wake?: WakeContext;
 }
 
 /** Everything one turn produced. */
@@ -116,6 +118,8 @@ export interface PromptOptions {
   profile?: Profile;
   /** A comment thread your partner is replying to. */
   replyingTo?: string;
+  /** A wake-up (stage 8). */
+  wake?: WakeContext;
 }
 
 /**
@@ -190,6 +194,7 @@ export function promptForChannel(store: Store, channelId: string, options: Promp
           onYourMessage: byId.get(replying.messageId)?.author === "partner",
         }
       : undefined,
+    wake: options.wake,
   });
 }
 
@@ -441,6 +446,7 @@ export class Partner {
         excludeIds: options.replacing,
         profile,
         replyingTo,
+        wake: options.wake,
       });
       const context: ToolContext = { store: this.store, channel, mode: replyingTo ? "comment" : "post" };
       const tools = profile.supportsTools ? toolSpecs(context) : [];
@@ -464,6 +470,8 @@ export class Partner {
       );
 
       const result: TurnResult = { messages: [], toolCalls: loop.toolCalls, replaced: [], skipped: false };
+      // "[nothing]": a wake-up without tools that had nothing to say.
+      if (options.wake && isNothing(loop.content)) loop.content = "";
       if (loop.stopped || loop.content === "") {
         // Nothing to write: your partner chose not to, or only acted. A
         // regeneration keeps the reply it would have replaced.

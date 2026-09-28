@@ -130,6 +130,8 @@ export function testConfig(dataDir: string, apiBaseUrl: string, overrides: Parti
     // Summaries are written only when a test asks (app.summarizer.catchUp),
     // so they never take a fake reply meant for a turn.
     summaryDelayMs: -1,
+    // Likewise wake-ups: only when a test asks (app.wakeups.event).
+    autoWake: false,
     ...overrides,
   };
 }

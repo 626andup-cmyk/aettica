@@ -33,6 +33,11 @@ export interface Config {
    * in milliseconds (default 4000). Negative: only when asked (for tests).
    */
   summaryDelayMs?: number;
+  /**
+   * Whether events wake your partner on their own (stage 8). Default true;
+   * tests turn it off and call `app.wakeups.event` themselves.
+   */
+  autoWake?: boolean;
 }
 
 /**
@@ -47,7 +52,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   return {
     host: env.HOST || "127.0.0.1",
-    port: parsePositiveInt(env.PORT, 3000, "PORT"),
+    port: parsePositiveInt(env.PORT, 4747, "PORT"),
     dataDir: resolve(root, env.DATA_DIR || "data"),
     publicDir: resolve(root, "public"),
     themesDir: resolve(root, "themes"),
