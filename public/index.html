@@ -121,8 +121,10 @@
     <div class="app" id="app">
       <!-- ============================================================ sidebar -->
       <nav class="sidebar surface" id="sidebar" aria-label="Channels">
+        <!-- Your servers: one per partner, usually (see src/hub.ts). Filled in by app.js. -->
+        <div class="server-rail" id="server-rail" aria-label="Servers"></div>
         <header class="sidebar-header">
-          <h1 class="server-name">Aettica</h1>
+          <h1 class="server-name"><button type="button" class="server-name-button" id="server-name" title="Server settings">Aettica</button></h1>
           <!-- Things your partner asked you to approve. The badge counts them. -->
           <button id="inbox-button" class="icon-button inbox-button" type="button" aria-label="Inbox" title="Inbox">
             <svg width="20" height="20" aria-hidden="true"><use href="#icon-inbox" /></svg>
@@ -137,7 +139,7 @@
         <ul class="channel-list" id="channel-list"></ul>
 
         <footer class="sidebar-footer">
-          <div class="partner-card">
+          <div class="partner-card" id="partner-card" role="button" tabindex="0" title="Your partner: who they are, how they write">
             <div class="avatar partner-avatar" id="partner-avatar" aria-hidden="true"></div>
             <div class="partner-card-text">
               <div class="partner-card-name" id="partner-name"></div>
@@ -256,54 +258,10 @@
       <form id="settings-form" method="dialog">
         <h2 class="dialog-title">Settings</h2>
 
-        <label for="setting-partner-name">Partner name</label>
-        <input id="setting-partner-name" name="partnerName" autocomplete="off" />
-
-        <label for="setting-partner">Who your partner is</label>
-        <p class="hint">Their name, personality and taste as a writer. Used in every channel.</p>
-        <textarea id="setting-partner" name="partnerPrompt" rows="5"></textarea>
-        <div class="memory-buttons">
-          <button type="button" class="button" id="surprise-partner">🎲 Surprise me</button>
-        </div>
-        <p class="hint" id="surprise-result" role="status">
-          A new partner from a few random ingredients. Nothing changes until you press Save.
+        <p class="hint">
+          Settings for this partner's space. Who they are, and how they write, is in their own menu:
+          <button type="button" class="link-button inline-link" id="open-partner-from-settings">Partner…</button>
         </p>
-
-        <label class="check-option">
-          <input type="checkbox" name="oocBubbles" />
-          <span
-            ><strong>Texting in OOC</strong><br /><span class="hint"
-              >Your partner texts in short bursts, shown one at a time with "typing…" between them (double-tap it to
-              skip). Each thing you send is its own text, and they answer once you pause.</span
-            ></span
-          >
-        </label>
-        <div class="grid assignment-grid texting-only">
-          <div>
-            <label for="setting-reply-delay">They answer after a pause of (seconds)</label>
-            <input id="setting-reply-delay" name="replyDelaySeconds" type="number" min="0" max="30" step="0.5" />
-          </div>
-          <div>
-            <label for="setting-typing-speed">Typing speed (ms per character)</label>
-            <input id="setting-typing-speed" name="typingPerCharMs" type="number" min="0" max="1000" step="5" />
-          </div>
-        </div>
-
-        <!--
-          One prompt per kind of channel. Only the one that applies is sent,
-          so instructions for long prose never reach an OOC chat.
-        -->
-        <label for="setting-literary">In literary scenes</label>
-        <p class="hint">How they write prose posts: style, pacing, length.</p>
-        <textarea id="setting-literary" name="literaryPrompt" rows="4"></textarea>
-
-        <label for="setting-casual">In casual scenes</label>
-        <p class="hint">How they write short in-character chat messages.</p>
-        <textarea id="setting-casual" name="casualPrompt" rows="4"></textarea>
-
-        <label for="setting-ooc">Out of character</label>
-        <p class="hint">How they talk to you as themselves in OOC channels, e.g. how long their messages are.</p>
-        <textarea id="setting-ooc" name="oocPrompt" rows="4"></textarea>
 
         <p class="hint">Characters, yours and your partner's, live in the notebook (the book button).</p>
 
@@ -726,6 +684,150 @@
         <span class="spacer"></span>
         <button type="button" class="button button-primary" data-close>Done</button>
       </div>
+    </dialog>
+
+    <!-- The open partner: who they are, how they look, how they write. -->
+    <dialog id="partner-dialog" class="dialog surface">
+      <form id="partner-form" method="dialog">
+        <div class="partner-dialog-head">
+          <div class="avatar partner-avatar" id="partner-dialog-avatar" aria-hidden="true"></div>
+          <h2 class="dialog-title" id="partner-dialog-title">Partner</h2>
+        </div>
+        <p class="hint">
+          Everything they remember is theirs alone: their notebook, channels, ideas and settings. Other partners never
+          see it.
+        </p>
+
+        <label for="partner-name-input">Name</label>
+        <input id="partner-name-input" name="partnerName" autocomplete="off" />
+
+        <div class="grid assignment-grid">
+          <div>
+            <label for="partner-avatar-input">Avatar</label>
+            <input id="partner-avatar-input" name="partnerAvatar" autocomplete="off" maxlength="8" placeholder="An emoji, or empty for their initial" />
+          </div>
+          <div>
+            <label for="partner-color-input">Colour</label>
+            <div class="inline-row">
+              <input id="partner-color-input" name="partnerColor" type="range" min="0" max="359" step="1" />
+              <label class="check-inline"><input type="checkbox" name="themeColor" /> Theme's</label>
+            </div>
+          </div>
+        </div>
+
+        <label for="setting-partner">Who your partner is</label>
+        <p class="hint">Their personality and taste as a writer. Used in every channel.</p>
+        <textarea id="setting-partner" name="partnerPrompt" rows="5"></textarea>
+        <div class="memory-buttons">
+          <button type="button" class="button" id="surprise-partner">🎲 Surprise me</button>
+        </div>
+        <p class="hint" id="surprise-result" role="status">
+          Reroll who they are from a few random ingredients. Nothing changes until you press Save.
+        </p>
+
+        <label class="check-option">
+          <input type="checkbox" name="oocBubbles" />
+          <span
+            ><strong>Texting in OOC</strong><br /><span class="hint"
+              >Your partner texts in short bursts, shown one at a time with "typing…" between them (double-tap it to
+              skip). Each thing you send is its own text, and they answer once you pause.</span
+            ></span
+          >
+        </label>
+        <div class="grid assignment-grid texting-only">
+          <div>
+            <label for="setting-reply-delay">They answer after a pause of (seconds)</label>
+            <input id="setting-reply-delay" name="replyDelaySeconds" type="number" min="0" max="30" step="0.5" />
+          </div>
+          <div>
+            <label for="setting-typing-speed">Typing speed (ms per character)</label>
+            <input id="setting-typing-speed" name="typingPerCharMs" type="number" min="0" max="1000" step="5" />
+          </div>
+        </div>
+
+        <!--
+          One prompt per kind of channel. Only the one that applies is sent,
+          so instructions for long prose never reach an OOC chat.
+        -->
+        <label for="setting-literary">In literary scenes</label>
+        <p class="hint">How they write prose posts: style, pacing, length.</p>
+        <textarea id="setting-literary" name="literaryPrompt" rows="4"></textarea>
+
+        <label for="setting-casual">In casual scenes</label>
+        <p class="hint">How they write short in-character chat messages.</p>
+        <textarea id="setting-casual" name="casualPrompt" rows="4"></textarea>
+
+        <label for="setting-ooc">Out of character</label>
+        <p class="hint">How they talk to you as themselves in OOC channels, e.g. how long their messages are.</p>
+        <textarea id="setting-ooc" name="oocPrompt" rows="4"></textarea>
+
+        <p class="form-error" role="alert" hidden></p>
+        <div class="dialog-buttons">
+          <button type="button" class="button button-danger" id="partner-delete">Delete…</button>
+          <button type="button" class="button" id="partner-move" hidden>Own server</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- A new partner: in a new server of their own, or in this one. -->
+    <dialog id="new-partner-dialog" class="dialog surface">
+      <form id="new-partner-form" method="dialog">
+        <h2 class="dialog-title" id="new-partner-title">New server</h2>
+        <p class="hint" id="new-partner-note">
+          A new partner, with a server of their own. They start fresh: their own notebook, channels and memory, with
+          your connection profiles and preferences.
+        </p>
+        <div id="new-server-name-row">
+          <label for="new-server-name">Server name</label>
+          <input id="new-server-name" name="serverName" autocomplete="off" maxlength="100" placeholder="Optional: their name, if empty" />
+        </div>
+        <div class="grid assignment-grid">
+          <div>
+            <label for="new-partner-name">Partner's name</label>
+            <input id="new-partner-name" name="name" autocomplete="off" maxlength="100" />
+          </div>
+          <div>
+            <label for="new-partner-avatar">Avatar</label>
+            <input id="new-partner-avatar" name="avatar" autocomplete="off" maxlength="8" placeholder="An emoji (optional)" />
+          </div>
+        </div>
+        <label for="new-partner-prompt">Who they are</label>
+        <textarea id="new-partner-prompt" name="prompt" rows="5" placeholder="Their personality and taste as a writer. Leave empty for the default."></textarea>
+        <div class="memory-buttons">
+          <button type="button" class="button" id="new-partner-surprise">🎲 Surprise me</button>
+        </div>
+        <p class="hint" id="new-partner-surprise-result" role="status"></p>
+        <p class="form-error" role="alert" hidden></p>
+        <div class="dialog-buttons">
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary" id="new-partner-create">Create</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- A server: its name, its partners, and deleting it. -->
+    <dialog id="server-dialog" class="dialog surface">
+      <form id="server-form" method="dialog">
+        <h2 class="dialog-title">Server</h2>
+        <label for="server-name-input">Name</label>
+        <input id="server-name-input" autocomplete="off" maxlength="100" placeholder="Empty: its first partner's name" />
+        <label>Partners here</label>
+        <ul id="server-partner-list" class="server-partner-list"></ul>
+        <div class="memory-buttons">
+          <button type="button" class="button" id="server-add-partner">Add a partner here…</button>
+        </div>
+        <p class="form-error" role="alert" hidden></p>
+        <div class="dialog-buttons">
+          <button type="button" class="button button-danger" id="server-delete">Delete server…</button>
+          <span class="spacer"></span>
+          <button type="button" class="button" data-close>Cancel</button>
+          <button type="submit" class="button button-primary">Save</button>
+        </div>
+      </form>
     </dialog>
 
     <!-- A channel category: its name (and deleting it). -->

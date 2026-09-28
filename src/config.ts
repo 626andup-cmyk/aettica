@@ -42,6 +42,15 @@ export interface Config {
   autoWake?: boolean;
   /** How long after a change the notebook keeper looks (ms); negative: only when asked (tests). */
   keeperDelayMs?: number;
+  /**
+   * Set by the hub (src/hub.ts), which runs one app per partner. Where your
+   * own themes are (shared by every partner; default `<dataDir>/themes`),
+   * which partner this app is (for notification links), and whether a brand
+   * new partner starts with the example character (default true).
+   */
+  userThemesDir?: string;
+  partnerId?: string;
+  example?: boolean;
 }
 
 /**

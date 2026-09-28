@@ -29,6 +29,8 @@ export interface Notification {
   text: string;
   /** The channel to open when it's tapped. */
   channelId: string;
+  /** Whose channel it is (src/hub.ts), so the app opens the right partner. */
+  partnerId?: string;
 }
 
 /** Something that can post notifications. Tests use a fake one. */
@@ -65,10 +67,11 @@ export class TermuxNotifier implements Notifier {
     return find("termux-notification") !== null;
   }
 
-  notify({ title, text, channelId }: Notification): void {
+  notify({ title, text, channelId, partnerId }: Notification): void {
     const command = find("termux-notification");
     if (!command) return;
-    const url = `${this.appUrl}/#/channel/${encodeURIComponent(channelId)}`;
+    const partner = partnerId ? `/p/${encodeURIComponent(partnerId)}` : "";
+    const url = `${this.appUrl}/#${partner}/channel/${encodeURIComponent(channelId)}`;
     run(command, [
       "--title",
       title,

@@ -6,7 +6,7 @@ Two endgame features from [DESIGN.md](../DESIGN.md): out-of-character chat that 
 
 - **Your partner texts in bursts.** A reply in an OOC channel comes as a few short texts ("omg wait", "you actually said that??", "legend") instead of one paragraph. They arrive **one at a time**, with "Arlo is typing…" between them; a longer text takes longer to type. **Double-tap "typing…"** to see the rest straight away.
 - **Each thing you send is its own text**, and your partner **waits until you pause** (2.5 seconds by default, and longer while you're still typing) before answering all of them in one reply. So you can send "hey", then "guess what", then the news, and they answer the whole thing.
-- Turn it off, or tune it, in **Settings → Texting in OOC**: how long a pause is, and the typing speed. Roleplay channels are never affected.
+- Turn it off, or tune it, in the **partner menu** (tap the partner card) → **Texting in OOC**: how long a pause is, and the typing speed. Roleplay channels are never affected.
 
 ### How it works
 
@@ -26,7 +26,7 @@ Two endgame features from [DESIGN.md](../DESIGN.md): out-of-character chat that 
 
 ## RNG partner creation
 
-**Settings → 🎲 Surprise me** invents a new partner: a name and a "who your partner is" description. It fills in the form; nothing changes until you press **Save**, so roll as often as you like.
+**🎲 Surprise me** invents a new partner: a name and a "who your partner is" description. In the partner menu it rerolls the open partner; in **+** (a new server) or **Add a partner here**, it fills in the new partner. It fills in the form; nothing changes until you press **Save**, so roll as often as you like.
 
 Asking a model for "a random character" gets the same few every time, so the randomness comes from Aettica (`src/rng.ts`). It picks a temperament, a way of talking, two interests, a quirk and two kinds of story they love from lists, and the model (the profile that writes OOC, at a high temperature) turns them into one believable person. The ingredients are shown under the button ("Meet Wren (dry and deadpan; quotes old films; ...)").
 

@@ -78,6 +78,8 @@
 
   /* Sidebar */
   --sidebar-width: 248px;
+  /* The server rail, left of the channels. */
+  --rail-width: 60px;
   --sidebar-bg: #2b2d31;
   --sidebar-border: none;
   --sidebar-shadow: none;
@@ -217,7 +219,8 @@ textarea {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: var(--sidebar-width);
+  width: calc(var(--sidebar-width) + var(--rail-width));
+  padding-left: var(--rail-width);
   flex-shrink: 0;
   background: var(--sidebar-bg);
   border-right: var(--sidebar-border);
@@ -249,7 +252,7 @@ textarea {
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 20;
-    width: min(var(--sidebar-width), 85vw);
+    width: min(calc(var(--sidebar-width) + var(--rail-width)), 92vw);
     padding-top: env(safe-area-inset-top);
     transform: translateX(-100%);
     transition: transform 0.2s ease;
@@ -2386,4 +2389,166 @@ button.attach-chip {
 .inline-row select {
   flex: 1;
   min-width: 0;
+}
+
+/* ------------------------------------------------ servers and partners */
+
+/* The rail: a column of round server buttons, left of the channels. */
+.server-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: var(--rail-width);
+  padding: 12px 0;
+  overflow-y: auto;
+  border-right: 1px solid color-mix(in srgb, var(--text-muted) 18%, transparent);
+  background: color-mix(in srgb, var(--sidebar-bg, #000) 70%, #000 30%);
+}
+
+.server-button {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  transition: border-radius 0.15s ease;
+}
+
+.server-button .avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: inherit;
+  font-size: 18px;
+}
+
+/* The open server: a squircle, and a pill on the rail's edge, like Discord. */
+.server-button[aria-current="true"],
+.server-button:hover {
+  border-radius: 14px;
+}
+
+.server-button[aria-current="true"]::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -8px;
+  width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: var(--text-strong);
+}
+
+.server-unread {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--sidebar-bg, #222);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.server-add {
+  border: 1px dashed var(--text-muted);
+  color: var(--text-muted);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.server-add:hover {
+  color: var(--text-strong);
+  border-color: var(--text-strong);
+}
+
+.server-name-button {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* An avatar in a partner's colour, or an emoji avatar. */
+.avatar.colored-avatar {
+  background: hsl(var(--partner-hue) var(--avatar-saturation, 55%) var(--avatar-lightness, 55%));
+}
+
+.avatar.emoji-avatar {
+  font-size: 1.15em;
+}
+
+.partner-card {
+  cursor: pointer;
+  border-radius: var(--radius-md);
+}
+
+.partner-card:hover {
+  background: var(--channel-link-hover-bg);
+}
+
+/* In a server with several partners: each one's channels under their name. */
+.partner-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 4px;
+  padding: 0 4px;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.partner-section .avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+
+.partner-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.partner-dialog-head .avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 20px;
+}
+
+.server-partner-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.server-partner-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.server-partner-list .avatar {
+  width: 28px;
+  height: 28px;
+  font-size: 13px;
 }

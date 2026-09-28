@@ -269,7 +269,7 @@ All of these are built now (each links to how it works).
 - [x] Which Xoul-style fields does a notebook entry have? Flexible labelled fields, starting from a template per kind (see "Decided in stage 4").
 - [ ] Which of your nanoGPT models reliably handle tool calling? Each profile's "Test tools" button, and the tool log, will answer this.
 - [x] How often do rolling channel summaries update (every N messages)? Every `summaryEvery` messages beyond the recent ones (default 20), a setting. See "Decided in stage 7".
-- [ ] Is there ever more than one partner per server?
+- [x] Is there ever more than one partner per server? Yes. Each partner is their own space, with fully separate memory (their own database). Usually each has a server of their own, but a server can hold several, each with their own channels, shown under their name. See [docs/partners.md](docs/partners.md).
 - [ ] Should a channel theme also restyle the sidebar while you're in that channel?
 - [ ] Can the partner pick or suggest a channel's theme (for example when creating a channel)?
 - [x] Should your casual characters stay server-wide, or become notebook entries pinned to each channel's cast in stage 4? They're notebook entries, usable anywhere, and posting as one pins it to the channel.

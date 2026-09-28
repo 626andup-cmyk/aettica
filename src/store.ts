@@ -88,6 +88,8 @@ export function defaultSettings(): Settings {
     keeperEvery: 6,
     jevChecks: true,
     heartbeatHours: 0,
+    partnerAvatar: "",
+    partnerColor: -1,
     oocBubbles: true,
     typingBaseMs: 600,
     typingPerCharMs: 40,
@@ -191,6 +193,13 @@ export function validateSettings(input: unknown): Partial<Settings> {
     clean.heartbeatHours = numberInRange(raw.heartbeatHours, "heartbeatHours", LIMITS.heartbeatHours, false);
     if (clean.heartbeatHours > 0 && clean.heartbeatHours < 1) throw new ValidationError("heartbeatHours must be 0 (off) or at least 1");
   }
+  if (raw.partnerAvatar !== undefined) {
+    if (typeof raw.partnerAvatar !== "string" || [...raw.partnerAvatar.trim()].length > 8) {
+      throw new ValidationError("partnerAvatar must be an emoji (or empty)");
+    }
+    clean.partnerAvatar = raw.partnerAvatar.trim();
+  }
+  if (raw.partnerColor !== undefined) clean.partnerColor = numberInRange(raw.partnerColor, "partnerColor", { min: -1, max: 359 }, true);
   if (raw.oocBubbles !== undefined) {
     if (typeof raw.oocBubbles !== "boolean") throw new ValidationError("oocBubbles must be true or false");
     clean.oocBubbles = raw.oocBubbles;
@@ -533,7 +542,7 @@ export class Store {
    * @param dataDir  Folder for the database. Created if it doesn't exist.
    *                 Pass `":memory:"` for a throwaway database (for tests).
    */
-  constructor(dataDir: string) {
+  constructor(dataDir: string, options: { example?: boolean } = {}) {
     const inMemory = dataDir === ":memory:";
     if (!inMemory) mkdirSync(dataDir, { recursive: true });
     const path = inMemory ? ":memory:" : join(dataDir, "aettica.db");
@@ -557,14 +566,18 @@ export class Store {
 
     if (isNew) {
       const imported = !inMemory && importLegacyChat(this, dataDir);
-      if (!imported) this.seed();
+      if (!imported) this.seed(options.example ?? true);
     }
   }
 
-  /** Starting content for a brand-new server. */
-  private seed(): void {
+  /**
+   * Starting content for a brand-new partner: a #story and an #ooc channel,
+   * and (for the very first partner) the example character in #story.
+   */
+  private seed(example: boolean): void {
     const story = this.createChannel({ name: "story", kind: "rp" });
     this.createChannel({ name: "ooc", kind: "ooc" });
+    if (!example) return;
     const character = defaultCharacter();
     this.addCharacterFromSheet(character.name, character.sheet, story.id);
   }
