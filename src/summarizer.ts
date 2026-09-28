@@ -49,6 +49,8 @@ export class Summarizer {
   private readonly runs = new Map<string, Promise<void>>();
   private readonly running = new Set<string>();
   private readonly errors = new Map<string, string>();
+  /** Told when a scene's summary is written (stage 8: a scene ending can wake your partner). */
+  onSceneSummarized: ((channelId: string, breakId: string) => void) | null = null;
 
   /**
    * @param delayMs  How long to wait after a change before catching up. A
@@ -60,7 +62,7 @@ export class Summarizer {
     private readonly api: ApiOptions,
     private readonly delayMs = 4000,
   ) {
-    store.onMessagesChanged = (channelId) => this.schedule(channelId);
+    store.watchMessages((channelId) => this.schedule(channelId));
   }
 
   /** Catch a channel up a little later (see `delayMs`). */
@@ -164,6 +166,11 @@ export class Summarizer {
       const content = await write("scene", seed?.content ?? "", lines(posts), sceneHeading(scene, scenes.indexOf(scene)));
       store.summaries.save(channelId, "scene", scene.end.id, content, scene.end.seq);
       if (current) store.summaries.remove(channelId, "current", startId);
+      try {
+        this.onSceneSummarized?.(channelId, scene.end.id);
+      } catch (error) {
+        console.warn("[summaries] couldn't pass on a finished scene", error);
+      }
     }
 
     // 2. The story so far, from the scene summaries.

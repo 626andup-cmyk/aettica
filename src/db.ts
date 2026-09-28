@@ -405,6 +405,47 @@ export const MIGRATIONS: Migration[] = [
     PRIMARY KEY (channel_id, kind, scene_id)
   );
   `,
+
+  // ---------------------------------------------------------------- 8
+  // Stage 8: the Jev log (src/jevlog.ts, the same as Kitsikai's) and the
+  // wake-up log (src/wakeups.ts).
+  `
+  CREATE TABLE jev_log (
+    id          TEXT PRIMARY KEY,
+    at          TEXT NOT NULL,
+    -- What asked: "Wake-up", "Notebook keeper"...
+    purpose     TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    -- The request body sent to Jev, as JSON; NULL if Jev wasn't asked (turned off).
+    request     TEXT,
+    -- Jev's reply, exactly as it came back ('' if there wasn't one).
+    response    TEXT NOT NULL,
+    error       TEXT,
+    -- 'jev', 'fallback', or NULL when nobody answered.
+    answered_by TEXT CHECK (answered_by IN ('jev', 'fallback')),
+    -- The answers in short: "t1: yes (95%), plan: no (90%)".
+    summary     TEXT NOT NULL,
+    -- The fallback profile's request and reply, as JSON, when it was asked.
+    fallback    TEXT,
+    duration_ms INTEGER NOT NULL
+  );
+  CREATE INDEX jev_log_by_time ON jev_log (at);
+
+  -- Each time something could have woken your partner, and what came of it.
+  CREATE TABLE wakeups (
+    id         TEXT PRIMARY KEY,
+    at         TEXT NOT NULL,
+    -- What happened: 'opened', 'away', 'scene-ended', 'review', 'heartbeat'.
+    reason     TEXT NOT NULL,
+    -- 'posted' (they wrote), 'quiet' (their turn, but they chose not to
+    -- write), 'declined' (Jev said it wasn't the moment), 'failed'.
+    outcome    TEXT NOT NULL CHECK (outcome IN ('posted', 'quiet', 'declined', 'failed')),
+    channel_id TEXT REFERENCES channels (id) ON DELETE SET NULL,
+    -- Why, in words.
+    detail     TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX wakeups_by_time ON wakeups (at);
+  `,
 ];
 
 /**

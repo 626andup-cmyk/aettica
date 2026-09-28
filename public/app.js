@@ -174,8 +174,87 @@ async function loadState() {
   state.roulettes = data.roulettes;
   state.proposals = data.proposals;
   state.busy = new Set(data.busyChannels);
+  state.revision = data.revision;
+  state.activity = data.activity ?? {};
+  // The very first time, everything that's there counts as read.
+  if (readLocal(SEEN_KEY) === null) {
+    writeLocal(SEEN_KEY, JSON.stringify(Object.fromEntries(Object.entries(state.activity).map(([id, a]) => [id, a?.lastId ?? null]))));
+  }
   state.appVersion ??= data.appVersion;
   checkForUpdate(data.appVersion);
+}
+
+// ----------------------------------------------------------- live updates
+
+/*
+ * Your partner can write without being asked (stage 8: a wake-up when you
+ * open the app, or when a scene ends). So while the app is showing, it
+ * checks every few seconds whether any message changed (the server's
+ * `revision`), and if so reloads the channel list and the open channel.
+ * Channels with a new message from your partner that you haven't seen get
+ * a dot. What you've seen is remembered on this device.
+ */
+
+/** How often to check for new messages while the app is showing. */
+const LIVE_CHECK_INTERVAL = 15_000;
+/** Coming back after this long away counts as opening the app (a possible wake-up). */
+const WAKE_AFTER_HIDDEN = 5 * 60_000;
+/** Each channel's newest message you've seen: {channelId: messageId}. */
+const SEEN_KEY = "aettica.seen";
+
+function seenMessages() {
+  try {
+    return JSON.parse(readLocal(SEEN_KEY) ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** Remember the open channel's newest message as seen. */
+function markSeen() {
+  const last = state.messages.at(-1);
+  if (!state.channelId || !last || last.id === "pending") return;
+  const seen = seenMessages();
+  if (seen[state.channelId] === last.id) return;
+  seen[state.channelId] = last.id;
+  writeLocal(SEEN_KEY, JSON.stringify(seen));
+  if (state.activity?.[state.channelId]) state.activity[state.channelId].lastId = last.id;
+}
+
+/** Whether a channel has a message from your partner you haven't seen. */
+function isUnread(channel) {
+  const activity = state.activity?.[channel.id];
+  if (!activity || activity.author !== "partner" || channel.id === state.channelId) return false;
+  return seenMessages()[channel.id] !== activity.lastId;
+}
+
+/** Check for messages the app didn't ask for, and show them. */
+async function checkLive() {
+  if (document.visibilityState !== "visible" || state.busy.size > 0) return;
+  let data;
+  try {
+    data = await api("GET", "/api/state");
+  } catch {
+    return; // the server's away for a moment
+  }
+  checkForUpdate(data.appVersion);
+  if (data.revision === state.revision) return;
+  state.revision = data.revision;
+  state.activity = data.activity ?? {};
+  state.channels = data.channels;
+  state.proposals = data.proposals;
+  state.settings = data.settings;
+  for (const channelId of data.busyChannels) state.busy.add(channelId);
+  const open = state.activity[state.channelId];
+  const shown = state.messages.at(-1)?.id ?? null;
+  // Reload the open channel if it changed (unless you're editing in it).
+  if (state.channelId && (open?.lastId ?? null) !== shown && state.editingId === null) await refreshMessages();
+  else renderAll();
+}
+
+/** Tell the server you've opened the app: your partner may wake up. */
+function sayOpened() {
+  api("POST", "/api/wake", { event: "opened" }).catch(() => {});
 }
 
 // ------------------------------------------------------------- updates
@@ -740,6 +819,7 @@ async function deleteMessage(id) {
 
 /** Redraw everything from `state`. */
 function renderAll() {
+  markSeen();
   applyThemes();
   renderSidebar();
   renderChannelHeader();
@@ -772,6 +852,11 @@ function renderSidebar() {
         const dot = document.createElement("span");
         dot.className = "channel-busy";
         dot.title = "Your partner is writing here";
+        link.append(dot);
+      } else if (isUnread(channel)) {
+        const dot = document.createElement("span");
+        dot.className = "channel-unread";
+        dot.title = "A new message from your partner";
         link.append(dot);
       }
       item.append(link);
@@ -2053,6 +2138,17 @@ function openSettings() {
   form.summaryEvery.value = s.summaryEvery;
   fillAssignmentSelect(form.summaryAssignment, s.summaryAssignment, "Same as roleplay");
   updateSummariesOnly();
+  form.wakeups.value = s.wakeups;
+  form.awayHours.value = s.awayHours;
+  form.wakeCooldownMinutes.value = s.wakeCooldownMinutes;
+  form.quietStart.value = String(s.quietStart);
+  form.quietEnd.value = String(s.quietEnd);
+  form.decisionModel.value = s.decisionModel;
+  form.decisionConfidence.value = s.decisionConfidence;
+  fillFallbackSelect(form.decisionFallback, s.decisionFallback);
+  $("test-jev-result").textContent = "";
+  updateWakeupsOnly();
+  loadWakeLog();
   hideFormError(els.settingsForm);
   els.settingsDialog.showModal();
 }
@@ -2073,12 +2169,168 @@ async function saveSettings(event) {
       summaries: form.summaries.checked,
       summaryEvery: Number(form.summaryEvery.value),
       summaryAssignment: form.summaryAssignment.value,
+      wakeups: form.wakeups.value,
+      awayHours: Number(form.awayHours.value),
+      wakeCooldownMinutes: Number(form.wakeCooldownMinutes.value),
+      quietStart: Number(form.quietStart.value),
+      quietEnd: Number(form.quietEnd.value),
+      decisionModel: form.decisionModel.value,
+      decisionConfidence: Number(form.decisionConfidence.value),
+      decisionFallback: form.decisionFallback.value,
     });
     state.settings = data.settings;
     els.settingsDialog.close();
     renderAll();
   } catch (error) {
     showFormError(els.settingsForm, error.message);
+  }
+}
+
+/** Only profiles (a fallback for Jev can't be a roulette), with "Nobody" first. */
+function fillFallbackSelect(select, value) {
+  select.replaceChildren(new Option("Nobody: skip that decision", ""), ...state.profiles.map((p) => new Option(p.name, `profile:${p.id}`)));
+  select.value = value || "";
+  if (select.selectedIndex < 0) select.selectedIndex = 0;
+}
+
+/** Show the wake-up settings only while wake-ups are on. */
+function updateWakeupsOnly() {
+  const on = els.settingsForm.elements.wakeups.value !== "off";
+  for (const element of els.settingsForm.querySelectorAll(".wakeups-only")) element.hidden = !on;
+}
+
+const WAKE_REASONS = {
+  opened: "You opened the app",
+  away: "You came back",
+  "scene-ended": "A scene ended",
+  review: "A suggestion to review",
+  heartbeat: "Heartbeat",
+};
+const WAKE_OUTCOMES = { posted: "wrote to you", quiet: "didn't write", declined: "not the moment", failed: "failed" };
+
+/** Settings → Your partner reaching out → Recent wake-ups. */
+async function loadWakeLog() {
+  const list = $("wake-log-list");
+  try {
+    const { wakeups } = await api("GET", "/api/wakeups");
+    if (wakeups.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "hint";
+      empty.textContent = "Nothing yet.";
+      list.replaceChildren(empty);
+      return;
+    }
+    list.replaceChildren(
+      ...wakeups.map((w) => {
+        const item = document.createElement("li");
+        item.dataset.outcome = w.outcome;
+        const head = document.createElement("strong");
+        head.textContent = `${WAKE_REASONS[w.reason] ?? w.reason}: ${WAKE_OUTCOMES[w.outcome] ?? w.outcome}`;
+        const time = document.createElement("time");
+        time.className = "message-time";
+        time.dateTime = w.at;
+        time.textContent = ` ${formatTime(w.at)}`;
+        const detail = document.createElement("div");
+        detail.className = "hint";
+        detail.textContent = w.detail;
+        item.append(head, time, detail);
+        return item;
+      }),
+    );
+  } catch (error) {
+    list.replaceChildren();
+  }
+}
+
+/** Settings → Test Jev: one tiny question, and what came back. */
+async function testJevNow() {
+  const result = $("test-jev-result");
+  result.textContent = "Asking Jev…";
+  try {
+    const data = await api("POST", "/api/jev/test", {});
+    const raw = data.report?.raw ? ` Raw reply: ${data.report.raw.slice(0, 300)}` : "";
+    result.textContent = `${data.ok ? "✓" : "✗"} ${data.detail}${data.ok ? "" : raw}`;
+  } catch (error) {
+    result.textContent = `✗ ${error.message}`;
+  }
+}
+
+/** The Jev log: every call from the last 36 hours. */
+async function openJevLog() {
+  $("jev-log-copy").textContent = "Copy as text";
+  await renderJevLog();
+  $("jev-log-dialog").showModal();
+}
+
+async function renderJevLog() {
+  const errorsOnly = $("jev-log-errors").checked;
+  const list = $("jev-log-list");
+  try {
+    const { calls, hours } = await api("GET", `/api/jev/log${errorsOnly ? "?errors=1" : ""}`);
+    state.jevLog = calls;
+    $("jev-log-note").textContent = `Every call to Jev from the last ${hours} hours, newest first, exactly as sent and received.`;
+    if (calls.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "hint";
+      empty.textContent = errorsOnly ? "No errors." : "No calls yet.";
+      list.replaceChildren(empty);
+      return;
+    }
+    list.replaceChildren(
+      ...calls.map((call) => {
+        const item = document.createElement("li");
+        item.className = "tool-call";
+        item.dataset.status = call.error && !call.answeredBy ? "error" : "ok";
+        const head = document.createElement("div");
+        head.className = "tool-call-head";
+        const name = document.createElement("code");
+        name.className = "tool-call-name";
+        name.textContent = call.purpose;
+        head.append(name, badge(call.answeredBy ?? "no answer"), badge(`${(call.durationMs / 1000).toFixed(1)}s`));
+        const time = document.createElement("time");
+        time.className = "message-time";
+        time.dateTime = call.at;
+        time.textContent = formatTime(call.at);
+        head.append(time);
+        const summary = document.createElement("p");
+        summary.className = "tool-call-summary";
+        summary.textContent = call.summary || call.error || "";
+        const details = document.createElement("details");
+        details.className = "tool-call-raw";
+        const label = document.createElement("summary");
+        label.textContent = "Request and reply";
+        const request = document.createElement("pre");
+        request.textContent = call.request ? JSON.stringify(call.request, null, 2) : "(Jev wasn't asked)";
+        const response = document.createElement("pre");
+        response.textContent = prettyJson(call.response || "");
+        details.append(label, request, response);
+        if (call.fallback) {
+          const fallback = document.createElement("pre");
+          fallback.textContent = `Fallback (${call.fallback.profile}): ${call.fallback.response || call.fallback.error || ""}`;
+          details.append(fallback);
+        }
+        item.append(head, summary, details);
+        return item;
+      }),
+    );
+  } catch (error) {
+    showFormError($("jev-log-dialog"), error.message);
+  }
+}
+
+async function copyJevLog() {
+  const text = (state.jevLog ?? [])
+    .map((c) =>
+      [`${c.at}  ${c.purpose}  ${c.answeredBy ?? "no answer"}  ${c.summary}`, c.error ? `error: ${c.error}` : "", `request: ${JSON.stringify(c.request)}`, `reply: ${c.response}`]
+        .filter(Boolean)
+        .join("\n"),
+    )
+    .join("\n\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    $("jev-log-copy").textContent = "Copied";
+  } catch {
+    showFormError($("jev-log-dialog"), "Couldn't copy: your browser didn't allow it.");
   }
 }
 
@@ -3894,10 +4146,20 @@ els.channelForm.addEventListener("change", (event) => {
 $("update-reload").addEventListener("click", () => location.reload());
 
 // Coming back to the app (switching to it, unlocking the phone) is when an
-// update is most likely to have happened while it sat in the background.
+// update is most likely to have happened while it sat in the background,
+// and, after a while away, a chance for your partner to say hi (stage 8).
+let hiddenAt = null;
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") checkServerVersion();
+  if (document.visibilityState !== "visible") {
+    hiddenAt = Date.now();
+    return;
+  }
+  checkServerVersion();
+  if (hiddenAt !== null && Date.now() - hiddenAt >= WAKE_AFTER_HIDDEN) sayOpened();
+  hiddenAt = null;
+  checkLive();
 });
+setInterval(checkLive, LIVE_CHECK_INTERVAL);
 els.errorRetry.addEventListener("click", () => state.retry && state.retry());
 $("error-dismiss").addEventListener("click", hideError);
 
@@ -3928,6 +4190,11 @@ $("memory-save-story").addEventListener("click", saveStory);
 $("memory-update").addEventListener("click", () => updateSummaries(false));
 $("memory-rebuild").addEventListener("click", () => updateSummaries(true));
 els.settingsForm.elements.summaries.addEventListener("change", updateSummariesOnly);
+els.settingsForm.elements.wakeups.addEventListener("change", updateWakeupsOnly);
+$("test-jev").addEventListener("click", testJevNow);
+$("open-jev-log").addEventListener("click", openJevLog);
+$("jev-log-errors").addEventListener("change", renderJevLog);
+$("jev-log-copy").addEventListener("click", copyJevLog);
 els.channelForm.addEventListener("submit", saveChannel);
 $("channel-move-up").addEventListener("click", () => moveChannel(-1));
 $("channel-move-down").addEventListener("click", () => moveChannel(1));
@@ -4040,6 +4307,8 @@ Promise.all([loadState(), loadThemes(), loadNotebook()])
     // A turn may already be running (from another tab, or from before a
     // reload): keep an eye on it.
     if (state.busy.size > 0) startBusyWatch();
+    // You've opened the app: your partner may wake up (stage 8).
+    sayOpened();
     return openChannel(channelFromAddress() ?? state.channels[0]?.id ?? null);
   })
   .catch((error) => showError(`Couldn't load Aettica: ${error.message}`, () => location.reload()));

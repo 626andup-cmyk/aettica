@@ -326,6 +326,115 @@
           oldest are folded into a summary of it. A cheap, careful model is a good choice for summaries.
         </p>
 
+        <h3 class="section-title">Your partner reaching out</h3>
+        <label for="setting-wakeups">Chattiness</label>
+        <select id="setting-wakeups" name="wakeups">
+          <option value="off">Off: only when you write</option>
+          <option value="quiet">Quiet: when you come back after a while, and to review your suggestions</option>
+          <option value="normal">Normal: also when you end a scene</option>
+          <option value="chatty">Chatty: also whenever you open the app</option>
+        </select>
+        <p class="hint">
+          Your partner may take a turn on their own, in your OOC channel. Jev (below) checks first whether it's the
+          moment, and they can always choose not to write.
+        </p>
+        <div class="grid assignment-grid wakeups-only">
+          <div>
+            <label for="setting-away-hours">Away after (hours)</label>
+            <input id="setting-away-hours" name="awayHours" type="number" min="0.25" max="720" step="0.25" />
+          </div>
+          <div>
+            <label for="setting-wake-cooldown">At most every (minutes)</label>
+            <input id="setting-wake-cooldown" name="wakeCooldownMinutes" type="number" min="1" max="10080" step="1" />
+          </div>
+          <div>
+            <label for="setting-quiet-start">Quiet hours from</label>
+            <select id="setting-quiet-start" name="quietStart">
+              <option value="-1">No quiet hours</option>
+              <option value="0">00:00</option>
+              <option value="1">01:00</option>
+              <option value="2">02:00</option>
+              <option value="3">03:00</option>
+              <option value="4">04:00</option>
+              <option value="5">05:00</option>
+              <option value="6">06:00</option>
+              <option value="7">07:00</option>
+              <option value="8">08:00</option>
+              <option value="9">09:00</option>
+              <option value="10">10:00</option>
+              <option value="11">11:00</option>
+              <option value="12">12:00</option>
+              <option value="13">13:00</option>
+              <option value="14">14:00</option>
+              <option value="15">15:00</option>
+              <option value="16">16:00</option>
+              <option value="17">17:00</option>
+              <option value="18">18:00</option>
+              <option value="19">19:00</option>
+              <option value="20">20:00</option>
+              <option value="21">21:00</option>
+              <option value="22">22:00</option>
+              <option value="23">23:00</option>
+            </select>
+          </div>
+          <div>
+            <label for="setting-quiet-end">...until</label>
+            <select id="setting-quiet-end" name="quietEnd">
+              <option value="0">00:00</option>
+              <option value="1">01:00</option>
+              <option value="2">02:00</option>
+              <option value="3">03:00</option>
+              <option value="4">04:00</option>
+              <option value="5">05:00</option>
+              <option value="6">06:00</option>
+              <option value="7">07:00</option>
+              <option value="8">08:00</option>
+              <option value="9">09:00</option>
+              <option value="10">10:00</option>
+              <option value="11">11:00</option>
+              <option value="12">12:00</option>
+              <option value="13">13:00</option>
+              <option value="14">14:00</option>
+              <option value="15">15:00</option>
+              <option value="16">16:00</option>
+              <option value="17">17:00</option>
+              <option value="18">18:00</option>
+              <option value="19">19:00</option>
+              <option value="20">20:00</option>
+              <option value="21">21:00</option>
+              <option value="22">22:00</option>
+              <option value="23">23:00</option>
+            </select>
+          </div>
+        </div>
+        <details class="wake-log wakeups-only" id="wake-log">
+          <summary>Recent wake-ups</summary>
+          <ul id="wake-log-list" class="wake-log-list"></ul>
+        </details>
+
+        <h3 class="section-title">Decisions (Jev)</h3>
+        <p class="hint">
+          Jev is a fast decision model on nanoGPT that makes small yes-or-no calls (is this the moment to reach out?)
+          with a confidence, and never writes. Unsure always takes the safe path.
+        </p>
+        <div class="grid assignment-grid">
+          <div>
+            <label for="setting-decision-model">Jev's model</label>
+            <input id="setting-decision-model" name="decisionModel" autocomplete="off" placeholder="Off" />
+          </div>
+          <div>
+            <label for="setting-decision-confidence">How sure Jev has to be</label>
+            <input id="setting-decision-confidence" name="decisionConfidence" type="number" min="0.5" max="0.99" step="0.01" />
+          </div>
+        </div>
+        <label for="setting-decision-fallback">If Jev can't answer, ask</label>
+        <select id="setting-decision-fallback" name="decisionFallback"></select>
+        <div class="memory-buttons">
+          <button type="button" class="button" id="test-jev">Test Jev</button>
+          <button type="button" class="button" id="open-jev-log">Jev log</button>
+        </div>
+        <p class="hint" id="test-jev-result" role="status"></p>
+
         <p class="form-error" role="alert" hidden></p>
 
         <div class="dialog-buttons">
@@ -337,6 +446,21 @@
     </dialog>
 
     <!-- The open channel's settings. -->
+    <!-- The Jev log: every call to Jev from the last 36 hours, exactly as sent and received. -->
+    <dialog id="jev-log-dialog" class="dialog surface">
+      <form method="dialog">
+        <h2 class="dialog-title">Jev log</h2>
+        <p class="hint" id="jev-log-note"></p>
+        <label class="check-inline"><input type="checkbox" id="jev-log-errors" /> Errors only</label>
+        <ul id="jev-log-list" class="tool-log-list"></ul>
+        <div class="dialog-buttons">
+          <button type="button" class="button" id="jev-log-copy">Copy as text</button>
+          <span class="spacer"></span>
+          <button type="button" class="button button-primary" data-close>Close</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="channel-dialog" class="dialog surface">
       <form id="channel-form" method="dialog">
         <h2 class="dialog-title">Channel settings</h2>

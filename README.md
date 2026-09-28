@@ -2,7 +2,7 @@
 
 Aettica gives you an AI **RP partner**, not a character: a writer with their own style who plays characters alongside you. The full vision is in [DESIGN.md](DESIGN.md).
 
-**Status: stage 7 of 8.** A Discord-style server of channels with your partner, with scenes, literary or casual styles, themes, a shared notebook of characters and lore, a mix of models, and a partner who can act through tools, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels), [stage 3](docs/stage-3.md) (scenes, modes), [stage 3.5](docs/stage-3.5.md) (themes), [stage 4](docs/stage-4.md) (the notebook and permissions), [stage 5](docs/stage-5.md) (connection profiles and roulettes), [stage 6](docs/stage-6.md) (tools, approvals, comments, and troubleshooting tool calls) and [stage 7](docs/stage-7.md) (summaries and the server digest).
+**Status: all 8 stages built; endgame features in progress.** A Discord-style server of channels with your partner, with scenes, literary or casual styles, themes, a shared notebook of characters and lore, a mix of models, and a partner who can act through tools, using models from [nanoGPT](https://nano-gpt.com). How it works inside: [stage 1](docs/stage-1.md) (server, API calls, prompts), [stage 2](docs/stage-2.md) (database, channels), [stage 3](docs/stage-3.md) (scenes, modes), [stage 3.5](docs/stage-3.5.md) (themes), [stage 4](docs/stage-4.md) (the notebook and permissions), [stage 5](docs/stage-5.md) (connection profiles and roulettes), [stage 6](docs/stage-6.md) (tools, approvals, comments, and troubleshooting tool calls), [stage 7](docs/stage-7.md) (summaries and the server digest) and [stage 8](docs/stage-8.md) (your partner reaching out, and Jev).
 
 ## What it can do
 
@@ -25,6 +25,7 @@ Aettica gives you an AI **RP partner**, not a character: a writer with their own
 - **Attach notes** to a message with the paperclip, or write `[[Name]]` in it: your partner gets those entries in full.
 - **Comments**: select text in a message to comment on it; your partner replies in the thread.
 - **Inbox** (the tray at the top of the channel list): your partner's proposals and suggested changes, to approve or reject.
+- **Your partner reaches out**: when you come back after a while, when a scene ends, or when a suggestion is waiting for them, your partner may write to you in OOC first. Jev, a small decision model, checks it's the moment first, and chattiness, quiet hours and a cooldown keep it from being too much (Settings → Your partner reaching out, with a log of every wake-up). A dot marks channels with messages you haven't seen.
 - **Partner's turn**: let your partner write without a new message from you, including opening an empty channel.
 - **Stop** a reply that's taking too long. Nothing is saved, and the channel is free again.
 - **Regenerate** the partner's last reply (or **Regenerate with…** a particular profile), **edit** or **delete** any message.
@@ -52,7 +53,7 @@ cp .env.example .env
 bun start
 ```
 
-Then open <http://127.0.0.1:3000> in your browser.
+Then open <http://127.0.0.1:4747> in your browser.
 
 ### On your phone (Termux)
 
@@ -60,7 +61,7 @@ The server is designed to run in [Termux](https://termux.dev) on the phone you c
 
 1. Install Bun inside Termux. If the installer from bun.sh doesn't work on your phone, run it inside a Linux environment set up with `proot-distro` instead.
 2. Follow the steps above, then run `bun start` and leave Termux open.
-3. Open <http://127.0.0.1:3000> in Chrome, then choose **menu → Add to Home screen** (or **Install app**). Aettica now opens like an app.
+3. Open <http://127.0.0.1:4747> in Chrome, then choose **menu → Add to Home screen** (or **Install app**). Aettica now opens like an app.
 
 The app only works while the server is running. If it says it can't connect, start the server in Termux again.
 
@@ -70,7 +71,7 @@ The app only works while the server is running. If it says it can't connect, sta
 | --- | --- | --- |
 | `NANOGPT_API_KEY` | none (required) | Your nanoGPT API key |
 | `HOST` | `127.0.0.1` | Where the server listens. The default means only this device can connect. |
-| `PORT` | `3000` | Port for the web app |
+| `PORT` | `4747` | Port for the web app (not 3000, so it can run next to Kitsikai) |
 | `DATA_DIR` | `./data` | Where your data is saved |
 | `NANOGPT_BASE_URL` | `https://nano-gpt.com/api/v1` | API address (only change this for testing) |
 | `REQUEST_TIMEOUT_SECONDS` | `180` | How long to wait for a reply before giving up |
@@ -105,6 +106,10 @@ src/
   activity.ts  The tool log, comment threads, and proposals
   summaries.ts Summaries: storing them, splitting scenes, what the prompt still needs
   summarizer.ts  Writes summaries in the background as channels change
+  wakeups.ts   Your partner waking up when something happens (stage 8)
+  jev.ts       Asking Jev, the decision model, yes-or-no questions
+  jevlog.ts    The Jev log: every call from the last 36 hours
+  json.ts      Finding JSON in a model's reply
   notebook.ts  The notebook: entries, folders, suggestions and each channel's cast
   permissions.ts  Who can see, edit and manage each notebook entry
   sheets.ts    Reads a plain-text character sheet into labelled fields

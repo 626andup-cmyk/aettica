@@ -327,7 +327,36 @@ export interface Settings {
    * for the one that writes roleplay.
    */
   summaryAssignment: string;
+
+  // Stage 8: decisions (Jev) and wake-ups.
+
+  /** Jev's model id on nanoGPT (pinned, like `typesafe/jev-1.13`), or "" to turn Jev off. */
+  decisionModel: string;
+  /** A profile asked instead when Jev fails (`"profile:<id>"`), or "" for none. */
+  decisionFallback: string;
+  /** How sure a decision has to be to count as a yes or a no (0.5 to 0.99). Unsure takes the safe path. */
+  decisionConfidence: number;
+  /**
+   * How readily your partner takes a turn on their own (a wake-up):
+   *
+   * - `off`: never.
+   * - `quiet`: when you come back after being away, and to review your suggestions.
+   * - `normal`: also when you end a scene.
+   * - `chatty`: also whenever you open the app.
+   */
+  wakeups: Chattiness;
+  /** Opening the app after this many hours without writing counts as "you've been away". */
+  awayHours: number;
+  /** The least time between two wake-ups, in minutes. */
+  wakeCooldownMinutes: number;
+  /** Quiet hours, when your partner never reaches out: from this hour (0–23), or -1 for none. */
+  quietStart: number;
+  /** ...to this hour (0–23). */
+  quietEnd: number;
 }
+
+/** How readily your partner reaches out on their own (see `Settings.wakeups`). */
+export type Chattiness = "off" | "quiet" | "normal" | "chatty";
 
 /**
  * One message in the format the chat completions API expects.

@@ -131,6 +131,17 @@ Your partner never deletes a channel, or anything of yours, directly: that's a p
 
 A wake-up gives the partner the server digest, pending items, and time since you last talked. The heartbeat is an endgame feature (see below).
 
+**Decided in stage 8:**
+
+- **Four events can wake your partner:** you open the app ("opened"; "away" if you haven't written for `awayHours`, default 4), you end a scene (once it's summarized, so they know how it went), a suggestion is waiting for their review, and (endgame) the heartbeat.
+- **A wake-up is a turn in your OOC channel** (the one you talked in last), with a "Why you're up" section in the prompt: the reason, how long since you wrote, what's waiting, and the scene that just ended. Doing nothing (`do_nothing`, or `[nothing]` without tools) is always allowed and usually right.
+- **Chattiness decides which events count:** off; quiet (away and reviews); normal (also a scene ending, the default); chatty (also just opening the app).
+- **Hard rules come first, with no model call:** quiet hours (except reviews), a cooldown between wake-ups (`wakeCooldownMinutes`, default 60; reviews 10), never reaching out twice without you writing in between, not mid-conversation, and not while they're already writing.
+- **Jev decides whether it's the moment.** Jev is TypeSafe's decision model on nanoGPT (`typesafe/jev-1.13`), as in Kitsikai. It gets a snapshot (the time, the silence, the recent OOC chat, what's waiting) and one yes/no question. Only a confident yes (`decisionConfidence`, default 0.8) wakes your partner; no or unsure doesn't. Reviews skip Jev (they're work, not conversation). A fallback profile can answer when Jev can't; with neither, your partner's own turn decides.
+- **Everything is logged:** the wake-up log (Settings → Your partner reaching out) and the Jev log (every call from the last 36 hours, as sent and received), plus a Test Jev button.
+- **The app notices new messages** by polling a revision number every 15 seconds while it's open, and shows a dot on channels with messages you haven't seen.
+- **Aettica runs on port 4747 by default**, so it doesn't clash with Kitsikai on 3000.
+
 ## Models, profiles and roulettes
 
 All models run through nanoGPT; connection profiles lock each model's settings, and roulettes mix profiles for variety.
@@ -221,7 +232,7 @@ The whole look of Aettica is themeable, including glassy, skeuomorphic styles li
 
 Each stage adds one new concept, so there's only ever one new thing to learn. Stage 1 is essentially Tiny RP.
 
-**Progress:** stages 1 to 7 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md), [docs/stage-3.md](docs/stage-3.md), [docs/stage-3.5.md](docs/stage-3.5.md), [docs/stage-4.md](docs/stage-4.md), [docs/stage-5.md](docs/stage-5.md), [docs/stage-6.md](docs/stage-6.md) and [docs/stage-7.md](docs/stage-7.md) for how they work.
+**Progress:** stages 1 to 8 are built. See [docs/stage-1.md](docs/stage-1.md), [docs/stage-2.md](docs/stage-2.md), [docs/stage-3.md](docs/stage-3.md), [docs/stage-3.5.md](docs/stage-3.5.md), [docs/stage-4.md](docs/stage-4.md), [docs/stage-5.md](docs/stage-5.md), [docs/stage-6.md](docs/stage-6.md), [docs/stage-7.md](docs/stage-7.md) and [docs/stage-8.md](docs/stage-8.md) for how they work.
 
 | Stage | Adds | New concept learned |
 | --- | --- | --- |
@@ -242,14 +253,18 @@ These are parked until the core works.
 - **Heartbeat:** a timer wakes the partner even with the app closed, so they can text you out of nowhere. Needs Termux wake lock and Termux notifications.
 - **Generate-and-grade:** on a heartbeat, the partner generates an idea (new RP, character, twist), reviews it, and only sends it if still excited about it.
 - **Idea drawer:** ideas that fail review are kept privately and can resurface when they fit better.
-- **Controls:** chattiness setting, quiet hours, and cooldowns to limit spam and API cost.
+- **Controls:** chattiness setting, quiet hours, and cooldowns to limit spam and API cost. (Built in stage 8, for wake-ups; the heartbeat will use them too.)
 - **RNG partner creation.**
 - **Channel categories** and drag-and-drop reordering polish.
 - **Multi-bubble OOC** with typing delays, reusing the Kitsikai extension ideas.
+- **Emoji reactions** on messages, from you and your partner, including custom emojis.
+- **Notebook keeper:** Jev notices lasting facts and new characters or places, and your partner writes them into the notebook (or suggests them).
+- **Jev everywhere it helps:** the guesswork already in Aettica (which channel an OOC message mentions, whether to reply in a comment thread, whether a summary is faithful, which entries a message is about) goes through a series of Jev questions, several phrasings that must agree, to cut down mistakes.
+- **Reference library:** upload long texts (like movie scripts for a fandom). They're split into passages and indexed, and your partner can search and read them with a tool when they want to; they're never sent whole.
 
 ## Open questions
 
-- [x] How does the partner review your shared-lore proposals: immediately, or on their next wake-up? Can they reject? On their next turn with tools, in any channel; they can accept or reject. (Stage 8's wake-ups will add a turn for it.)
+- [x] How does the partner review your shared-lore proposals: immediately, or on their next wake-up? Can they reject? On their next turn with tools, in any channel; they can accept or reject. Stage 8 wakes them up for it.
 - [ ] Does the partner keep private notes about you and your friendship for OOC memory?
 - [x] Which Xoul-style fields does a notebook entry have? Flexible labelled fields, starting from a template per kind (see "Decided in stage 4").
 - [ ] Which of your nanoGPT models reliably handle tool calling? Each profile's "Test tools" button, and the tool log, will answer this.

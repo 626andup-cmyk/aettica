@@ -361,6 +361,15 @@ textarea {
   animation: pulse 1.2s infinite ease-in-out;
 }
 
+/* A channel with a message from your partner you haven't seen. */
+.channel-unread {
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 @keyframes pulse {
   50% {
     opacity: 0.3;
@@ -1069,6 +1078,27 @@ button:disabled {
   margin-top: 20px;
   color: var(--text-muted);
   font-size: 14px;
+}
+
+/* Settings → Recent wake-ups. */
+.wake-log {
+  margin-top: 12px;
+}
+
+.wake-log > summary {
+  cursor: pointer;
+}
+
+.wake-log-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.wake-log-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--scene-break-line);
 }
 
 /* Channel settings → Memory: the channel's summaries. */
